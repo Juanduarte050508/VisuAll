@@ -2,21 +2,25 @@
 
 # 📱 Challenge FIAP 2026 - Parceria Jovi
 
-Este repositório é dedicado ao desenvolvimento do **Challenge FIAP 2026**, realizado em parceria com a **Jovi**, empresa inovadora no setor de dispositivos móveis.
+Este repositório contém o desenvolvimento do **Challenge 2026**, um projeto prático realizado em parceria com a **Jovi**.
 
 ## 🎯 O Desafio
-O objetivo deste projeto é desenvolver soluções tecnológicas que agreguem valor ao ecossistema da Jovi, focando em [insira aqui o foco do projeto, ex: experiência do usuário / logística / software].
+[Descreva aqui em uma frase o problema que a Jovi pediu para resolver. Ex: "Criar um sistema de diagnóstico para aparelhos móveis."]
 
-## 🛠️ Tecnologias Planejadas
-* **Linguagem Principal:** Python (Computational Thinking)
-* **Web:** HTML5, CSS3 e JavaScript
-* **Outros:** [A definir conforme o projeto avançar]
+## 🚀 Proposta de Solução
+A nossa solução foca em:
+* **[Ponto 1]:** [Ex: Interface intuitiva para o usuário]
+* **[Ponto 2]:** [Ex: Algoritmo de automação em Python]
 
-## 📅 Cronograma de Entregas (Sprints)
-- [ ] **Sprint 1:** Definição de escopo e análise de requisitos.
-- [ ] **Sprint 2:** Desenvolvimento do MVP (Mínimo Produto Viável).
-- [ ] **Sprint 3:** Refinamento e testes.
-- [ ] **Entrega Final:** Apresentação da solução.
+## 🛠️ Tecnologias Utilizadas
+* **Linguagem:** [Python / JavaScript / etc]
+* **Ferramentas:** [VS Code / GitHub]
+* **Frameworks:** [Ex: Flask / React / Nenhum]
+
+## 👥 Integrantes do Grupo
+* **RM [XXXXX]** - Juan Duarte
+* **RM [XXXXX]** - [Nome do Integrante 2]
+* **RM [XXXXX]** - [Nome do Integrante 3]
 
 ---
-*Desenvolvido por: Juan Duarte*
+*Status do Projeto: 🏗️ Em desenvolvimento (Sprint [X])*
