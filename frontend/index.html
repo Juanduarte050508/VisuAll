@@ -1,0 +1,1199 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>VisuAll</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+
+:root {
+  --gold:        #E8A020;
+  --gold-light:  #F5C842;
+  --gold-deep:   #B87818;
+  --gold-glow:   rgba(232,160,32,0.45);
+  --blue:        #3A7BD5;
+  --blue-light:  #5C9CE8;
+  --blue-deep:   #1A4A8C;
+  --black:       #030303;
+  --bg:          #0A0A0A;
+  --glass:       rgba(15,15,15,0.72);
+  --glass-strong:rgba(20,20,20,0.92);
+  --border:      rgba(255,255,255,0.08);
+  --border-gold: rgba(232,160,32,0.3);
+  --white:       #F5F1E8;
+  --muted:       rgba(245,241,232,0.55);
+}
+
+html, body {
+  width: 100%; height: 100%;
+  background: #030303;
+  font-family: 'Inter', sans-serif;
+  color: var(--white);
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ════════════════════════════════════════════
+   MOLDURA METÁLICA VISUALL
+══════════════════════════════════════════════ */
+.phone-stage {
+  position: fixed; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: radial-gradient(ellipse at center, #0C0C0C 0%, #000 100%);
+}
+
+/* Moldura metálica dourada (tipo aço/bronze escovado) */
+.phone-outer {
+  position: relative;
+  padding: 5px;
+  border-radius: 56px;
+  background: linear-gradient(135deg,
+    #6B4A10 0%,
+    #B87818 15%,
+    #E8A020 30%,
+    #F5C842 45%,
+    #C88818 55%,
+    #8B5A0D 70%,
+    #E8A020 85%,
+    #5A3D0A 100%
+  );
+  box-shadow:
+    0 0 0 1px rgba(0,0,0,0.6),
+    inset 0 0 0 1px rgba(255,220,150,0.3),
+    0 0 30px rgba(232,160,32,0.2),
+    0 30px 80px rgba(0,0,0,0.85);
+}
+
+.phone-outer::before {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border-radius: 54px;
+  background: linear-gradient(135deg,
+    rgba(255,255,255,0.15) 0%,
+    transparent 30%,
+    transparent 70%,
+    rgba(255,255,255,0.08) 100%);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.phone {
+  position: relative;
+  width: 390px; height: 844px;
+  background: var(--bg);
+  border-radius: 50px;
+  overflow: hidden;
+  z-index: 1;
+}
+
+/* Sem notch */
+
+/* ════════════════════════════════════════════
+   STATUS BAR (iOS-style com relógio + bateria)
+══════════════════════════════════════════════ */
+/* Status bar completa estilo iOS */
+.status-bar {
+  position: absolute; top: 0; left: 0; right: 0;
+  height: 44px;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 24px;
+  z-index: 100;
+  pointer-events: none;
+}
+.status-time {
+  font-weight: 600;
+  font-size: 15px;
+  color: white;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+}
+.status-icons {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.status-icons svg {
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.6));
+}
+
+/* ════════════════════════════════════════════
+   VIEWFINDER
+══════════════════════════════════════════════ */
+.viewfinder { position: absolute; inset: 0; background: #0A0A0A; overflow: hidden; }
+
+#cameraFeed {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  object-fit: cover;
+  background: #0A0A0A;
+  transition: filter 0.4s, transform 0.5s cubic-bezier(0.22,1,0.36,1);
+}
+.flipping #cameraFeed {
+  transform: rotateY(90deg);
+  filter: blur(8px) brightness(0.5);
+}
+
+.cam-loading {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  flex-direction: column; gap: 14px;
+  background: rgba(0,0,0,0.85);
+  transition: opacity 0.4s;
+  z-index: 50;
+}
+.cam-loading.hidden { opacity: 0; pointer-events: none; }
+.cam-loading-spinner {
+  width: 38px; height: 38px;
+  border: 3px solid rgba(232,160,32,0.2);
+  border-top-color: var(--gold);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+.cam-loading p {
+  color: var(--gold-light);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  margin-top: 4px;
+}
+.cam-loading small {
+  color: rgba(245,241,232,0.4);
+  font-size: 10.5px;
+  letter-spacing: 1px;
+  margin-top: 2px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ════════════════════════════════════════════
+   BADGES TOPO (Modo Libras + AO VIVO) — SUBIDOS
+══════════════════════════════════════════════ */
+.top-bar {
+  position: absolute;
+  top: 52px; left: 0; right: 0;
+  z-index: 80;
+  pointer-events: none;
+}
+
+.live-badge {
+  position: absolute;
+  top: 0; left: 16px;
+  background: var(--glass-strong);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 6px 11px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  color: var(--white);
+  display: flex; align-items: center; gap: 6px;
+  backdrop-filter: blur(20px);
+  opacity: 0;
+  transform: translateX(-10px);
+  transition: all 0.4s cubic-bezier(0.22,1,0.36,1);
+}
+.live-badge.show { opacity: 1; transform: translateX(0); }
+.live-dot {
+  width: 7px; height: 7px;
+  background: #FF3838; border-radius: 50%;
+  box-shadow: 0 0 6px #FF3838;
+  animation: blink 1.4s ease-in-out infinite;
+}
+
+.mode-badge {
+  position: absolute;
+  top: 0; left: 50%; transform: translateX(-50%) translateY(-6px);
+  background: var(--glass-strong);
+  border: 1px solid var(--border-gold);
+  border-radius: 20px;
+  padding: 6px 13px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--white);
+  backdrop-filter: blur(20px);
+  opacity: 0;
+  transition: all 0.4s cubic-bezier(0.22,1,0.36,1);
+  display: flex; align-items: center; gap: 7px;
+  white-space: nowrap;
+}
+.mode-badge.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.mode-badge-glow {
+  width: 6px; height: 6px;
+  background: var(--gold);
+  border-radius: 50%;
+  box-shadow: 0 0 8px var(--gold);
+  animation: pulseGold 2s ease-in-out infinite;
+}
+@keyframes pulseGold {
+  0%,100% { box-shadow: 0 0 6px var(--gold); transform: scale(1); }
+  50%      { box-shadow: 0 0 14px var(--gold); transform: scale(1.15); }
+}
+
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+/* Botão histórico — posicionado FORA do arco superior direito */
+.history-btn {
+  position: absolute;
+  top: 50px; right: 16px;
+  z-index: 85;
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  background: rgba(40,40,40,0.85);
+  border: 1px solid var(--border-gold);
+  backdrop-filter: blur(20px);
+  display: none;
+  align-items: center; justify-content: center;
+  cursor: pointer;
+  color: var(--gold);
+  transition: all 0.2s;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+.history-btn.visible { display: flex; }
+.history-btn:hover {
+  background: rgba(60,60,60,0.9);
+  transform: scale(1.08);
+}
+.history-btn:active { transform: scale(0.93); }
+.history-count {
+  position: absolute;
+  top: -4px; right: -4px;
+  background: var(--gold);
+  color: #000;
+  font-size: 9px;
+  font-weight: 800;
+  min-width: 15px; height: 15px;
+  padding: 0 3px;
+  border-radius: 8px;
+  display: none;
+  align-items: center; justify-content: center;
+}
+.history-count.show { display: flex; }
+
+/* Reorganiza: quando history-btn tá visível, o live badge move pra esquerda */
+.history-btn.visible ~ .top-bar .live-badge {
+  margin-right: 42px;
+}
+
+/* ════════════════════════════════════════════
+   ARCOS DOURADOS — MAIOR ÁREA (estendidos pra cima)
+══════════════════════════════════════════════ */
+.arc-frame { position: absolute; inset: 0; pointer-events: none; z-index: 60; }
+
+.arc {
+  position: absolute;
+  width: 70px; height: 70px;
+  border: 3px solid var(--gold);
+  filter: drop-shadow(0 0 8px var(--gold-glow));
+  opacity: 0;
+  transform: scale(1.4);
+  transition: all 0.5s cubic-bezier(0.22,1,0.36,1);
+}
+.arc-frame.show .arc { opacity: 1; transform: scale(1); }
+/* Arcos começam mais em cima (85px) e terminam onde começam os modos */
+.arc-tl { top: 95px; left: 20px; border-right: none; border-bottom: none; border-radius: 60px 0 0 0; transition-delay: 0s; }
+.arc-tr { top: 95px; right: 20px; border-left: none; border-bottom: none; border-radius: 0 60px 0 0; transition-delay: 0.08s; }
+.arc-bl { bottom: 175px; left: 20px; border-right: none; border-top: none; border-radius: 0 0 0 60px; transition-delay: 0.16s; }
+.arc-br { bottom: 175px; right: 20px; border-left: none; border-top: none; border-radius: 0 0 60px 0; transition-delay: 0.24s; }
+
+/* ════════════════════════════════════════════
+   DETECÇÃO (letra + frase)
+══════════════════════════════════════════════ */
+.detection-area {
+  position: absolute;
+  bottom: 195px; left: 0; right: 0;
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  z-index: 70;
+  opacity: 0;
+  transition: opacity 0.4s;
+  pointer-events: none;
+}
+.detection-area.show { opacity: 1; }
+
+.letra-pill {
+  background: var(--glass-strong);
+  border: 1.5px solid var(--gold);
+  border-radius: 22px;
+  padding: 9px 18px;
+  display: flex; align-items: center; gap: 10px;
+  backdrop-filter: blur(20px);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 12px rgba(232,160,32,0.15);
+  min-width: 130px;
+  justify-content: center;
+  transition: all 0.3s;
+}
+.letra-pill.high-conf {
+  border-color: var(--gold-light);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 24px rgba(232,160,32,0.5);
+  animation: glowPulse 1.6s ease-in-out infinite;
+}
+@keyframes glowPulse {
+  0%,100% { box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 18px rgba(232,160,32,0.4); }
+  50%      { box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 32px rgba(232,160,32,0.7); }
+}
+.letra-text {
+  font-size: 18px; font-weight: 700;
+  color: var(--white);
+  letter-spacing: 0.5px;
+  display: inline-block;
+  transition: transform 0.18s cubic-bezier(0.34,1.56,0.64,1);
+}
+.letra-text.bump { transform: scale(1.25); }
+.letra-conf {
+  font-size: 11px; font-weight: 500;
+  color: var(--gold-light);
+  letter-spacing: 0.3px;
+}
+
+.frase-box {
+  background: var(--glass-strong);
+  backdrop-filter: blur(15px);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 8px 14px;
+  display: flex; align-items: center; gap: 10px;
+  max-width: 280px;
+  pointer-events: auto;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  transition: all 0.3s;
+}
+.frase-box.hidden {
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+  padding: 0; border: none; background: transparent;
+  height: 0; min-height: 0;
+  overflow: hidden;
+}
+.frase-text {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--white);
+  font-style: italic;
+  word-break: break-all;
+  line-height: 1.2;
+}
+.frase-text.empty { display: none; }
+.frase-clear-btn {
+  width: 22px; height: 22px;
+  border: none;
+  background: rgba(255,56,56,0.15);
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  color: #FF6060;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+.frase-clear-btn:hover { background: rgba(255,56,56,0.3); transform: scale(1.08); }
+.frase-clear-btn:active { transform: scale(0.9); }
+.frase-clear-btn.hidden { display: none; }
+
+/* ════════════════════════════════════════════
+   INDICADOR DE GESTO DE LIMPAR
+══════════════════════════════════════════════ */
+.clear-gesture {
+  position: absolute;
+  top: 135px; left: 50%; transform: translateX(-50%);
+  background: rgba(255,56,56,0.15);
+  border: 1.5px solid rgba(255,56,56,0.6);
+  border-radius: 16px;
+  padding: 6px 14px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #FF9090;
+  backdrop-filter: blur(15px);
+  opacity: 0;
+  transition: opacity 0.25s;
+  pointer-events: none;
+  z-index: 82;
+  display: flex; align-items: center; gap: 10px;
+}
+.clear-gesture.show { opacity: 1; }
+.clear-gesture-bar {
+  width: 60px; height: 3px;
+  background: rgba(255,56,56,0.2);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.clear-gesture-fill {
+  height: 100%;
+  background: #FF6060;
+  transform-origin: left;
+  transform: scaleX(0);
+  transition: transform 0.1s linear;
+}
+
+/* ════════════════════════════════════════════
+   MODOS + ÍCONES LATERAIS
+══════════════════════════════════════════════ */
+.mode-pills {
+  position: absolute;
+  bottom: 130px; left: 0; right: 0;
+  display: flex; justify-content: center; align-items: center; gap: 8px;
+  z-index: 70;
+  padding: 0 16px;
+  pointer-events: none;
+}
+.mode-item {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1.2px;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 7px 14px;
+  border-radius: 14px;
+  background: rgba(40,40,40,0.7);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255,255,255,0.06);
+  transition: all 0.25s;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  pointer-events: auto;
+}
+.mode-item.active {
+  color: var(--gold);
+  background: rgba(0,0,0,0.6);
+  border-color: rgba(232,160,32,0.3);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3), 0 0 12px rgba(232,160,32,0.15);
+}
+
+.access-icon-left {
+  position: absolute;
+  bottom: 130px; left: 16px;
+  z-index: 71;
+  width: 32px; height: 32px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  color: var(--white);
+  transition: all 0.3s;
+  background: rgba(40,40,40,0.85);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 50%;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+.access-icon-left.active {
+  color: var(--gold);
+  border-color: rgba(232,160,32,0.5);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3), 0 0 14px rgba(232,160,32,0.5);
+  animation: accessPulse 2.2s ease-in-out infinite;
+}
+@keyframes accessPulse {
+  0%,100% { transform: scale(1); }
+  50%      { transform: scale(1.08); }
+}
+.access-icon-left:hover { transform: scale(1.1); }
+
+.zoom-btn {
+  position: absolute;
+  bottom: 130px; right: 16px;
+  z-index: 71;
+  background: rgba(40,40,40,0.85);
+  border: 1px solid rgba(232,160,32,0.25);
+  border-radius: 50%;
+  width: 32px; height: 32px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10.5px; font-weight: 600;
+  color: var(--gold-light);
+  backdrop-filter: blur(15px);
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+
+/* ════════════════════════════════════════════
+   BOTTOM CONTROLS
+══════════════════════════════════════════════ */
+.bottom-controls {
+  position: absolute;
+  bottom: 32px; left: 0; right: 0;
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 0 50px;
+  z-index: 70;
+}
+
+.gallery-btn {
+  width: 46px; height: 46px;
+  background: rgba(255,255,255,0.95);
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.15s;
+  border: 2px solid var(--gold);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4), 0 0 10px rgba(232,160,32,0.2);
+}
+.gallery-btn::after {
+  content: '';
+  position: absolute;
+  top: 3px; right: 3px;
+  width: 8px; height: 8px;
+  background: var(--gold);
+  border-radius: 50%;
+  box-shadow: 0 0 6px var(--gold-glow);
+  z-index: 2;
+}
+.gallery-btn:hover { transform: scale(1.05); }
+.gallery-btn:active { transform: scale(0.93); }
+.gallery-btn svg { color: #1A1A1A; }
+.gallery-thumb {
+  position: absolute; inset: 0;
+  background-size: cover; background-position: center;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+.gallery-thumb.show { opacity: 1; }
+
+.shutter {
+  width: 63px; height: 63px;
+  border-radius: 50%;
+  border: 5px solid var(--gold);
+  background: transparent;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.3s;
+  padding: 4px;
+  box-shadow:
+    0 0 0 2px rgba(232,160,32,0.15),
+    0 0 20px rgba(232,160,32,0.35),
+    0 4px 16px rgba(0,0,0,0.5);
+}
+.shutter::before {
+  content: '';
+  width: 100%; height: 100%;
+  border-radius: 50%;
+  background: #FFFFFF;
+  transition: all 0.15s;
+  box-shadow: inset 0 0 0 1px rgba(232,160,32,0.2);
+}
+.shutter:hover {
+  box-shadow: 0 0 0 3px rgba(232,160,32,0.25), 0 0 28px rgba(232,160,32,0.55), 0 4px 16px rgba(0,0,0,0.5);
+}
+.shutter.recording { border-color: #FF3838; animation: pulseRec 1s ease-in-out infinite; box-shadow: none; }
+.shutter.recording::before {
+  border-radius: 6px;
+  background: #FF3838;
+  width: 60%; height: 60%;
+}
+@keyframes pulseRec {
+  0%,100% { box-shadow: 0 0 6px rgba(255,56,56,0.4); }
+  50%      { box-shadow: 0 0 16px rgba(255,56,56,0.7); }
+}
+.shutter:active::before { transform: scale(0.88); }
+
+.flip-btn {
+  width: 46px; height: 46px;
+  background: transparent;
+  border: 2px solid var(--white);
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  transition: transform 0.4s cubic-bezier(0.22,1,0.36,1);
+  color: var(--white);
+}
+.flip-btn:hover { transform: scale(1.05); background: rgba(255,255,255,0.05); }
+.flip-btn:active { transform: rotate(180deg); }
+
+/* ════════════════════════════════════════════
+   REC TIMER + FLASH
+══════════════════════════════════════════════ */
+.rec-timer {
+  position: absolute;
+  top: 135px; left: 50%; transform: translateX(-50%);
+  background: rgba(255,56,56,0.92);
+  color: white;
+  padding: 6px 14px;
+  border-radius: 14px;
+  font-size: 12px; font-weight: 600;
+  display: none;
+  align-items: center; gap: 6px;
+  z-index: 75;
+}
+.rec-timer.show { display: flex; }
+.rec-timer-dot {
+  width: 7px; height: 7px;
+  background: white; border-radius: 50%;
+  animation: blink 1s ease-in-out infinite;
+}
+
+.capture-flash {
+  position: absolute; inset: 0;
+  background: white;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 150;
+}
+.capture-flash.flash { animation: flashAnim 0.35s ease-out; }
+@keyframes flashAnim { 0%{opacity:0.95} 100%{opacity:0} }
+
+/* ════════════════════════════════════════════
+   MODAL HISTÓRICO
+══════════════════════════════════════════════ */
+.history-modal {
+  position: absolute; inset: 0;
+  z-index: 300;
+  background: rgba(0,0,0,0.75);
+  backdrop-filter: blur(20px);
+  display: flex; flex-direction: column;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s;
+}
+.history-modal.show { opacity: 1; pointer-events: auto; }
+
+.history-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 50px 20px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.history-title {
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  color: var(--gold);
+}
+.history-close {
+  width: 32px; height: 32px;
+  border: none; background: rgba(255,255,255,0.08);
+  border-radius: 50%;
+  color: var(--white);
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.history-close:hover { background: rgba(255,255,255,0.15); }
+
+.history-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.history-empty {
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+  padding: 40px 0;
+  font-style: italic;
+}
+.history-item {
+  background: rgba(30,30,30,0.8);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--gold);
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 13.5px;
+  color: var(--white);
+  word-break: break-all;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  animation: slideIn 0.3s cubic-bezier(0.22,1,0.36,1);
+}
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(-10px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.history-item-text {
+  flex: 1;
+  line-height: 1.3;
+}
+.history-item-remove {
+  width: 24px; height: 24px;
+  background: rgba(255,56,56,0.12);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  color: #FF6060;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+.history-item-remove:hover {
+  background: rgba(255,56,56,0.25);
+  transform: scale(1.08);
+}
+.history-item-remove:active { transform: scale(0.9); }
+
+.history-footer {
+  padding: 14px 20px 20px;
+  border-top: 1px solid var(--border);
+}
+.history-clear-all {
+  width: 100%;
+  padding: 10px;
+  background: rgba(255,56,56,0.12);
+  border: 1px solid rgba(255,56,56,0.35);
+  border-radius: 10px;
+  color: #FF6060;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.history-clear-all:hover { background: rgba(255,56,56,0.2); }
+
+/* Tutorial de gesto */
+.gesture-hint {
+  position: absolute;
+  top: 92px; left: 50%; transform: translateX(-50%);
+  background: rgba(10,10,10,0.92);
+  border: 1px solid var(--border-gold);
+  border-radius: 14px;
+  padding: 8px 14px;
+  font-size: 10.5px;
+  color: var(--gold-light);
+  backdrop-filter: blur(20px);
+  font-weight: 500;
+  opacity: 0;
+  transition: opacity 0.4s;
+  pointer-events: none;
+  z-index: 81;
+  max-width: 260px;
+  text-align: center;
+}
+.gesture-hint.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<div class="phone-stage">
+
+<div class="phone-outer">
+<div class="phone" id="phone">
+
+  <!-- Status bar completa (relógio, sinal, wifi, bateria) -->
+  <div class="status-bar">
+    <span class="status-time" id="clock">9:41</span>
+    <div class="status-icons">
+      <!-- Sinal -->
+      <svg width="17" height="11" viewBox="0 0 17 11" fill="white">
+        <rect x="0" y="7" width="3" height="4" rx="0.5"/>
+        <rect x="4.5" y="4.5" width="3" height="6.5" rx="0.5"/>
+        <rect x="9" y="2" width="3" height="9" rx="0.5"/>
+        <rect x="13.5" y="0" width="3" height="11" rx="0.5"/>
+      </svg>
+      <!-- Wifi -->
+      <svg width="16" height="12" viewBox="0 0 16 12" fill="white">
+        <path d="M8 10a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zM3.8 6.2a6 6 0 0 1 8.4 0l-1.4 1.4a4 4 0 0 0-5.6 0L3.8 6.2zM1 3a10 10 0 0 1 14 0l-1.4 1.4a8 8 0 0 0-11.2 0L1 3z"/>
+      </svg>
+      <!-- Bateria -->
+      <svg width="27" height="12" viewBox="0 0 27 12" fill="none">
+        <rect x="0.5" y="0.5" width="22" height="11" rx="3" stroke="white" stroke-opacity="0.8" stroke-width="1"/>
+        <rect x="2" y="2" width="19" height="8" rx="1.5" fill="white"/>
+        <path d="M24 4v4a2 2 0 0 0 0-4z" fill="white" fill-opacity="0.5"/>
+      </svg>
+    </div>
+  </div>
+
+  <!-- Viewfinder -->
+  <div class="viewfinder">
+    <img id="cameraFeed" alt=""/>
+
+    <div class="cam-loading" id="loading">
+      <div class="cam-loading-spinner"></div>
+      <p>Conectando à câmera...</p>
+      <small>VISUALL</small>
+    </div>
+
+    <div class="capture-flash" id="captureFlash"></div>
+
+    <div class="rec-timer" id="recTimer">
+      <div class="rec-timer-dot"></div>
+      <span id="recTime">00:00</span>
+    </div>
+
+    <!-- Top badges -->
+    <div class="top-bar">
+      <div class="mode-badge" id="modeBadge">
+        <div class="mode-badge-glow"></div>
+        Modo Libras Ativado
+      </div>
+      <div class="live-badge" id="liveBadge">
+        <div class="live-dot"></div>
+        AO VIVO
+      </div>
+    </div>
+
+    <!-- Botão histórico (ao lado do AO VIVO) -->
+    <div class="history-btn" id="historyBtn" onclick="openHistory()">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"/>
+        <polyline points="12 6 12 12 16 14"/>
+      </svg>
+      <div class="history-count" id="historyCount">0</div>
+    </div>
+
+    <!-- Hint inicial -->
+    <div class="gesture-hint" id="gestureHint">
+      ✋ Mão toda aberta por 5s = limpar frase
+    </div>
+
+    <!-- Indicador de gesto -->
+    <div class="clear-gesture" id="clearGesture">
+      <span>✋ Soltando em breve...</span>
+      <div class="clear-gesture-bar">
+        <div class="clear-gesture-fill" id="clearFill"></div>
+      </div>
+    </div>
+
+    <!-- Arcos -->
+    <div class="arc-frame" id="arcFrame">
+      <div class="arc arc-tl"></div>
+      <div class="arc arc-tr"></div>
+      <div class="arc arc-bl"></div>
+      <div class="arc arc-br"></div>
+    </div>
+
+    <!-- Detecção -->
+    <div class="detection-area" id="detectionArea">
+      <div class="letra-pill" id="letraPill">
+        <span class="letra-text" id="letraText">-</span>
+        <span class="letra-conf" id="letraConf">0% conf.</span>
+      </div>
+      <div class="frase-box hidden">
+        <div class="frase-text" id="fraseText"></div>
+        <button class="frase-clear-btn hidden" id="fraseClearBtn" onclick="clearFrase()" title="Limpar">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="3 6 5 6 21 6"/>
+            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Modos -->
+    <div class="mode-pills">
+      <div class="mode-item" data-mode="retrato" onclick="setMode(this)">RETRATO</div>
+      <div class="mode-item active" data-mode="foto" onclick="setMode(this)">FOTO</div>
+      <div class="mode-item" data-mode="video" onclick="setMode(this)">VIDEO</div>
+    </div>
+
+    <div class="access-icon-left" id="accessIcon" onclick="toggleLibras()">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="4" r="2"/>
+        <line x1="12" y1="6" x2="12" y2="13"/>
+        <line x1="6" y1="9" x2="18" y2="9"/>
+        <line x1="12" y1="13" x2="9" y2="22"/>
+        <line x1="12" y1="13" x2="15" y2="22"/>
+      </svg>
+    </div>
+
+    <div class="zoom-btn">1x</div>
+
+    <!-- Bottom controls -->
+    <div class="bottom-controls">
+      <div class="gallery-btn">
+        <div class="gallery-thumb" id="galleryThumb"></div>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2"/>
+          <circle cx="8.5" cy="8.5" r="1.5"/>
+          <path d="M21 15l-5-5L5 21"/>
+        </svg>
+      </div>
+
+      <div class="shutter" id="shutter" onclick="shutterClick()"></div>
+
+      <div class="flip-btn" onclick="flipCamera()">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12a9 9 0 0 1-15.5 6.3L3 16"/>
+          <path d="M3 12a9 9 0 0 1 15.5-6.3L21 8"/>
+          <polyline points="3 21 3 16 8 16"/>
+          <polyline points="21 3 21 8 16 8"/>
+        </svg>
+      </div>
+    </div>
+
+    <!-- MODAL HISTÓRICO -->
+    <div class="history-modal" id="historyModal">
+      <div class="history-header">
+        <div class="history-title">HISTÓRICO</div>
+        <button class="history-close" onclick="closeHistory()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <div class="history-list" id="historyList">
+        <div class="history-empty">Nenhuma frase ainda...</div>
+      </div>
+      <div class="history-footer">
+        <button class="history-clear-all" onclick="clearHistory()">LIMPAR TUDO</button>
+      </div>
+    </div>
+
+  </div><!-- /phone -->
+</div><!-- /phone-outer -->
+</div><!-- /phone-stage -->
+
+<script>
+// SOM TIC (Web Audio API — não precisa de arquivo)
+let audioCtx = null;
+function playTick() {
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = 1200;  // frequência do "tic"
+    gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.08);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.08);
+  } catch (e) {}
+}
+
+// CLOCK
+function updateClock() {
+  const d = new Date();
+  document.getElementById('clock').textContent =
+    d.getHours() + ':' + String(d.getMinutes()).padStart(2,'0');
+}
+updateClock(); setInterval(updateClock, 30000);
+
+// LIBRAS MODE
+let librasActive = false;
+let firstActivation = true;
+
+function toggleLibras() {
+  librasActive = !librasActive;
+  document.getElementById('accessIcon').classList.toggle('active', librasActive);
+  document.getElementById('modeBadge').classList.toggle('show', librasActive);
+  document.getElementById('liveBadge').classList.toggle('show', librasActive);
+  document.getElementById('arcFrame').classList.toggle('show', librasActive);
+  document.getElementById('detectionArea').classList.toggle('show', librasActive);
+  document.getElementById('historyBtn').classList.toggle('visible', librasActive);
+
+  if (librasActive && firstActivation) {
+    const hint = document.getElementById('gestureHint');
+    hint.classList.add('show');
+    setTimeout(() => hint.classList.remove('show'), 4500);
+    firstActivation = false;
+  }
+
+  if (!librasActive) {
+    document.getElementById('letraText').textContent = '-';
+    document.getElementById('letraConf').textContent = '0% conf.';
+    document.getElementById('letraPill').classList.remove('high-conf');
+  }
+}
+
+// MODOS
+let currentMode = 'foto';
+function setMode(el) {
+  document.querySelectorAll('.mode-item').forEach(m => m.classList.remove('active'));
+  el.classList.add('active');
+  currentMode = el.dataset.mode;
+  if (currentMode !== 'video' && isRecording) stopRecording();
+}
+
+// SHUTTER
+let isRecording = false;
+let recStart = 0;
+let recInterval = null;
+
+function shutterClick() {
+  if (currentMode === 'video') {
+    isRecording ? stopRecording() : startRecording();
+  } else {
+    capturePhoto();
+  }
+}
+
+function capturePhoto() {
+  const flash = document.getElementById('captureFlash');
+  flash.classList.remove('flash');
+  void flash.offsetWidth;
+  flash.classList.add('flash');
+
+  const feed = document.getElementById('cameraFeed');
+  if (feed.src && feed.src.startsWith('data:')) {
+    const thumb = document.getElementById('galleryThumb');
+    thumb.style.backgroundImage = `url(${feed.src})`;
+    thumb.classList.add('show');
+  }
+}
+
+function startRecording() {
+  isRecording = true;
+  document.getElementById('shutter').classList.add('recording');
+  document.getElementById('recTimer').classList.add('show');
+  recStart = Date.now();
+  recInterval = setInterval(updateRecTime, 250);
+}
+function stopRecording() {
+  isRecording = false;
+  document.getElementById('shutter').classList.remove('recording');
+  document.getElementById('recTimer').classList.remove('show');
+  clearInterval(recInterval);
+}
+function updateRecTime() {
+  const sec = Math.floor((Date.now() - recStart) / 1000);
+  const m = String(Math.floor(sec / 60)).padStart(2,'0');
+  const s = String(sec % 60).padStart(2,'0');
+  document.getElementById('recTime').textContent = `${m}:${s}`;
+}
+
+// FLIP
+function flipCamera() {
+  const phone = document.getElementById('phone');
+  phone.classList.add('flipping');
+  setTimeout(() => {
+    const feed = document.getElementById('cameraFeed');
+    feed.style.transform = feed.style.transform === 'scaleX(-1)' ? 'scaleX(1)' : 'scaleX(-1)';
+    phone.classList.remove('flipping');
+  }, 250);
+}
+
+// FRASE
+function clearFrase() {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ action: 'limpar' }));
+  }
+}
+
+// HISTÓRICO
+function openHistory() {
+  document.getElementById('historyModal').classList.add('show');
+}
+function closeHistory() {
+  document.getElementById('historyModal').classList.remove('show');
+}
+function clearHistory() {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ action: 'limpar_historico' }));
+  }
+}
+function removeHistoryItem(idx) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ action: 'remover_item', index: idx }));
+  }
+}
+
+function renderHistory(historico) {
+  const list = document.getElementById('historyList');
+  const count = document.getElementById('historyCount');
+
+  if (!historico || historico.length === 0) {
+    list.innerHTML = '<div class="history-empty">Nenhuma frase ainda...</div>';
+    count.classList.remove('show');
+    return;
+  }
+
+  count.textContent = historico.length > 9 ? '9+' : historico.length;
+  count.classList.add('show');
+
+  list.innerHTML = historico.map((f, idx) =>
+    `<div class="history-item">
+      <div class="history-item-text">${escapeHtml(f)}</div>
+      <button class="history-item-remove" onclick="removeHistoryItem(${idx})" title="Remover">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"/>
+          <line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>`
+  ).join('');
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// WEBSOCKET
+let ws;
+let lastLetraDisplayed = '-';
+let lastHistoricoLength = -1;
+let lastHistoricoStr = '';
+let lastFraseLength = 0;  // pra detectar quando letra é adicionada
+
+function connect() {
+  ws = new WebSocket('ws://localhost:8000');
+  ws.addEventListener('open', () => console.log('✅ Conectado'));
+
+  ws.addEventListener('message', (event) => {
+    try {
+      const data = JSON.parse(event.data);
+
+      if (data.frame) {
+        document.getElementById('cameraFeed').src = 'data:image/jpeg;base64,' + data.frame;
+        document.getElementById('loading').classList.add('hidden');
+      }
+
+      // Gesto de limpar
+      const gestProgress = data.gesto_limpar_progress || 0;
+      const gestureEl = document.getElementById('clearGesture');
+      const fillEl = document.getElementById('clearFill');
+      if (gestProgress > 0.1 && librasActive) {
+        gestureEl.classList.add('show');
+        fillEl.style.transform = `scaleX(${gestProgress})`;
+      } else {
+        gestureEl.classList.remove('show');
+      }
+
+      if (librasActive) {
+        const letra = data.letra_atual && data.letra_atual !== '-' ? data.letra_atual : '-';
+        const conf = Math.round((data.confianca || 0) * 100);
+
+        const letraEl = document.getElementById('letraText');
+        if (letra !== lastLetraDisplayed && letra !== '-') {
+          letraEl.classList.remove('bump');
+          void letraEl.offsetWidth;
+          letraEl.classList.add('bump');
+          setTimeout(() => letraEl.classList.remove('bump'), 200);
+        }
+        lastLetraDisplayed = letra;
+
+        letraEl.textContent = letra;
+        document.getElementById('letraConf').textContent = `${conf}% conf.`;
+        document.getElementById('letraPill').classList.toggle('high-conf', conf >= 90);
+
+        const frase = data.frase || '';
+        // Toca tic quando a frase cresceu (letra adicionada)
+        if (frase.length > lastFraseLength) {
+          playTick();
+        }
+        lastFraseLength = frase.length;
+
+        const fraseEl = document.getElementById('fraseText');
+        const fraseBox = document.querySelector('.frase-box');
+        const clearBtn = document.getElementById('fraseClearBtn');
+        if (frase) {
+          fraseEl.textContent = frase;
+          fraseBox.classList.remove('hidden');
+          clearBtn.classList.remove('hidden');
+        } else {
+          fraseEl.textContent = '';
+          fraseBox.classList.add('hidden');
+          clearBtn.classList.add('hidden');
+        }
+      }
+
+      // Histórico — só renderiza se mudou (compara string)
+      const histStr = JSON.stringify(data.historico || []);
+      if (histStr !== lastHistoricoStr) {
+        renderHistory(data.historico || []);
+        lastHistoricoStr = histStr;
+      }
+
+    } catch (e) {
+      console.error(e);
+    }
+  });
+
+  ws.addEventListener('close', () => setTimeout(connect, 2000));
+}
+
+connect();
+</script>
+
+</body>
+</html>
