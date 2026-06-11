@@ -1,36 +1,16 @@
-# ============ Python ============
+﻿# Models & datasets (too large for Git - upload via GitHub Releases)
+*.pkl
+*.h5
+*.npz
+*.npy
+
+# Python
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
+*.pyc
 .venv/
 venv/
-env/
-ENV/
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
 
-# ============ IDE ============
-.vscode/
-.idea/
-*.swp
+# System
+.env
 .DS_Store
 Thumbs.db
-
-# ============ Data & Models (heavy files) ============
-# Datasets brutos (vídeos/imagens) e processados (.npz)
-data/raw_images/
-data/raw_videos/
-data/*.npz
-
-# Modelos legados não usados pelo backend atual
-models/legacy/
-*_old.pkl
-modelo_novo.pkl
-
-# ============ Logs / temp ============
-*.log
-*.tmp
-.cache/

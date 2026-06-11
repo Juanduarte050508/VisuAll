@@ -436,7 +436,9 @@ html, body {
   z-index: 70;
   padding: 0 16px;
   pointer-events: none;
+  opacity: 0; visibility: hidden; transition: opacity .25s ease;
 }
+.mode-pills.show { opacity: 1; visibility: visible; }
 .mode-item {
   font-size: 11px;
   font-weight: 600;
@@ -865,11 +867,17 @@ html, body {
       </div>
     </div>
 
-    <!-- Modos -->
-    <div class="mode-pills">
-      <div class="mode-item" data-mode="retrato" onclick="setMode(this)">RETRATO</div>
+    <!-- Modos de câmera (aparecem quando o Libras está DESLIGADO) -->
+    <div class="mode-pills show" id="cameraPills">
       <div class="mode-item active" data-mode="foto" onclick="setMode(this)">FOTO</div>
       <div class="mode-item" data-mode="video" onclick="setMode(this)">VIDEO</div>
+    </div>
+
+    <!-- Modos de reconhecimento VisuAll (aparecem quando o Libras está LIGADO) -->
+    <div class="mode-pills" id="modePills">
+      <div class="mode-item active" data-mode="alfabeto" onclick="setModoVisuall(this)">ALFABETO</div>
+      <div class="mode-item" data-mode="corpo" onclick="setModoVisuall(this)">CORPO</div>
+      <div class="mode-item" id="linhasBtn" onclick="toggleLinhas(this)">LINHAS: ON</div>
     </div>
 
     <div class="access-icon-left" id="accessIcon" onclick="toggleLibras()">
@@ -968,6 +976,8 @@ function toggleLibras() {
   document.getElementById('liveBadge').classList.toggle('show', librasActive);
   document.getElementById('arcFrame').classList.toggle('show', librasActive);
   document.getElementById('detectionArea').classList.toggle('show', librasActive);
+  document.getElementById('modePills').classList.toggle('show', librasActive);
+  document.getElementById('cameraPills').classList.toggle('show', !librasActive);
   document.getElementById('historyBtn').classList.toggle('visible', librasActive);
 
   if (librasActive && firstActivation) {
@@ -984,10 +994,10 @@ function toggleLibras() {
   }
 }
 
-// MODOS
+// MODOS DE CÂMERA (foto / video)
 let currentMode = 'foto';
 function setMode(el) {
-  document.querySelectorAll('.mode-item').forEach(m => m.classList.remove('active'));
+  document.querySelectorAll('#cameraPills .mode-item').forEach(m => m.classList.remove('active'));
   el.classList.add('active');
   currentMode = el.dataset.mode;
   if (currentMode !== 'video' && isRecording) stopRecording();
@@ -1108,6 +1118,28 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
+// MODO VISUALL (alfabeto / corpo) — filtro que evita ler os dois ao mesmo tempo
+let modoVisuall = 'alfabeto';
+function setModoVisuall(el) {
+  document.querySelectorAll('.mode-pills .mode-item[data-mode]').forEach(m => m.classList.remove('active'));
+  el.classList.add('active');
+  modoVisuall = el.dataset.mode;
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ action: 'modo', modo: modoVisuall }));
+  }
+}
+
+// LIGA/DESLIGA linhas de detecção
+let linhasAtivas = true;
+function toggleLinhas(el) {
+  linhasAtivas = !linhasAtivas;
+  el.textContent = 'LINHAS: ' + (linhasAtivas ? 'ON' : 'OFF');
+  el.classList.toggle('active', linhasAtivas);
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ action: 'desenho', ativo: linhasAtivas }));
+  }
+}
+
 // WEBSOCKET
 let ws;
 let lastLetraDisplayed = '-';
@@ -1117,7 +1149,10 @@ let lastFraseLength = 0;  // pra detectar quando letra é adicionada
 
 function connect() {
   ws = new WebSocket('ws://localhost:8000');
-  ws.addEventListener('open', () => console.log('✅ Conectado'));
+  ws.addEventListener('open', () => {
+    console.log('✅ Conectado');
+    ws.send(JSON.stringify({ action: 'modo', modo: modoVisuall }));
+  });
 
   ws.addEventListener('message', (event) => {
     try {
@@ -1157,6 +1192,7 @@ function connect() {
         document.getElementById('letraPill').classList.toggle('high-conf', conf >= 90);
 
         const frase = data.frase || '';
+        const fraseShow = data.frase_exibida || frase;
         // Toca tic quando a frase cresceu (letra adicionada)
         if (frase.length > lastFraseLength) {
           playTick();
@@ -1166,8 +1202,8 @@ function connect() {
         const fraseEl = document.getElementById('fraseText');
         const fraseBox = document.querySelector('.frase-box');
         const clearBtn = document.getElementById('fraseClearBtn');
-        if (frase) {
-          fraseEl.textContent = frase;
+        if (fraseShow) {
+          fraseEl.textContent = fraseShow;
           fraseBox.classList.remove('hidden');
           clearBtn.classList.remove('hidden');
         } else {
