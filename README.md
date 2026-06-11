@@ -1,224 +1,186 @@
-# VisuAll — Reconhecimento de Libras em Tempo Real
+<!--
+  README DO REPOSITÓRIO VisuAll
+  Cole no README.md do repo github.com/Juanduarte050508/VisuAll
 
-> Reconhecimento do alfabeto de Libras (Língua Brasileira de Sinais) em tempo real, usando visão computacional e dois modelos MLP especializados — um para letras estáticas e outro para letras com movimento.
+  ANTES DE COMMITAR, revise:
+  1. A seção "Project Status" reflete que a versão integrada ainda não subiu.
+     Quando subir o código unificado, apague essa seção ou marque tudo como ✅.
+  2. Ajuste os comandos de instalação/execução para os nomes reais dos seus
+     arquivos (ex: main.py, server.py — confira como se chamam no seu projeto).
+  3. Adicione um GIF/print de demo na seção indicada (faz MUITA diferença).
+-->
 
-![Stack](https://img.shields.io/badge/Python-3.10+-blue?logo=python&logoColor=white)
-![MediaPipe](https://img.shields.io/badge/MediaPipe-Hands-green)
-![scikit--learn](https://img.shields.io/badge/scikit--learn-MLP-orange?logo=scikitlearn&logoColor=white)
-![WebSocket](https://img.shields.io/badge/WebSocket-asyncio-purple)
-![License](https://img.shields.io/badge/License-MIT-yellow)
+<div align="center">
+
+# 🤟 VisuAll
+
+### Real-Time Brazilian Sign Language (Libras) Recognition
+
+**An AI system that translates Libras — alphabet and body signs — into text, live from a webcam.**
+
+[![Python](https://img.shields.io/badge/Python-3.10+-2F81F7?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
+[![MediaPipe](https://img.shields.io/badge/MediaPipe-Holistic-0097A7?style=flat-square&logo=google&logoColor=white)](https://developers.google.com/mediapipe)
+[![TensorFlow](https://img.shields.io/badge/TensorFlow-Keras_LSTM-FF6F00?style=flat-square&logo=tensorflow&logoColor=white)](https://www.tensorflow.org/)
+[![scikit-learn](https://img.shields.io/badge/scikit--learn-MLP-F7931E?style=flat-square&logo=scikitlearn&logoColor=white)](https://scikit-learn.org/)
+[![Status](https://img.shields.io/badge/FIAP_Challenge-2026-2F81F7?style=flat-square)]()
+
+<!-- 📸 COLOQUE AQUI UM GIF DE DEMO (10-15s mostrando o reconhecimento ao vivo)
+<img src="docs/demo.gif" width="700" alt="VisuAll live demo"/>
+-->
+
+</div>
 
 ---
 
-## TL;DR
+## 💡 The Problem
 
-Webcam capta o gesto → MediaPipe extrai 21 landmarks da mão → o sistema decide automaticamente se é uma letra **estática** (A, B, C…) ou **dinâmica** (H, J, K, X, Z) com base no movimento detectado nos últimos frames → o MLP correspondente classifica → a letra é adicionada à frase quando se mantém estável. Tudo isso roda em ~20fps no frontend via WebSocket.
+Over **2 million people in Brazil** are deaf or hard of hearing, and Libras is
+their primary language — yet very few hearing Brazilians understand it. VisuAll
+aims to lower that communication barrier with accessible, real-time sign
+recognition that runs on a regular computer with a webcam. No special hardware,
+no gloves, no sensors.
 
----
-
-## Demo
-
-> *(Em breve: gif/vídeo do sistema em uso. Por enquanto, rode localmente seguindo as instruções abaixo.)*
-
-O frontend simula a interface de um smartphone (J0VI) e mostra:
-- Stream da webcam com landmarks da mão sobrepostos
-- Letra atual sendo reconhecida + nível de confiança
-- Frase em construção
-- Histórico das últimas frases reconhecidas
-- Indicador do modo de detecção ativo (estático / dinâmico)
+> Developed for the **FIAP Challenge 2026** in partnership with **J0VI**.
 
 ---
 
-## Arquitetura
+## 🧠 How It Works
+
+VisuAll combines **two recognition engines** in one unified system:
+
+| Engine | What it recognizes | Model | Input |
+|---|---|---|---|
+| ✋ **Alphabet** | Static letters (A, B, C…) | MLP (scikit-learn) | 21 hand landmarks |
+| 👋 **Alphabet (dynamic)** | Letters with motion (H, J, X, Z…) | MLP over frame sequences | Landmark sequences |
+| 🧍 **Body Signs** | Full words/signs ("olá", "obrigado"…) | LSTM (Keras) | MediaPipe Holistic (pose + hands + face) |
+
+### Architecture
 
 ```
-┌─────────────────┐    WebSocket (ws://localhost:8000)   ┌──────────────────┐
-│   Frontend      │ <──────────────────────────────────> │   Backend        │
-│   (HTML/CSS/JS) │   ↓ frame JPEG base64 + estado       │   (Python)       │
-└─────────────────┘   ↑ comandos (limpar, espaço…)       └──────────────────┘
-                                                                  │
-                                                                  ↓
-                                                         ┌──────────────────┐
-                                                         │ Capture Thread   │  ← OpenCV / webcam
-                                                         │ Process Thread   │  ← MediaPipe + MLP
-                                                         │ asyncio loop     │  ← WebSocket I/O
-                                                         └──────────────────┘
+                    ┌──────────────────────────────┐
+   Webcam ───────►  │   MediaPipe (Hands/Holistic) │
+                    │   landmark extraction         │
+                    └──────────────┬───────────────┘
+                                   │ normalized landmarks
+                    ┌──────────────▼───────────────┐
+                    │        Routing layer          │
+                    │  (alphabet mode / sign mode)  │
+                    └──────┬───────────────┬───────┘
+                           │               │
+              ┌────────────▼───┐   ┌───────▼────────────┐
+              │  MLP models    │   │  Keras LSTM        │
+              │  static+dynamic│   │  sequence model    │
+              └────────────┬───┘   └───────┬────────────┘
+                           │               │
+                    ┌──────▼───────────────▼───────┐
+                    │      Token-list builder       │
+                    │  letters/signs → phrases      │
+                    └──────────────┬───────────────┘
+                                   │ WebSocket
+                    ┌──────────────▼───────────────┐
+                    │     Web frontend (live UI)    │
+                    └──────────────────────────────┘
 ```
 
-### Pipeline de classificação
+### Key Technical Features
 
-1. **Captura** (thread dedicada): lê frames da webcam a 30fps e armazena no buffer compartilhado.
-2. **Processamento** (thread dedicada): para cada frame novo:
-   - Extrai 21 landmarks 2D da mão via **MediaPipe Hands**.
-   - Normaliza os pontos em relação ao pulso (invariante à posição na tela).
-   - Calcula a variação de movimento nos últimos 5 frames.
-   - Se movimento > limiar → roteia para o **MLP dinâmico** (janela de 10 frames, 420 features).
-   - Se mão parada → roteia para o **MLP estático** (frame único, 42 features).
-   - Aplica filtro de estabilidade (N frames consecutivos com mesma predição) antes de adicionar à frase.
-3. **Gesto especial**: mão totalmente aberta por 3s limpa a frase atual.
-4. **WebSocket**: envia frame + estado a ~20fps; recebe comandos do frontend (espaço, apagar, limpar).
-
-### Por que dois modelos MLP em vez de um modelo único?
-
-Letras estáticas e dinâmicas têm estruturas de feature radicalmente diferentes. Tentar treinar um modelo único forçaria padding/zero-fill e degradaria ambos os casos. Separar permite:
-- **Estático**: 42 features (21 pontos × 2 coords), alta precisão para A–G, I, L, M, N, O, P, Q, R, S, T, U, V, W, Y.
-- **Dinâmico**: 420 features (10 frames × 42), captura trajetória para H, J, K, X, Z.
-- **Roteador heurístico** (limiar de movimento) escolhe qual modelo usar — sem custo extra de inferência.
+- **Adaptive facial calibration** — landmark normalization adapts to each
+  user's position and distance from the camera, improving accuracy across
+  different setups.
+- **Token-list phrase architecture** — recognized letters and signs are
+  emitted as tokens and assembled into phrases, instead of raw per-frame
+  predictions.
+- **Static + dynamic letter handling** — letters that require motion (H, J,
+  X, Z) are handled by a separate sequence-aware model, a common gap in
+  alphabet-only recognizers.
+- **Unified backend** — alphabet and body-sign engines, originally three
+  separate codebases, were integrated into a single backend serving one
+  frontend over WebSocket.
 
 ---
 
-## Stack
+## 🚧 Project Status
 
-| Camada | Tecnologias |
+| Module | Status |
 |---|---|
-| Captura de vídeo | OpenCV |
-| Detecção de mão | MediaPipe Hands |
-| Modelos | MLP (scikit-learn) — 256→128 hidden, ReLU, early stopping |
-| Comunicação | WebSocket (`websockets` + `asyncio`) |
-| Concorrência | `threading` (captura + processamento) + asyncio (I/O) |
-| Frontend | HTML5 + CSS3 + JavaScript vanilla |
+| Alphabet recognition (static MLP) | ✅ Published in this repo |
+| Alphabet recognition (dynamic MLP) | ✅ Published in this repo |
+| Body-sign recognition (Holistic + LSTM) | 🔜 Integration sprint complete — publishing soon |
+| Unified backend + frontend | 🔜 Publishing soon |
+| FIAP Challenge 2026 presentation | 🗓️ In preparation |
 
 ---
 
-## Estrutura do repositório
+## ⚙️ Getting Started
 
-```
-visuall/
-├── backend/
-│   ├── app.py                          # Servidor WebSocket + pipeline de inferência
-│   ├── data_extraction/
-│   │   ├── extract_from_images.py      # Gera dataset estático a partir de fotos
-│   │   └── extract_from_videos.py      # Gera dataset dinâmico a partir de vídeos
-│   └── training/
-│       ├── train_static_model.py       # Treina MLP estático
-│       └── train_dynamic_model.py      # Treina MLP dinâmico
-├── frontend/
-│   └── index.html                      # UI completa (simula smartphone J0VI)
-├── models/
-│   ├── static_model.pkl                # MLP estático treinado
-│   ├── static_classes.pkl              # Mapeamento idx → letra
-│   ├── dynamic_model.pkl               # MLP dinâmico treinado
-│   └── dynamic_classes.pkl
-├── docs/
-│   └── architecture.md                 # Notas técnicas mais profundas
-├── requirements.txt
-└── README.md
-```
-
----
-
-## Como rodar
-
-### Pré-requisitos
-- Python 3.10+
-- Webcam funcional
-- (Recomendado) Ambiente virtual
-
-### Setup
+> Requires **Python 3.10+** and a webcam.
 
 ```bash
-# 1. Clone e entre no diretório
-git clone https://github.com/Juanduarte050508/visuall.git
-cd visuall
+# 1. Clone the repository
+git clone https://github.com/Juanduarte050508/VisuAll.git
+cd VisuAll
 
-# 2. Crie ambiente virtual
+# 2. Create a virtual environment
 python -m venv .venv
-source .venv/bin/activate          # Linux / macOS
-# .venv\Scripts\activate           # Windows
+.venv\Scripts\activate        # Windows
+# source .venv/bin/activate   # Linux/macOS
 
-# 3. Instale dependências
+# 3. Install dependencies
 pip install -r requirements.txt
+
+# 4. Run
+python main.py                # ← ajuste para o nome real do seu entrypoint
 ```
 
-### Execução
-
-```bash
-# Terminal 1 — backend
-cd backend
-python app.py
-# Aguarde: "✅ Servidor pronto! MLP dinâmico + MLP estático ativos"
-
-# Terminal 2 — frontend
-# Basta abrir frontend/index.html no navegador (Chrome/Edge recomendado).
-# Ele conecta automaticamente em ws://localhost:8000
-```
+Then open the frontend in your browser and start signing. ✋
 
 ---
 
-## Treinando seus próprios modelos
+## 🗺️ Roadmap
 
-Os modelos pré-treinados estão em `models/`. Caso queira treinar do zero:
-
-### 1. Coletar dados
-
-```
-data/
-├── raw_images/        # para letras estáticas
-│   ├── A/  foto1.jpg foto2.jpg ...
-│   ├── B/  ...
-│   └── ...
-└── raw_videos/        # para letras dinâmicas
-    ├── H/  v1.mp4 v2.mp4 ...
-    ├── J/  ...
-    └── ...
-```
-
-### 2. Extrair landmarks
-
-```bash
-cd backend/data_extraction
-python extract_from_images.py    # gera data/dataset_static.npz
-python extract_from_videos.py    # gera data/dataset_dynamic.npz
-```
-
-### 3. Treinar
-
-```bash
-cd backend/training
-python train_static_model.py     # gera models/static_model.pkl
-python train_dynamic_model.py    # gera models/dynamic_model.pkl
-```
+- [x] Static alphabet recognition (MLP)
+- [x] Dynamic letters (H, J, X, Z) via sequence model
+- [x] Body-sign recognition with MediaPipe Holistic + LSTM
+- [x] Unify three codebases into a single backend/frontend
+- [x] Adaptive facial marker calibration
+- [ ] Publish the fully integrated version in this repo
+- [ ] Expand the body-sign vocabulary
+- [ ] React frontend + Node.js/Express API refactor
+- [ ] Mobile exploration (ONNX → TFLite)
 
 ---
 
-## Decisões técnicas relevantes
+## 🧰 Tech Stack
 
-- **Threading + asyncio**: a captura da webcam é bloqueante e não combina com o loop assíncrono do WebSocket. A solução foi separar em duas threads de daemon (captura + processamento) sincronizadas via `Lock`, deixando o asyncio responsável apenas pelo I/O de rede.
-- **Resize para 320×240 antes do MediaPipe**: o frame original (640×480) é mantido para exibição, mas a inferência usa uma versão reduzida — ganho de ~2× em FPS sem perda relevante de precisão na detecção de mão.
-- **Janela de 10 frames para o modelo dinâmico**: testado com 8, 10 e 15. 10 oferece o melhor trade-off entre latência (~330ms a 30fps) e precisão na captura do gesto completo.
-- **Limiar de confiança (0.90) + estabilidade temporal**: predição só vira "letra confirmada" se o modelo estiver com ≥90% de confiança E mantiver a mesma letra por N frames consecutivos (12 estáticas, 2 dinâmicas — gestos dinâmicos passam rápido).
-- **Cooldown pós-letra**: 1s para estáticas, 0.3s para dinâmicas — evita repetições acidentais durante a transição entre gestos.
+`Python` · `OpenCV` · `MediaPipe (Hands & Holistic)` · `scikit-learn (MLP)` ·
+`TensorFlow / Keras (LSTM)` · `WebSocket` · `HTML/CSS/JS`
 
 ---
 
-## Próximos passos
+## 👥 Team
 
-- [ ] Tornar o frontend hospedável (servir HTML pelo próprio backend via aiohttp)
-- [ ] Adicionar suporte a duas mãos para letras como "H"
-- [ ] Migrar para LSTM para melhor captura temporal de letras dinâmicas
-- [ ] Empacotar inferência em ONNX para rodar embarcado em smartphone
-- [ ] Criar dataset público com diversidade de tons de pele e iluminação
+| Member | Role |
+|---|---|
+| **Juan Duarte** | Technical lead — models, integration, backend/frontend |
+| **Victor** | Presentation & design |
 
----
-
-## Contexto do projeto
-
-Este projeto faz parte do **Challenge FIAP 2026** — programa em que estudantes de Engenharia de Software desenvolvem soluções reais para empresas parceiras. A parceira do desafio é a **J0VI**, uma proposta de smartphone com foco em acessibilidade.
-
-O reconhecimento de Libras aqui demonstrado é uma das features acessibilidade desenvolvidas. O escopo deste repositório cobre **a parte de visão computacional e ML** do produto, isolada como um sistema funcional independente.
-
-**Equipe VisuAll** — desenvolvido em equipe por estudantes de Engenharia de Software da FIAP. Este repositório contém o código no qual atuei como desenvolvedor principal das partes de captura, modelagem e backend.
+*FIAP Challenge 2026 · Partner brand: J0VI*
 
 ---
 
-## Sobre o autor
+## 📜 Origin Story
 
-**Juan Duarte Moura** — estudante de Engenharia de Software (FIAP, turma de 2030) e técnico em Mecatrônica (ETEC). Background em integração hardware/software (Arduino, Fusion 360, F1 in Schools). Interessado em visão computacional, IA aplicada e backend.
-
-[LinkedIn](https://www.linkedin.com/in/) · [Outros projetos](https://github.com/Juanduarte050508)
+VisuAll grew out of my Mechatronics capstone project: a
+[robotic hand controlled by computer vision](https://github.com/Juanduarte050508/Engineering-Portfolio).
+The same MediaPipe landmark approach that moved servo motors now powers
+real-time sign language recognition.
 
 ---
 
-## Licença
+<div align="center">
 
-[MIT](LICENSE) — sinta-se livre para usar como referência. Uma menção é apreciada mas não obrigatória.
+**If this project interests you, leave a ⭐ — it helps a lot!**
+
+[Report a bug](https://github.com/Juanduarte050508/VisuAll/issues) · [Juan Duarte](https://github.com/Juanduarte050508)
+
+</div>
