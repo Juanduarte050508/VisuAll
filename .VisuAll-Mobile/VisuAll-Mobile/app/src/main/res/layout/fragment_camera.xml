@@ -1,0 +1,225 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/root_layout"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000">
+
+    <!--
+        PreviewView com ratio 3:4 (portrait 4:3) centralizado.
+        A largura é match_parent (0dp entre start/end),
+        a altura é derivada do dimensionRatio W,3:4 = altura = largura * 4/3.
+        Centralizado verticalmente entre topo e fundo do parent.
+    -->
+    <!--
+        Preview 4:3: largura = match_parent, altura = largura * 4/3.
+        Com width=match_parent e height=0dp + dimensionRatio H,4:3,
+        o ConstraintLayout calcula a altura a partir da largura.
+        Centralizado verticalmente pelo bias.
+    -->
+    <androidx.camera.view.PreviewView
+        android:id="@+id/preview_view"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        app:scaleType="fillCenter"
+        app:layout_constraintDimensionRatio="H,3:4"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintVertical_bias="0.5" />
+
+    <!-- Flash -->
+    <ImageView
+        android:id="@+id/btn_flash"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:layout_marginTop="48dp"
+        android:layout_marginStart="20dp"
+        android:src="@drawable/ic_flash_auto"
+        android:padding="8dp"
+        android:contentDescription="Flash"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent" />
+
+    <!-- Botão Aspect Ratio (topo direito) -->
+    <TextView
+        android:id="@+id/btn_aspect_ratio"
+        android:layout_width="wrap_content"
+        android:layout_height="44dp"
+        android:layout_marginTop="48dp"
+        android:layout_marginEnd="20dp"
+        android:text="4:3"
+        android:textColor="#FFFFFF"
+        android:textSize="13sp"
+        android:textStyle="bold"
+        android:gravity="center"
+        android:paddingHorizontal="10dp"
+        android:background="@drawable/bg_zoom"
+        android:contentDescription="Aspect Ratio"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- Timer gravação -->
+    <TextView
+        android:id="@+id/tv_timer"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="48dp"
+        android:background="@drawable/bg_live"
+        android:paddingHorizontal="10dp"
+        android:paddingVertical="4dp"
+        android:text="● 00:00"
+        android:textColor="#FFFFFF"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- Zoom -->
+    <LinearLayout
+        android:id="@+id/zoom_container"
+        android:layout_width="54dp"
+        android:layout_height="214dp"
+        android:layout_marginEnd="14dp"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:background="@drawable/bg_zoom"
+        android:paddingHorizontal="6dp"
+        android:paddingVertical="10dp"
+        app:layout_constraintTop_toTopOf="@id/preview_view"
+        app:layout_constraintBottom_toBottomOf="@id/preview_view"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <TextView
+            android:id="@+id/tv_zoom_max"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="10x"
+            android:textColor="#E6A817"
+            android:textSize="11sp"
+            android:textStyle="bold" />
+
+        <com.visuall.app.ui.VerticalZoomSlider
+            android:id="@+id/seek_zoom"
+            android:layout_width="34dp"
+            android:layout_height="142dp"
+            android:layout_marginVertical="8dp" />
+
+        <TextView
+            android:id="@+id/tv_zoom_min"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="1x"
+            android:textColor="#F5F1E8"
+            android:textSize="11sp"
+            android:textStyle="bold" />
+
+    </LinearLayout>
+
+    <!-- Modos -->
+    <LinearLayout
+        android:id="@+id/modes_row"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="20dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        app:layout_constraintBottom_toTopOf="@id/controls_row"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <TextView android:id="@+id/mode_retrato"
+            android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_marginHorizontal="14dp" android:text="RETRATO"
+            android:textColor="#808080" android:textSize="12sp"
+            android:letterSpacing="0.05" android:paddingVertical="6dp" />
+
+        <TextView android:id="@+id/mode_foto"
+            android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_marginHorizontal="14dp" android:text="FOTO"
+            android:textColor="#E6A817" android:textSize="12sp"
+            android:letterSpacing="0.05" android:paddingVertical="6dp" />
+
+        <TextView android:id="@+id/mode_video"
+            android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_marginHorizontal="14dp" android:text="VIDEO"
+            android:textColor="#808080" android:textSize="12sp"
+            android:letterSpacing="0.05" android:paddingVertical="6dp" />
+
+        <ImageView android:id="@+id/btn_libras_mode"
+            android:layout_width="36dp" android:layout_height="36dp"
+            android:layout_marginHorizontal="10dp"
+            android:background="@drawable/vf_bg_action_btn"
+            android:contentDescription="Entrar no modo Libras"
+            android:padding="8dp"
+            android:src="@drawable/ic_accessibility"
+            app:tint="#E8A020" />
+
+    </LinearLayout>
+
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:id="@+id/controls_row"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="40dp"
+        android:paddingHorizontal="32dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <ImageView
+            android:id="@+id/btn_gallery"
+            android:layout_width="54dp"
+            android:layout_height="54dp"
+            android:src="@drawable/ic_gallery"
+            android:background="@drawable/bg_gallery"
+            android:scaleType="centerCrop"
+            android:clipToOutline="true"
+            android:contentDescription="Galeria"
+            app:layout_constraintDimensionRatio="1:1"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toStartOf="@id/shutter_container" />
+
+        <FrameLayout
+            android:id="@+id/shutter_container"
+            android:layout_width="76dp"
+            android:layout_height="76dp"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent">
+
+            <ImageView
+                android:id="@+id/btn_shutter"
+                android:layout_width="76dp"
+                android:layout_height="76dp"
+                android:layout_gravity="center"
+                android:src="@drawable/ic_shutter"
+                android:contentDescription="Capturar" />
+
+        </FrameLayout>
+
+        <ImageView
+            android:id="@+id/btn_flip"
+            android:layout_width="54dp"
+            android:layout_height="54dp"
+            android:src="@drawable/ic_flip"
+            android:contentDescription="Girar câmera"
+            android:padding="10dp"
+            android:scaleType="centerInside"
+            app:layout_constraintDimensionRatio="1:1"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintStart_toEndOf="@id/shutter_container"
+            app:layout_constraintEnd_toEndOf="parent" />
+
+    </androidx.constraintlayout.widget.ConstraintLayout>
+
+</androidx.constraintlayout.widget.ConstraintLayout>

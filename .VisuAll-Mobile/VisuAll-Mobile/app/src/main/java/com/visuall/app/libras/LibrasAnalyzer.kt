@@ -1,0 +1,1001 @@
+package com.visuall.app.libras
+
+import ai.onnxruntime.OnnxTensor
+import ai.onnxruntime.OrtEnvironment
+import ai.onnxruntime.OrtSession
+import android.content.Context
+import android.graphics.Bitmap
+import androidx.camera.core.ExperimentalGetImage
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.ImageProxy
+import com.google.mediapipe.framework.image.BitmapImageBuilder
+import com.google.mediapipe.tasks.core.BaseOptions
+import com.google.mediapipe.tasks.vision.core.RunningMode
+import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker
+import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker.HandLandmarkerOptions
+import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarker
+import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarker.PoseLandmarkerOptions
+import org.tensorflow.lite.Interpreter
+import org.tensorflow.lite.flex.FlexDelegate
+import java.nio.ByteBuffer
+import java.nio.FloatBuffer
+import java.nio.ByteOrder
+import java.util.ArrayDeque
+import kotlin.math.abs
+import kotlin.math.sqrt
+
+class LibrasAnalyzer(
+    private val context: Context,
+    private val onLetra: (letra: String, confianca: Float, modo: String) -> Unit,
+    private val onFraseUpdate: (frase: String) -> Unit,
+    private val onNoHand: () -> Unit,
+    private val onGestoLimpar: (progresso: Float) -> Unit,
+    private val onRepeticaoPendente: (letra: String?) -> Unit,
+    private val onFeedback: (mensagem: String, nivel: Int) -> Unit
+) : ImageAnalysis.Analyzer {
+
+    companion object {
+        const val JANELA_MLP             = 10
+        // Reduzido de 0.90 → 0.82: o limiar antigo rejeitava quase tudo
+        // quando a câmera do celular (ângulo/luz diferentes do dataset original)
+        // gerava confiança um pouco mais baixa que o esperado.
+        const val CONFIANCA_MINIMA       = 0.90f
+        const val CONFIANCA_ESTATICA     = 0.88f
+        const val CONFIANCA_ESTATICA_DIFICIL = 0.82f
+        const val CONFIANCA_DINAMICA     = 0.74f
+        const val CONFIANCA_DINAMICA_FORTE = 0.64f
+        const val MARGEM_ESTATICA_MINIMA = 0.05f
+        const val MARGEM_DINAMICA_MINIMA = 0.04f
+        const val MARGEM_DINAMICA_CONTRA_ESTATICO = 0.16f
+        // Reduzido de 0.30 → 0.25: a letra X (e outras dinâmicas) tem um
+        // movimento mais sutil que muitas vezes não cruzava o limiar antigo,
+        // fazendo o sistema tentar classificar como estática e falhar.
+        const val LIMIAR_MOVIMENTO       = 0.12f
+        const val LIMIAR_MOVIMENTO_FORTE = 0.20f
+        const val TEMPO_PRA_LIMPAR       = 3_000L
+        const val ESTAB_MIN_DINAMICO     = 1
+        // Reduzido de 12 → 10: resposta mais rápida sem perder estabilidade.
+        const val ESTAB_MIN_ESTATICO     = 6
+        const val COOLDOWN_DINAMICO      = 550L
+        const val COOLDOWN_ESTATICO      = 850L
+        const val COOLDOWN_REPETICAO     = 650L
+        const val NO_HAND_TOLERANCE      = 3
+        const val FEATURES_ESTATICO      = 42
+        const val FEATURES_DINAMICO      = 420
+        const val BODY_POSE_POINTS       = 33
+        const val BODY_HAND_POINTS       = 21
+        const val BODY_TOTAL_POINTS      = BODY_POSE_POINTS + BODY_HAND_POINTS * 2
+        const val BODY_FEATURES          = BODY_TOTAL_POINTS * 3
+        const val BODY_WINDOW            = 30
+        const val BODY_MOV_WINDOW        = 5
+        const val BODY_POINT_LEFT_SHOULDER = 11
+        const val BODY_POINT_RIGHT_SHOULDER = 12
+        const val BODY_START_MOTION      = 0.045f
+        const val BODY_END_MOTION        = 0.030f
+        const val BODY_START_FRAMES      = 3
+        const val BODY_END_FRAMES        = 5
+        const val BODY_MIN_FRAMES        = 10
+        const val BODY_MAX_FRAMES        = 60
+        const val BODY_CONFIDENCE        = 0.80f
+        const val BODY_CONFIDENCE_MARGIN = 0.06f
+        const val BODY_GESTURE_VARIATION = 0.015f
+        const val BODY_START_HAND_PATH   = 0.045f
+        const val BODY_START_HAND_RANGE  = 0.030f
+        const val BODY_GESTURE_HAND_PATH = 0.070f
+        const val BODY_GESTURE_HAND_RANGE = 0.035f
+        const val BODY_COOLDOWN          = 2_500L
+        const val CALIBRATION_MIN_FRAMES = 8
+        const val CALIBRATION_MAX_FRAMES = 45
+        const val CALIBRATION_TARGET_FRAMES = 24
+        const val TRAINING_BASIC_TARGET_SAMPLES = CALIBRATION_TARGET_FRAMES
+        const val TRAINING_STRONG_TARGET_SAMPLES = 96
+        const val CALIBRATION_MATCH_LIMIT = 0.18f
+        const val CALIBRATION_OVERRIDE_GAP = 0.04f
+        const val FEEDBACK_NEUTRO = 0
+        const val FEEDBACK_BOM = 1
+        const val FEEDBACK_ALERTA = 2
+        const val TRAINING_FILE_NAME = "visuall_libras_phone_dataset.csv"
+        const val DYNAMIC_TRAINING_FILE_NAME = "visuall_libras_dynamic_phone_dataset.csv"
+        val LETRAS_ESTATICAS_DIFICEIS    = setOf("E", "I", "U", "F", "G", "P", "Q", "T", "V", "W", "Y")
+        val LETRAS_REPETICAO_AUTO        = setOf("S", "R")
+    }
+
+    enum class Modo {
+        ALFABETO,
+        CORPO
+    }
+
+    private enum class BodyState {
+        OCIOSO,
+        CAPTURANDO
+    }
+
+    private data class Prediction(
+        val letra: String,
+        val confianca: Float,
+        val modo: String,
+        val margem: Float = 1f
+    )
+
+    private val handLandmarker: HandLandmarker
+    private val poseLandmarker: PoseLandmarker
+    private val flexDelegate = FlexDelegate()
+    private val bodyInterpreter: Interpreter
+    private val labelsCorpo: List<String>
+    @Volatile private var modoAtual = Modo.ALFABETO
+
+    init {
+        val baseOptions = BaseOptions.builder()
+            .setModelAssetPath("hand_landmarker.task")
+            .build()
+
+        val options = HandLandmarkerOptions.builder()
+            .setBaseOptions(baseOptions)
+            .setNumHands(2)
+            // Reduzido de 0.5 → 0.4: facilita a detecção inicial da mão,
+            // principalmente em ângulos ou iluminação menos ideais.
+            .setMinHandDetectionConfidence(0.4f)
+            .setMinHandPresenceConfidence(0.4f)
+            .setMinTrackingConfidence(0.4f)
+            .setRunningMode(RunningMode.IMAGE)
+            .build()
+
+        handLandmarker = HandLandmarker.createFromOptions(context, options)
+
+        val poseBaseOptions = BaseOptions.builder()
+            .setModelAssetPath("pose_landmarker_lite.task")
+            .build()
+        val poseOptions = PoseLandmarkerOptions.builder()
+            .setBaseOptions(poseBaseOptions)
+            .setRunningMode(RunningMode.IMAGE)
+            .setMinPoseDetectionConfidence(0.35f)
+            .setMinPosePresenceConfidence(0.35f)
+            .setMinTrackingConfidence(0.35f)
+            .build()
+        poseLandmarker = PoseLandmarker.createFromOptions(context, poseOptions)
+
+        bodyInterpreter = Interpreter(
+            loadAssetBuffer("body_model.tflite"),
+            Interpreter.Options().addDelegate(flexDelegate)
+        )
+        bodyInterpreter.resizeInput(0, intArrayOf(1, BODY_WINDOW, BODY_FEATURES))
+        bodyInterpreter.allocateTensors()
+        labelsCorpo = context.assets.open("body_labels.txt")
+            .bufferedReader().readLines().filter { it.isNotBlank() }
+    }
+
+    private val ortEnv          = OrtEnvironment.getEnvironment()
+    private val sessionEstatico = ortEnv.createSession(
+        context.assets.open("static_model.onnx").readBytes()
+    )
+    private val sessionDinamico = ortEnv.createSession(
+        context.assets.open("dynamic_model.onnx").readBytes()
+    )
+    private val labelsEstatico  = context.assets.open("static_labels.txt")
+        .bufferedReader().readLines().filter { it.isNotBlank() }
+    private val labelsDinamico  = context.assets.open("dynamic_labels.txt")
+        .bufferedReader().readLines().filter { it.isNotBlank() }
+    private val trainingStore = CalibrationTrainingStore(context, labelsEstatico, labelsDinamico)
+
+    private val bufferLm              = ArrayDeque<FloatArray>()
+    private val bodyMovementBuffer    = ArrayDeque<FloatArray>()
+    private val bodyGestureBuffer     = ArrayList<FloatArray>()
+    private val calibrationLock       = Any()
+    private val calibrationBuffer     = ArrayList<FloatArray>()
+    @Volatile private var calibrationTarget: String? = null
+    // NOVO: pequeno buffer de votação para suavizar ruído de 1 frame isolado
+    // (ex.: confunde X com outra letra por 1 frame e volta) — evita "flicker".
+    private val bufVotacao            = ArrayDeque<String>()
+    private var ultimaPredicao        = ""
+    private var contadorEstabilidade  = 0
+    private var ultimaLetraAdicionada = ""
+    private var ultimoTempoAdicao     = 0L
+    private var tempoInicioEsticado   = 0L
+    private var ultimoTempoLimpar     = 0L
+    private var frase                 = ""
+    private var framesSemMao          = 0
+    private var letraRepetidaPendente = ""
+    private var bodyState             = BodyState.OCIOSO
+    private var bodyStartCount        = 0
+    private var bodyEndCount          = 0
+    private var ultimoTempoCorpo      = 0L
+    private var ultimaClasseCorpo     = ""
+    private var bodyNoHandSince       = 0L
+
+    @ExperimentalGetImage
+    override fun analyze(imageProxy: ImageProxy) {
+        // ── Converter YUV → RGBA_8888 (exigido pelo MediaPipe) ────────────
+        val bitmap = imageProxy.toBitmap()
+        val rotatedBitmap = rotateBitmap(bitmap, imageProxy.imageInfo.rotationDegrees.toFloat())
+        val mpImage = BitmapImageBuilder(rotatedBitmap).build()
+
+        val result = handLandmarker.detect(mpImage)
+
+        if (modoAtual == Modo.CORPO) {
+            val poseResult = poseLandmarker.detect(mpImage)
+            analisarCorpo(result, poseResult)
+            imageProxy.close()
+            return
+        }
+
+        if (result.landmarks().isEmpty()) {
+            framesSemMao++
+            if (framesSemMao >= NO_HAND_TOLERANCE) {
+                ultimaPredicao       = ""
+                contadorEstabilidade = 0
+                tempoInicioEsticado  = 0L
+                bufferLm.clear()
+                bufVotacao.clear()
+                letraRepetidaPendente = ""
+                onRepeticaoPendente(null)
+                onFeedback("MAO FORA DO QUADRO", FEEDBACK_ALERTA)
+                onNoHand()
+            }
+            imageProxy.close()
+            return
+        }
+
+        framesSemMao = 0
+        val lms    = result.landmarks()[0]
+        val pontos = lms.map { Pair(it.x(), it.y()) }
+        val dedicosEsticados = detectarDedosEsticados(pontos)
+
+        if (dedicosEsticados) {
+            val agora = System.currentTimeMillis()
+            if (tempoInicioEsticado == 0L) tempoInicioEsticado = agora
+            val progresso = ((agora - tempoInicioEsticado).toFloat() / TEMPO_PRA_LIMPAR)
+                .coerceIn(0f, 1f)
+            onGestoLimpar(progresso)
+
+            if ((agora - tempoInicioEsticado) >= TEMPO_PRA_LIMPAR
+                && (agora - ultimoTempoLimpar) > 2_000L) {
+                frase = ""; ultimaLetraAdicionada = ""; letraRepetidaPendente = ""
+                tempoInicioEsticado = 0L; ultimoTempoLimpar = agora
+                onRepeticaoPendente(null)
+                onFraseUpdate("")
+            }
+        } else {
+            tempoInicioEsticado = 0L
+            onGestoLimpar(0f)
+
+            val dados    = normalizeLandmarks(pontos)
+            captureCalibrationFrame(dados)
+            bufferLm.addLast(dados)
+            while (bufferLm.size > JANELA_MLP + 5) bufferLm.removeFirst()
+
+            val movimento = calcularMovimento()
+            val predicao = escolherClassificacao(dados, movimento)
+            val letraBruta = predicao.letra
+            val confianca = predicao.confianca
+            val modo = predicao.modo
+            emitirFeedbackAlfabeto(predicao, movimento)
+
+            // Suavização por votação: só aceita a letra se ela apareceu
+            // em pelo menos 2 dos últimos 3 frames analisados.
+            bufVotacao.addLast(letraBruta)
+            if (bufVotacao.size > 3) bufVotacao.removeFirst()
+            val letra = if (bufVotacao.count { it == letraBruta } >= 2) letraBruta else "-"
+
+            onLetra(letra, confianca, modo)
+
+            if (letra != "-") {
+                contadorEstabilidade = if (letra == ultimaPredicao) contadorEstabilidade + 1 else 1
+                ultimaPredicao = letra
+            } else {
+                contadorEstabilidade = 0
+                ultimaPredicao = ""
+            }
+
+            val agora    = System.currentTimeMillis()
+            val estabMin = if (modo == "dinamico") ESTAB_MIN_DINAMICO else ESTAB_MIN_ESTATICO
+            val cooldown = if (modo == "dinamico") COOLDOWN_DINAMICO  else COOLDOWN_ESTATICO
+
+            if (contadorEstabilidade >= estabMin
+                && letra != "-"
+                && letra != ultimaLetraAdicionada
+                && (agora - ultimoTempoAdicao) > cooldown) {
+                if (frase.lastOrNull()?.toString() == letra) {
+                    if (podeRepetirAutomaticamente(letra)) {
+                        frase += letra
+                        letraRepetidaPendente = ""
+                        onRepeticaoPendente(null)
+                        onFraseUpdate(frase)
+                    } else {
+                        letraRepetidaPendente = letra
+                        onRepeticaoPendente(letra)
+                    }
+                } else {
+                    frase += letra
+                    letraRepetidaPendente = ""
+                    onRepeticaoPendente(null)
+                    onFraseUpdate(frase)
+                }
+                ultimaLetraAdicionada = letra
+                ultimoTempoAdicao     = agora
+                contadorEstabilidade  = 0
+            }
+
+            if ((agora - ultimoTempoAdicao) > COOLDOWN_REPETICAO)
+                ultimaLetraAdicionada = ""
+        }
+
+        imageProxy.close()
+    }
+
+    // ── Rotacionar bitmap conforme a orientação da câmera ─────────────────
+    private fun rotateBitmap(bitmap: Bitmap, degrees: Float): Bitmap {
+        if (degrees == 0f) return bitmap
+        val matrix = android.graphics.Matrix().apply { postRotate(degrees) }
+        return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+    }
+
+    private fun normalizeLandmarks(pontos: List<Pair<Float, Float>>): FloatArray {
+        val baseX = pontos[0].first
+        val baseY = pontos[0].second
+        val norm  = FloatArray(pontos.size * 2)
+        for (i in pontos.indices) {
+            norm[i * 2 + 0] = pontos[i].first  - baseX
+            norm[i * 2 + 1] = pontos[i].second - baseY
+        }
+        val maxV = norm.map { abs(it) }.maxOrNull()?.takeIf { it > 0f } ?: 1f
+        return FloatArray(norm.size) { norm[it] / maxV }
+    }
+
+    private fun mirrorLandmarks(dados: FloatArray): FloatArray {
+        val mirrored = dados.copyOf()
+        for (i in mirrored.indices step 2) {
+            mirrored[i] = -mirrored[i]
+        }
+        return mirrored
+    }
+
+    private fun captureCalibrationFrame(dados: FloatArray) {
+        if (calibrationTarget == null) return
+        synchronized(calibrationLock) {
+            if (calibrationTarget == null) return
+            if (calibrationBuffer.size >= CALIBRATION_MAX_FRAMES) {
+                calibrationBuffer.removeAt(0)
+            }
+            calibrationBuffer.add(dados.copyOf())
+            val letra = calibrationTarget.orEmpty()
+            val total = calibrationBuffer.size
+            onFeedback("GRAVANDO $letra  $total/$CALIBRATION_TARGET_FRAMES", FEEDBACK_BOM)
+        }
+    }
+
+    private fun emitirFeedbackAlfabeto(prediction: Prediction, movimento: Float) {
+        if (calibrationTarget != null) return
+
+        val mensagem = when {
+            prediction.letra != "-" && prediction.confianca >= 0.92f -> "SINAL ESTAVEL"
+            prediction.letra != "-" && prediction.confianca >= 0.82f -> "SEGURE MAIS FIRME"
+            movimento > LIMIAR_MOVIMENTO -> "MOVIMENTO ALTO"
+            prediction.confianca >= 0.68f -> "QUASE: AJUSTE ANGULO"
+            else -> "APROXIME A MAO"
+        }
+        val nivel = when {
+            prediction.letra != "-" && prediction.confianca >= 0.90f -> FEEDBACK_BOM
+            prediction.confianca >= 0.72f -> FEEDBACK_NEUTRO
+            else -> FEEDBACK_ALERTA
+        }
+        onFeedback(mensagem, nivel)
+    }
+
+    private fun aplicarCalibracaoPessoal(dados: FloatArray, base: Prediction): Prediction {
+        val calibrado = melhorCalibracao(dados)
+        if (calibrado.letra == "-") return base
+
+        val deveUsarCalibrado = base.letra == "-" ||
+            calibrado.confianca >= base.confianca - CALIBRATION_OVERRIDE_GAP ||
+            calibrado.letra in LETRAS_ESTATICAS_DIFICEIS
+
+        return if (deveUsarCalibrado) calibrado else base
+    }
+
+    private fun melhorCalibracao(dados: FloatArray): Prediction {
+        val match = synchronized(calibrationLock) {
+            trainingStore.bestStaticMatch(
+                candidates = listOf(dados, mirrorLandmarks(dados)),
+                maxDistance = CALIBRATION_MATCH_LIMIT
+            )
+        } ?: return Prediction("-", 0f, "calibrado")
+
+        val score = (1f - match.distance / CALIBRATION_MATCH_LIMIT).coerceIn(0f, 1f)
+        val confianca = (0.86f + score * 0.13f).coerceAtMost(0.99f)
+        return Prediction(match.letter, confianca, "calibrado")
+    }
+
+    private fun averageFrames(frames: List<FloatArray>): FloatArray {
+        val result = FloatArray(FEATURES_ESTATICO)
+        if (frames.isEmpty()) return result
+        frames.forEach { frame ->
+            for (i in result.indices) {
+                result[i] += frame[i]
+            }
+        }
+        for (i in result.indices) {
+            result[i] = result[i] / frames.size.toFloat()
+        }
+        return result
+    }
+
+    private fun detectarDedosEsticados(lms: List<Pair<Float, Float>>): Boolean {
+        val M = 0.06f
+        return lms[8].second  < lms[5].second  - M &&
+               lms[12].second < lms[9].second  - M &&
+               lms[16].second < lms[13].second - M &&
+               lms[20].second < lms[17].second - M &&
+               abs(lms[4].first - lms[0].first) > 0.12f
+    }
+
+    private fun calcularMovimento(): Float {
+        if (bufferLm.size < 5) return 0f
+        val recent = bufferLm.toList().takeLast(5)
+        return std(recent.map { it[2] }) + std(recent.map { it[3] }) +
+               std(recent.map { it[16] }) + std(recent.map { it[17] })
+    }
+
+    private fun std(values: List<Float>): Float {
+        val mean = values.average().toFloat()
+        return sqrt(values.map { (it - mean) * (it - mean) }.average().toFloat())
+    }
+
+    private fun podeRepetirAutomaticamente(letra: String): Boolean {
+        if (letra !in LETRAS_REPETICAO_AUTO) return false
+        return frase.length < 2 || frase[frase.length - 2].toString() != letra
+    }
+
+    private fun escolherClassificacao(dados: FloatArray, movimento: Float): Prediction {
+        val estatico = classificarEstatico(dados)
+        val estaticoEspelhado = classificarEstatico(mirrorLandmarks(dados))
+        val melhorEstatico = if (estaticoEspelhado.confianca > estatico.confianca) {
+            estaticoEspelhado.copy(modo = "estatico espelhado")
+        } else {
+            estatico
+        }
+        val estaticoComCalibracao = if (movimento < LIMIAR_MOVIMENTO * 0.8f) {
+            aplicarCalibracaoPessoal(dados, melhorEstatico)
+        } else {
+            melhorEstatico
+        }
+        if (bufferLm.size < JANELA_MLP) return estaticoComCalibracao
+
+        val dinamico = classificarDinamico()
+        val dinamicoEspelhado = classificarDinamico(espelhar = true)
+        val melhorDinamico = if (dinamicoEspelhado.confianca > dinamico.confianca) {
+            dinamicoEspelhado.copy(modo = "dinamico espelhado")
+        } else {
+            dinamico
+        }
+        val dinamicoConfiavel = melhorDinamico.letra != "-" &&
+            movimento >= LIMIAR_MOVIMENTO &&
+            melhorDinamico.margem >= MARGEM_DINAMICA_MINIMA &&
+            (
+                (
+                    melhorDinamico.confianca >= CONFIANCA_DINAMICA &&
+                    (
+                        estaticoComCalibracao.letra == "-" ||
+                        melhorDinamico.confianca + MARGEM_DINAMICA_CONTRA_ESTATICO >= estaticoComCalibracao.confianca
+                    )
+                ) ||
+                (movimento >= LIMIAR_MOVIMENTO_FORTE && melhorDinamico.confianca >= CONFIANCA_DINAMICA_FORTE)
+            )
+
+        return if (dinamicoConfiavel) melhorDinamico else estaticoComCalibracao
+    }
+
+    private fun classificarEstatico(dados: FloatArray): Prediction {
+        val tensor = OnnxTensor.createTensor(
+            ortEnv, FloatBuffer.wrap(dados), longArrayOf(1, FEATURES_ESTATICO.toLong()))
+        val out    = sessionEstatico.run(mapOf("landmarks_input" to tensor))
+        @Suppress("UNCHECKED_CAST")
+        val probs  = (out[1].value as Array<FloatArray>)[0]
+        val idx    = probs.indices.maxByOrNull { probs[it] } ?: 0
+        val second = probs.indices
+            .filter { it != idx }
+            .maxOfOrNull { probs[it] } ?: 0f
+        val conf   = probs[idx]
+        val label  = labelsEstatico.getOrNull(idx)
+        val minimo = if (label in LETRAS_ESTATICAS_DIFICEIS) {
+            CONFIANCA_ESTATICA_DIFICIL
+        } else {
+            CONFIANCA_ESTATICA
+        }
+        val margem = conf - second
+        val letra  = if (label != null && conf >= minimo && margem >= MARGEM_ESTATICA_MINIMA) label else "-"
+        tensor.close(); out.close()
+        return Prediction(letra, conf, "estatico", margem)
+    }
+
+    private fun classificarDinamico(espelhar: Boolean = false): Prediction {
+        val entrada = FloatArray(FEATURES_DINAMICO)
+        bufferLm.toList().takeLast(JANELA_MLP).forEachIndexed { i, frame ->
+            val fonte = if (espelhar) mirrorLandmarks(frame) else frame
+            fonte.copyInto(entrada, i * FEATURES_ESTATICO)
+        }
+        val tensor = OnnxTensor.createTensor(
+            ortEnv, FloatBuffer.wrap(entrada), longArrayOf(1, FEATURES_DINAMICO.toLong()))
+        val out    = sessionDinamico.run(mapOf("landmarks_input" to tensor))
+        @Suppress("UNCHECKED_CAST")
+        val probs  = (out[1].value as Array<FloatArray>)[0]
+        val idx    = probs.indices.maxByOrNull { probs[it] } ?: 0
+        val second = probs.indices
+            .filter { it != idx }
+            .maxOfOrNull { probs[it] } ?: 0f
+        val conf   = probs[idx]
+        val margem = conf - second
+        val letra  = if (conf >= CONFIANCA_DINAMICA_FORTE && idx < labelsDinamico.size)
+                         labelsDinamico[idx] else "-"
+        tensor.close(); out.close()
+        return Prediction(letra, conf, "dinamico", margem)
+    }
+
+    private fun analisarCorpo(
+        handResult: com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarkerResult,
+        poseResult: com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarkerResult
+    ) {
+        val bodyFrame = extractBodyFrame(handResult, poseResult)
+        if (!bodyFrame.hasPose || !bodyFrame.hasHand) {
+            resetBodyCapture()
+            bodyNoHandSince = if (bodyNoHandSince == 0L) System.currentTimeMillis() else bodyNoHandSince
+            if (System.currentTimeMillis() - bodyNoHandSince > 1_500L) {
+                ultimaClasseCorpo = ""
+            }
+            onLetra("-", 0f, "corpo")
+            onFeedback("ENQUADRE CORPO E MAO", FEEDBACK_ALERTA)
+            onNoHand()
+            return
+        }
+
+        val normalized = normalizeBodyFrame(bodyFrame.points)
+        clearMissingHands(normalized, bodyFrame)
+        bodyMovementBuffer.addLast(normalized)
+        while (bodyMovementBuffer.size > BODY_MOV_WINDOW) bodyMovementBuffer.removeFirst()
+
+        val movimento = bodyMotion()
+        val movimentoMao = bodyHandMotion(bodyMovementBuffer.toList())
+        val agora = System.currentTimeMillis()
+        onGestoLimpar(0f)
+
+        if (bodyFrame.hasHand) {
+            bodyNoHandSince = 0L
+        } else {
+            if (bodyNoHandSince == 0L) bodyNoHandSince = agora
+            if (agora - bodyNoHandSince > 1_500L) {
+                ultimaClasseCorpo = ""
+            }
+        }
+
+        when (bodyState) {
+            BodyState.OCIOSO -> {
+                val gestoComecou = bodyMovementBuffer.size >= BODY_MOV_WINDOW &&
+                    movimento > BODY_START_MOTION &&
+                    movimentoMao.path >= BODY_START_HAND_PATH &&
+                    movimentoMao.range >= BODY_START_HAND_RANGE
+
+                if (gestoComecou) {
+                    bodyStartCount++
+                    if (bodyStartCount >= BODY_START_FRAMES) {
+                        bodyState = BodyState.CAPTURANDO
+                        bodyGestureBuffer.clear()
+                        bodyGestureBuffer.addAll(bodyMovementBuffer)
+                        bodyEndCount = 0
+                        onFeedback("CAPTURANDO GESTO", FEEDBACK_NEUTRO)
+                    }
+                } else {
+                    bodyStartCount = 0
+                    onFeedback("FAÇA O GESTO NO QUADRO", FEEDBACK_NEUTRO)
+                }
+            }
+            BodyState.CAPTURANDO -> {
+                bodyGestureBuffer.add(normalized)
+                bodyEndCount = if (movimento < BODY_END_MOTION) bodyEndCount + 1 else 0
+
+                if (bodyEndCount >= BODY_END_FRAMES || bodyGestureBuffer.size >= BODY_MAX_FRAMES) {
+                    val prediction = classifyBodyGesture(bodyGestureBuffer)
+                    bodyState = BodyState.OCIOSO
+                    bodyStartCount = 0
+                    bodyEndCount = 0
+                    bodyGestureBuffer.clear()
+
+                    if (prediction != null && isReliableBodyPrediction(prediction)) {
+                        onLetra(prediction.letra, prediction.confianca, "corpo")
+                        onFeedback("CORPO: ${traduzirCorpo(prediction.letra).uppercase()}", FEEDBACK_BOM)
+                        if (prediction.letra != "NEUTRO" &&
+                            prediction.letra != ultimaClasseCorpo &&
+                            agora - ultimoTempoCorpo > BODY_COOLDOWN) {
+                            val palavra = traduzirCorpo(prediction.letra)
+                            frase = (frase.trim() + " " + palavra).trim()
+                            ultimoTempoCorpo = agora
+                            ultimaClasseCorpo = prediction.letra
+                            onFraseUpdate(frase)
+                        }
+                    } else {
+                        onLetra("-", 0f, "corpo")
+                        onFeedback("REPITA MAIS DEVAGAR", FEEDBACK_ALERTA)
+                    }
+                }
+            }
+        }
+
+        if (bodyState == BodyState.OCIOSO) {
+            onLetra("-", 0f, "corpo")
+        }
+    }
+
+    private data class BodyFrame(
+        val points: FloatArray,
+        val hasHand: Boolean,
+        val hasPose: Boolean,
+        val hasLeftHand: Boolean,
+        val hasRightHand: Boolean
+    )
+
+    private data class BodyHandMotion(
+        val path: Float,
+        val range: Float
+    )
+
+    private fun extractBodyFrame(
+        handResult: com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarkerResult,
+        poseResult: com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarkerResult
+    ): BodyFrame {
+        val frame = FloatArray(BODY_FEATURES)
+        val poses = poseResult.landmarks()
+        val hasPose = poses.isNotEmpty()
+        if (poses.isNotEmpty()) {
+            poses[0].take(BODY_POSE_POINTS).forEachIndexed { index, lm ->
+                writeBodyPoint(frame, index, lm.x(), lm.y(), lm.z())
+            }
+        }
+
+        var hasHand = false
+        var hasLeftHand = false
+        var hasRightHand = false
+        handResult.landmarks().forEachIndexed { handIndex, landmarks ->
+            val handedness = handResult.handednesses().getOrNull(handIndex)
+                ?.firstOrNull()?.categoryName().orEmpty()
+            val offset = if (handedness.equals("Left", ignoreCase = true)) {
+                BODY_POSE_POINTS
+            } else if (handedness.equals("Right", ignoreCase = true)) {
+                BODY_POSE_POINTS + BODY_HAND_POINTS
+            } else {
+                val avgX = landmarks.map { it.x() }.average()
+                if (avgX < 0.5) BODY_POSE_POINTS else BODY_POSE_POINTS + BODY_HAND_POINTS
+            }
+            landmarks.take(BODY_HAND_POINTS).forEachIndexed { index, lm ->
+                writeBodyPoint(frame, offset + index, lm.x(), lm.y(), lm.z())
+            }
+            hasHand = true
+            if (offset == BODY_POSE_POINTS) {
+                hasLeftHand = true
+            } else {
+                hasRightHand = true
+            }
+        }
+
+        return BodyFrame(frame, hasHand, hasPose, hasLeftHand, hasRightHand)
+    }
+
+    private fun writeBodyPoint(frame: FloatArray, pointIndex: Int, x: Float, y: Float, z: Float) {
+        val base = pointIndex * 3
+        frame[base] = x
+        frame[base + 1] = y
+        frame[base + 2] = z
+    }
+
+    private fun normalizeBodyFrame(frame: FloatArray): FloatArray {
+        val normalized = frame.copyOf()
+        val leftShoulder = BODY_POINT_LEFT_SHOULDER * 3
+        val rightShoulder = BODY_POINT_RIGHT_SHOULDER * 3
+        val centerX = (frame[leftShoulder] + frame[rightShoulder]) / 2f
+        val centerY = (frame[leftShoulder + 1] + frame[rightShoulder + 1]) / 2f
+        val dx = frame[leftShoulder] - frame[rightShoulder]
+        val dy = frame[leftShoulder + 1] - frame[rightShoulder + 1]
+        val scale = sqrt(dx * dx + dy * dy).takeIf { it > 0.0001f } ?: 1f
+        for (point in 0 until BODY_TOTAL_POINTS) {
+            val base = point * 3
+            normalized[base] = (normalized[base] - centerX) / scale
+            normalized[base + 1] = (normalized[base + 1] - centerY) / scale
+        }
+        return normalized
+    }
+
+    private fun clearMissingHands(frame: FloatArray, bodyFrame: BodyFrame) {
+        if (!bodyFrame.hasLeftHand) clearHandBlock(frame, BODY_POSE_POINTS)
+        if (!bodyFrame.hasRightHand) clearHandBlock(frame, BODY_POSE_POINTS + BODY_HAND_POINTS)
+    }
+
+    private fun clearHandBlock(frame: FloatArray, offset: Int) {
+        for (point in offset until offset + BODY_HAND_POINTS) {
+            val base = point * 3
+            frame[base] = 0f
+            frame[base + 1] = 0f
+            frame[base + 2] = 0f
+        }
+    }
+
+    private fun bodyMotion(): Float {
+        if (bodyMovementBuffer.size < 3) return 0f
+        var total = 0f
+        var count = 0
+        for (point in BODY_POSE_POINTS until BODY_TOTAL_POINTS) {
+            for (coord in 0..1) {
+                val values = bodyMovementBuffer.map { it[point * 3 + coord] }
+                total += std(values)
+                count++
+            }
+        }
+        return if (count == 0) 0f else total / count
+    }
+
+    private fun classifyBodyGesture(frames: List<FloatArray>): Prediction? {
+        if (frames.size < BODY_MIN_FRAMES || labelsCorpo.isEmpty()) return null
+        val movimentoMao = bodyHandMotion(frames)
+        if (movimentoMao.path < BODY_GESTURE_HAND_PATH ||
+            movimentoMao.range < BODY_GESTURE_HAND_RANGE) return null
+        if (bodyGestureVariation(frames) < BODY_GESTURE_VARIATION) return null
+
+        val sampled = resampleBodyFrames(frames, BODY_WINDOW)
+        val input = Array(1) { Array(BODY_WINDOW) { FloatArray(BODY_FEATURES) } }
+        sampled.forEachIndexed { index, frame ->
+            frame.copyInto(input[0][index])
+        }
+        val output = Array(1) { FloatArray(labelsCorpo.size) }
+        bodyInterpreter.run(input, output)
+        val probs = output[0]
+        val idx = probs.indices.maxByOrNull { probs[it] } ?: return null
+        val second = probs.indices
+            .filter { it != idx }
+            .maxOfOrNull { probs[it] } ?: 0f
+        return Prediction(labelsCorpo[idx], probs[idx], "corpo", probs[idx] - second)
+    }
+
+    private fun isReliableBodyPrediction(prediction: Prediction): Boolean {
+        return prediction.letra != "-" &&
+            prediction.confianca >= BODY_CONFIDENCE &&
+            prediction.margem >= BODY_CONFIDENCE_MARGIN
+    }
+
+    private fun bodyGestureVariation(frames: List<FloatArray>): Float {
+        if (frames.size < BODY_MIN_FRAMES) return 0f
+        var total = 0f
+        var count = 0
+        for (point in BODY_POSE_POINTS until BODY_TOTAL_POINTS) {
+            for (coord in 0..1) {
+                total += std(frames.map { it[point * 3 + coord] })
+                count++
+            }
+        }
+        return if (count == 0) 0f else total / count
+    }
+
+    private fun bodyHandMotion(frames: List<FloatArray>): BodyHandMotion {
+        if (frames.size < 2) return BodyHandMotion(0f, 0f)
+        val left = handBlockMotion(frames, BODY_POSE_POINTS)
+        val right = handBlockMotion(frames, BODY_POSE_POINTS + BODY_HAND_POINTS)
+        return if (left.path + left.range >= right.path + right.range) left else right
+    }
+
+    private fun handBlockMotion(frames: List<FloatArray>, offset: Int): BodyHandMotion {
+        val centers = frames.mapNotNull { handCenter(it, offset) }
+        if (centers.size < 2) return BodyHandMotion(0f, 0f)
+
+        var path = 0f
+        for (i in 1 until centers.size) {
+            path += distance(centers[i - 1], centers[i])
+        }
+
+        val minX = centers.minOf { it.first }
+        val maxX = centers.maxOf { it.first }
+        val minY = centers.minOf { it.second }
+        val maxY = centers.maxOf { it.second }
+        val range = sqrt((maxX - minX) * (maxX - minX) + (maxY - minY) * (maxY - minY))
+        return BodyHandMotion(path, range)
+    }
+
+    private fun handCenter(frame: FloatArray, offset: Int): Pair<Float, Float>? {
+        var x = 0f
+        var y = 0f
+        var count = 0
+        for (point in offset until offset + BODY_HAND_POINTS) {
+            val base = point * 3
+            val px = frame[base]
+            val py = frame[base + 1]
+            if (px != 0f || py != 0f) {
+                x += px
+                y += py
+                count++
+            }
+        }
+        if (count < 8) return null
+        return Pair(x / count, y / count)
+    }
+
+    private fun distance(a: Pair<Float, Float>, b: Pair<Float, Float>): Float {
+        val dx = a.first - b.first
+        val dy = a.second - b.second
+        return sqrt(dx * dx + dy * dy)
+    }
+
+    private fun resetBodyCapture() {
+        bodyState = BodyState.OCIOSO
+        bodyStartCount = 0
+        bodyEndCount = 0
+        bodyMovementBuffer.clear()
+        bodyGestureBuffer.clear()
+    }
+
+    private fun resampleBodyFrames(frames: List<FloatArray>, count: Int): List<FloatArray> {
+        if (frames.size == count) return frames
+        return List(count) { index ->
+            val sourceIndex = ((frames.size - 1) * index.toFloat() / (count - 1)).toInt()
+            frames[sourceIndex]
+        }
+    }
+
+    private fun traduzirCorpo(label: String): String {
+        return when (label.uppercase()) {
+            "AJUDAR" -> "ajuda"
+            "COMPUTADOR" -> "computador"
+            "CONVERSAR" -> "conversa"
+            "PESSOA" -> "pessoa"
+            "SURDO" -> "surdo"
+            else -> label.lowercase()
+        }
+    }
+
+    fun setModo(novoModo: Modo) {
+        modoAtual = novoModo
+        bodyState = BodyState.OCIOSO
+        bodyStartCount = 0
+        bodyEndCount = 0
+        bodyMovementBuffer.clear()
+        bodyGestureBuffer.clear()
+        ultimaClasseCorpo = ""
+        bodyNoHandSince = 0L
+        ultimaPredicao = ""
+        contadorEstabilidade = 0
+        letraRepetidaPendente = ""
+        onRepeticaoPendente(null)
+        onLetra("-", 0f, novoModo.name.lowercase())
+        if (novoModo == Modo.CORPO) {
+            onFeedback("MODO CORPO: ENQUADRE TRONCO E MAO", FEEDBACK_NEUTRO)
+        } else {
+            onFeedback("MODO LIBRAS: CENTRALIZE A MAO", FEEDBACK_NEUTRO)
+        }
+    }
+
+    fun startCalibration(letra: String) {
+        synchronized(calibrationLock) {
+            calibrationTarget = letra.uppercase()
+            calibrationBuffer.clear()
+        }
+        onFeedback("CALIBRANDO ${letra.uppercase()}: SEGURE A MAO", FEEDBACK_NEUTRO)
+    }
+
+    fun finishCalibration(): Boolean {
+        synchronized(calibrationLock) {
+            val letra = calibrationTarget ?: return false
+            if (calibrationBuffer.size < CALIBRATION_MIN_FRAMES) {
+                onFeedback("POUCAS AMOSTRAS PARA $letra", FEEDBACK_ALERTA)
+                return false
+            }
+
+            val frames = calibrationBuffer.map { it.copyOf() }
+            if (letra in labelsDinamico) {
+                val sequencias = trainingStore.saveDynamicSamples(letra, frames)
+                if (sequencias == 0) {
+                    onFeedback("MOVIMENTE MAIS PARA $letra", FEEDBACK_ALERTA)
+                    return false
+                }
+                trainingStore.incrementSampleCount(letra, sequencias)
+            } else {
+                val referencia = averageFrames(frames)
+                trainingStore.saveStaticCalibration(letra, referencia)
+                trainingStore.saveStaticSamples(letra, frames)
+                trainingStore.incrementSampleCount(letra, frames.size)
+            }
+
+            calibrationTarget = null
+            calibrationBuffer.clear()
+            onFeedback("$letra SALVA PARA TREINO", FEEDBACK_BOM)
+            return true
+        }
+    }
+
+    fun cancelCalibration() {
+        synchronized(calibrationLock) {
+            calibrationTarget = null
+            calibrationBuffer.clear()
+        }
+    }
+
+    fun getCalibrationCount(): Int {
+        synchronized(calibrationLock) {
+            return trainingStore.calibrationCount()
+        }
+    }
+
+    fun getCalibrationFrameCount(): Int {
+        synchronized(calibrationLock) {
+            return calibrationBuffer.size
+        }
+    }
+
+    fun getTrainingSampleCount(letra: String? = null): Int {
+        if (letra != null) {
+            return trainingStore.sampleCount(letra)
+        }
+        return trainingStore.totalSampleCount()
+    }
+
+    fun getTrainingDatasetPath(): String {
+        return trainingStore.staticDatasetPath()
+    }
+
+    fun getDynamicTrainingDatasetPath(): String {
+        return trainingStore.dynamicDatasetPath()
+    }
+
+    fun clearTrainingData() {
+        synchronized(calibrationLock) {
+            calibrationTarget = null
+            calibrationBuffer.clear()
+            trainingStore.clear()
+        }
+        onFeedback("TREINO ZERADO", FEEDBACK_NEUTRO)
+    }
+
+    fun aplicarSugestao(palavra: String) {
+        val sugestao = palavra.trim()
+        if (sugestao.isBlank()) return
+
+        val prefixo = frase.substringBeforeLast(" ", missingDelimiterValue = "")
+        frase = if (prefixo.isBlank()) {
+            "$sugestao "
+        } else {
+            "$prefixo $sugestao "
+        }
+
+        ultimaPredicao = ""
+        contadorEstabilidade = 0
+        ultimaLetraAdicionada = ""
+        letraRepetidaPendente = ""
+        onRepeticaoPendente(null)
+        onFraseUpdate(frase)
+    }
+
+    fun adicionarEspaco()  { frase += " "; letraRepetidaPendente = ""; onRepeticaoPendente(null); onFraseUpdate(frase) }
+    fun repetirLetraPendente() {
+        if (letraRepetidaPendente.isNotBlank()) {
+            frase += letraRepetidaPendente
+            letraRepetidaPendente = ""
+            ultimaLetraAdicionada = ""
+            onRepeticaoPendente(null)
+            onFraseUpdate(frase)
+        }
+    }
+    fun apagarUltima()     { if (frase.isNotEmpty()) { frase = frase.dropLast(1); letraRepetidaPendente = ""; ultimaLetraAdicionada = ""; onRepeticaoPendente(null); onFraseUpdate(frase) } }
+    fun limparFrase()      { frase = ""; letraRepetidaPendente = ""; ultimaLetraAdicionada = ""; onRepeticaoPendente(null); onFraseUpdate(frase) }
+    fun getFrase(): String = frase
+
+    fun close() {
+        handLandmarker.close()
+        poseLandmarker.close()
+        bodyInterpreter.close()
+        flexDelegate.close()
+        sessionEstatico.close()
+        sessionDinamico.close()
+        ortEnv.close()
+    }
+
+    private fun loadAssetBuffer(assetName: String): ByteBuffer {
+        val bytes = context.assets.open(assetName).use { it.readBytes() }
+        return ByteBuffer.allocateDirect(bytes.size)
+            .order(ByteOrder.nativeOrder())
+            .put(bytes)
+            .also { it.rewind() }
+    }
+
+}

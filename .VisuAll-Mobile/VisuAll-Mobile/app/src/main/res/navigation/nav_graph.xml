@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<navigation xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/nav_graph"
+    app:startDestination="@id/nav_camera">
+    <fragment
+        android:id="@+id/nav_camera"
+        android:name="com.visuall.app.camera.CameraFragment"
+        android:label="Camera">
+        <action
+            android:id="@+id/action_camera_to_libras"
+            app:destination="@id/nav_libras"
+            app:enterAnim="@anim/slide_in_up"
+            app:exitAnim="@anim/fade_out" />
+    </fragment>
+    <fragment
+        android:id="@+id/nav_libras"
+        android:name="com.visuall.app.libras.LibrasFragment"
+        android:label="Libras">
+        <action
+            android:id="@+id/action_libras_to_camera"
+            app:destination="@id/nav_camera"
+            app:launchSingleTop="true"
+            app:popUpTo="@id/nav_camera"
+            app:popUpToInclusive="false"
+            app:enterAnim="@anim/fade_in"
+            app:exitAnim="@anim/slide_out_down" />
+    </fragment>
+</navigation>

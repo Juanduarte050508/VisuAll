@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">VisuAll</string>
+    <string name="perm_camera_title">Permissão de câmera</string>
+    <string name="perm_camera_msg">Este app precisa da câmera para funcionar.</string>
+    <string name="perm_grant">Conceder</string>
+</resources>

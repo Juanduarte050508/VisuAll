@@ -1,0 +1,36 @@
+# Android / Gradle
+.gradle/
+build/
+app/build/
+local.properties
+
+# IDE / local machine
+.idea/
+.vscode/
+*.iml
+
+# Python environments and caches
+tools/drive_env/
+tools/training_env/
+tools/__pycache__/
+__pycache__/
+*.pyc
+
+# Large app packages
+*.aab
+*.apk
+*.zip
+*.mp4
+*.pdf
+
+# Generated project artifacts
+output/
+tmp/
+release_demo_v*/
+Versoes_Android/
+drive_exports/
+drive_reports/
+training_exports/
+model_exports/
+model_backups/
+body_exports/

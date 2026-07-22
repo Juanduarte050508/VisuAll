@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Canto TL -->
+    <item android:gravity="top|start">
+        <layer-list>
+            <item android:width="40dp" android:height="3dp">
+                <shape><solid android:color="#E6A817"/></shape>
+            </item>
+            <item android:width="3dp" android:height="40dp">
+                <shape><solid android:color="#E6A817"/></shape>
+            </item>
+        </layer-list>
+    </item>
+    <!-- Canto TR -->
+    <item android:gravity="top|end">
+        <layer-list>
+            <item android:width="40dp" android:height="3dp">
+                <shape><solid android:color="#E6A817"/></shape>
+            </item>
+            <item android:gravity="end" android:width="3dp" android:height="40dp">
+                <shape><solid android:color="#E6A817"/></shape>
+            </item>
+        </layer-list>
+    </item>
+    <!-- Canto BL -->
+    <item android:gravity="bottom|start">
+        <layer-list>
+            <item android:width="40dp" android:height="3dp">
+                <shape><solid android:color="#E6A817"/></shape>
+            </item>
+            <item android:width="3dp" android:height="40dp">
+                <shape><solid android:color="#E6A817"/></shape>
+            </item>
+        </layer-list>
+    </item>
+    <!-- Canto BR -->
+    <item android:gravity="bottom|end">
+        <layer-list>
+            <item android:width="40dp" android:height="3dp">
+                <shape><solid android:color="#E6A817"/></shape>
+            </item>
+            <item android:gravity="end" android:width="3dp" android:height="40dp">
+                <shape><solid android:color="#E6A817"/></shape>
+            </item>
+        </layer-list>
+    </item>
+</layer-list>
