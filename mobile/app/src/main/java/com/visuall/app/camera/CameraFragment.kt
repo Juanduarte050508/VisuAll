@@ -97,14 +97,18 @@ class CameraFragment : Fragment() {
 
     // ── Câmera ─────────────────────────────────────────────────────────────
     private fun startCamera() {
-        val future = ProcessCameraProvider.getInstance(requireContext())
+        val context = context ?: return
+        val future = ProcessCameraProvider.getInstance(context)
         future.addListener({
+            if (_binding == null || !isAdded) return@addListener
             cameraProvider = future.get()
             bindCamera()
-        }, ContextCompat.getMainExecutor(requireContext()))
+        }, ContextCompat.getMainExecutor(context))
     }
 
     private fun bindCamera() {
+        val currentBinding = _binding ?: return
+        if (!isAdded || view == null) return
         val provider = cameraProvider ?: return
         val selector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
 
@@ -120,7 +124,7 @@ class CameraFragment : Fragment() {
         val preview = Preview.Builder()
             .setResolutionSelector(resolutionSelector)
             .build()
-            .also { it.setSurfaceProvider(binding.previewView.surfaceProvider) }
+            .also { it.setSurfaceProvider(currentBinding.previewView.surfaceProvider) }
 
         try {
             provider.unbindAll()
@@ -202,6 +206,7 @@ class CameraFragment : Fragment() {
         binding.modeFoto.setOnClickListener    { selectMode("FOTO") }
         binding.modeVideo.setOnClickListener   { selectMode("VIDEO") }
         binding.btnLibrasMode.setOnClickListener {
+            releaseCamera()
             findNavController().navigate(R.id.action_camera_to_libras)
         }
 
@@ -374,10 +379,29 @@ class CameraFragment : Fragment() {
         }
     }
 
+    private fun releaseCamera() {
+        try {
+            recording?.stop()
+            recording = null
+            isRecording = false
+            cameraProvider?.unbindAll()
+            camera = null
+            imageCapture = null
+            videoCapture = null
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        releaseCamera()
+    }
+
     override fun onDestroyView() {
         super.onDestroyView()
         timerHandler.removeCallbacks(timerRunnable)
-        recording?.stop()
+        releaseCamera()
         zoomStateObserver?.let { observer ->
             zoomStateLiveData?.removeObserver(observer)
         }
@@ -387,3 +411,4 @@ class CameraFragment : Fragment() {
         _binding = null
     }
 }
+

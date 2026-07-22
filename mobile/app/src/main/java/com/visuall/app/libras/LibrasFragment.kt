@@ -141,14 +141,37 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
             bindCamera()
         }, ContextCompat.getMainExecutor(requireContext()))
     }
+    private fun cameraSelectorForAvailableLens(preferredLensFacing: Int): CameraSelector {
+        val provider = cameraProvider
+        val preferred = CameraSelector.Builder()
+            .requireLensFacing(preferredLensFacing)
+            .build()
+        if (provider == null || runCatching { provider.hasCamera(preferred) }.getOrDefault(false)) {
+            return preferred
+        }
+
+        val fallbackLensFacing = if (preferredLensFacing == CameraSelector.LENS_FACING_FRONT) {
+            CameraSelector.LENS_FACING_BACK
+        } else {
+            CameraSelector.LENS_FACING_FRONT
+        }
+        val fallback = CameraSelector.Builder()
+            .requireLensFacing(fallbackLensFacing)
+            .build()
+        return if (runCatching { provider.hasCamera(fallback) }.getOrDefault(false)) {
+            lensFacing = fallbackLensFacing
+            fallback
+        } else {
+            preferred
+        }
+    }
 
     private fun bindCamera() {
         val provider = cameraProvider ?: return
         if (!isAdded || _binding == null) return
 
-        val selector = CameraSelector.Builder()
-            .requireLensFacing(lensFacing)
-            .build()
+        val requestedLensFacing = lensFacing
+        val selector = cameraSelectorForAvailableLens(requestedLensFacing)
 
         val preview = Preview.Builder().build().also { p ->
             p.setSurfaceProvider(binding.previewView.surfaceProvider)
@@ -162,34 +185,44 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         // Desvincula câmera (para entrega de frames no pipeline)
         provider.unbindAll()
 
-        // Fecha o analyzer antigo APÓS unbindAll — nenhum frame novo chegará
-        oldAnalyzer?.close()
-
         // Recria executor se foi encerrado
         if (cameraExecutor.isShutdown) {
             cameraExecutor = Executors.newSingleThreadExecutor()
         }
 
-        // Cria novo analyzer
-        librasAnalyzer = LibrasAnalyzer(
-            context       = requireContext(),
-            onLetra       = { letra, conf, _ -> onLetraDetectada(letra, conf) },
-            onFraseUpdate = { frase -> onFraseAtualizada(frase) },
-            onNoHand      = { onSemMao() },
-            onGestoLimpar = { prog -> onGestoLimpar(prog) },
-            onRepeticaoPendente = { letra -> onRepeticaoPendente(letra) },
-            onFeedback = { mensagem, nivel -> onFeedback(mensagem, nivel) }
-        ).also { it.setModo(modoAtual) }
-
         val analysis = ImageAnalysis.Builder()
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
             .build()
-            .also { ia -> ia.setAnalyzer(cameraExecutor, librasAnalyzer!!) }
 
         try {
             provider.bindToLifecycle(viewLifecycleOwner, selector, preview, analysis)
         } catch (e: Exception) {
             e.printStackTrace()
+            oldAnalyzer?.close()
+            return
+        }
+
+        val appContext = requireContext().applicationContext
+        cameraExecutor.execute {
+            oldAnalyzer?.close()
+
+            val newAnalyzer = LibrasAnalyzer(
+                context       = appContext,
+                onLetra       = { letra, conf, _ -> onLetraDetectada(letra, conf) },
+                onFraseUpdate = { frase -> onFraseAtualizada(frase) },
+                onNoHand      = { onSemMao() },
+                onGestoLimpar = { prog -> onGestoLimpar(prog) },
+                onRepeticaoPendente = { letra -> onRepeticaoPendente(letra) },
+                onFeedback = { mensagem, nivel -> onFeedback(mensagem, nivel) }
+            ).also { it.setModo(modoAtual) }
+
+            if (!isAdded || _binding == null || cameraExecutor.isShutdown) {
+                newAnalyzer.close()
+                return@execute
+            }
+
+            librasAnalyzer = newAnalyzer
+            analysis.setAnalyzer(cameraExecutor, newAnalyzer)
         }
     }
 

@@ -118,10 +118,10 @@ class LibrasAnalyzer(
     )
 
     private val handLandmarker: HandLandmarker
-    private val poseLandmarker: PoseLandmarker
-    private val flexDelegate = FlexDelegate()
-    private val bodyInterpreter: Interpreter
-    private val labelsCorpo: List<String>
+    private var poseLandmarker: PoseLandmarker? = null
+    private var flexDelegate: FlexDelegate? = null
+    private var bodyInterpreter: Interpreter? = null
+    private var labelsCorpo: List<String> = emptyList()
     @Volatile private var modoAtual = Modo.ALFABETO
 
     init {
@@ -141,27 +141,6 @@ class LibrasAnalyzer(
             .build()
 
         handLandmarker = HandLandmarker.createFromOptions(context, options)
-
-        val poseBaseOptions = BaseOptions.builder()
-            .setModelAssetPath("pose_landmarker_lite.task")
-            .build()
-        val poseOptions = PoseLandmarkerOptions.builder()
-            .setBaseOptions(poseBaseOptions)
-            .setRunningMode(RunningMode.IMAGE)
-            .setMinPoseDetectionConfidence(0.35f)
-            .setMinPosePresenceConfidence(0.35f)
-            .setMinTrackingConfidence(0.35f)
-            .build()
-        poseLandmarker = PoseLandmarker.createFromOptions(context, poseOptions)
-
-        bodyInterpreter = Interpreter(
-            loadAssetBuffer("body_model.tflite"),
-            Interpreter.Options().addDelegate(flexDelegate)
-        )
-        bodyInterpreter.resizeInput(0, intArrayOf(1, BODY_WINDOW, BODY_FEATURES))
-        bodyInterpreter.allocateTensors()
-        labelsCorpo = context.assets.open("body_labels.txt")
-            .bufferedReader().readLines().filter { it.isNotBlank() }
     }
 
     private val ortEnv          = OrtEnvironment.getEnvironment()
@@ -212,7 +191,14 @@ class LibrasAnalyzer(
         val result = handLandmarker.detect(mpImage)
 
         if (modoAtual == Modo.CORPO) {
-            val poseResult = poseLandmarker.detect(mpImage)
+            val poseDetector = ensureBodyModelsLoaded()
+            if (poseDetector == null) {
+                onLetra("-", 0f, "corpo")
+                onFeedback("MODELO DE CORPO INDISPONIVEL", FEEDBACK_ALERTA)
+                imageProxy.close()
+                return
+            }
+            val poseResult = poseDetector.detect(mpImage)
             analisarCorpo(result, poseResult)
             imageProxy.close()
             return
@@ -327,6 +313,45 @@ class LibrasAnalyzer(
         if (degrees == 0f) return bitmap
         val matrix = android.graphics.Matrix().apply { postRotate(degrees) }
         return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+    }
+    private fun ensureBodyModelsLoaded(): PoseLandmarker? {
+        poseLandmarker?.let { return it }
+
+        return try {
+            val poseBaseOptions = BaseOptions.builder()
+                .setModelAssetPath("pose_landmarker_lite.task")
+                .build()
+            val poseOptions = PoseLandmarkerOptions.builder()
+                .setBaseOptions(poseBaseOptions)
+                .setRunningMode(RunningMode.IMAGE)
+                .setMinPoseDetectionConfidence(0.35f)
+                .setMinPosePresenceConfidence(0.35f)
+                .setMinTrackingConfidence(0.35f)
+                .build()
+            val loadedPose = PoseLandmarker.createFromOptions(context, poseOptions)
+            val loadedDelegate = FlexDelegate()
+            val loadedInterpreter = Interpreter(
+                loadAssetBuffer("body_model.tflite"),
+                Interpreter.Options().addDelegate(loadedDelegate)
+            )
+            loadedInterpreter.resizeInput(0, intArrayOf(1, BODY_WINDOW, BODY_FEATURES))
+            loadedInterpreter.allocateTensors()
+
+            labelsCorpo = context.assets.open("body_labels.txt")
+                .bufferedReader().readLines().filter { it.isNotBlank() }
+            flexDelegate = loadedDelegate
+            bodyInterpreter = loadedInterpreter
+            poseLandmarker = loadedPose
+            loadedPose
+        } catch (error: Throwable) {
+            poseLandmarker = null
+            bodyInterpreter?.close()
+            bodyInterpreter = null
+            flexDelegate?.close()
+            flexDelegate = null
+            labelsCorpo = emptyList()
+            null
+        }
     }
 
     private fun normalizeLandmarks(pontos: List<Pair<Float, Float>>): FloatArray {
@@ -730,7 +755,9 @@ class LibrasAnalyzer(
     }
 
     private fun classifyBodyGesture(frames: List<FloatArray>): Prediction? {
-        if (frames.size < BODY_MIN_FRAMES || labelsCorpo.isEmpty()) return null
+        val interpreter = bodyInterpreter ?: return null
+        val labels = labelsCorpo
+        if (frames.size < BODY_MIN_FRAMES || labels.isEmpty()) return null
         val movimentoMao = bodyHandMotion(frames)
         if (movimentoMao.path < BODY_GESTURE_HAND_PATH ||
             movimentoMao.range < BODY_GESTURE_HAND_RANGE) return null
@@ -741,14 +768,14 @@ class LibrasAnalyzer(
         sampled.forEachIndexed { index, frame ->
             frame.copyInto(input[0][index])
         }
-        val output = Array(1) { FloatArray(labelsCorpo.size) }
-        bodyInterpreter.run(input, output)
+        val output = Array(1) { FloatArray(labels.size) }
+        interpreter.run(input, output)
         val probs = output[0]
         val idx = probs.indices.maxByOrNull { probs[it] } ?: return null
         val second = probs.indices
             .filter { it != idx }
             .maxOfOrNull { probs[it] } ?: 0f
-        return Prediction(labelsCorpo[idx], probs[idx], "corpo", probs[idx] - second)
+        return Prediction(labels[idx], probs[idx], "corpo", probs[idx] - second)
     }
 
     private fun isReliableBodyPrediction(prediction: Prediction): Boolean {
@@ -982,9 +1009,9 @@ class LibrasAnalyzer(
 
     fun close() {
         handLandmarker.close()
-        poseLandmarker.close()
-        bodyInterpreter.close()
-        flexDelegate.close()
+        poseLandmarker?.close()
+        bodyInterpreter?.close()
+        flexDelegate?.close()
         sessionEstatico.close()
         sessionDinamico.close()
         ortEnv.close()
@@ -999,3 +1026,5 @@ class LibrasAnalyzer(
     }
 
 }
+
+

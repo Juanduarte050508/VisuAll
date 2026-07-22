@@ -14,3 +14,8 @@ venv/
 .env
 .DS_Store
 Thumbs.db
+
+# IDE
+.idea/
+*.iml
+.vscode/
