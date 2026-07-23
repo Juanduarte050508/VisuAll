@@ -5,6 +5,7 @@ import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import android.content.Context
 import android.graphics.Bitmap
+import android.os.SystemClock
 import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
@@ -137,7 +138,11 @@ class LibrasAnalyzer(
             .setMinHandDetectionConfidence(0.4f)
             .setMinHandPresenceConfidence(0.4f)
             .setMinTrackingConfidence(0.4f)
-            .setRunningMode(RunningMode.IMAGE)
+            // VIDEO em vez de IMAGE: mantém rastreamento temporal entre frames.
+            // Isso reduz o "tremor" dos landmarks (jitter) e a latência, porque
+            // o detector reaproveita a região da mão do frame anterior em vez de
+            // refazer a detecção completa toda vez — igual ao Holistic do Python.
+            .setRunningMode(RunningMode.VIDEO)
             .build()
 
         handLandmarker = HandLandmarker.createFromOptions(context, options)
@@ -180,6 +185,15 @@ class LibrasAnalyzer(
     private var ultimoTempoCorpo      = 0L
     private var ultimaClasseCorpo     = ""
     private var bodyNoHandSince       = 0L
+    // Timestamp monotônico exigido pelo modo VIDEO do MediaPipe. Precisa ser
+    // estritamente crescente a cada frame para o rastreamento funcionar.
+    private var videoTimestamp        = 0L
+
+    private fun nextVideoTimestamp(): Long {
+        val now = SystemClock.uptimeMillis()
+        videoTimestamp = if (now <= videoTimestamp) videoTimestamp + 1 else now
+        return videoTimestamp
+    }
 
     @ExperimentalGetImage
     override fun analyze(imageProxy: ImageProxy) {
@@ -188,7 +202,8 @@ class LibrasAnalyzer(
         val rotatedBitmap = rotateBitmap(bitmap, imageProxy.imageInfo.rotationDegrees.toFloat())
         val mpImage = BitmapImageBuilder(rotatedBitmap).build()
 
-        val result = handLandmarker.detect(mpImage)
+        val timestamp = nextVideoTimestamp()
+        val result = handLandmarker.detectForVideo(mpImage, timestamp)
 
         if (modoAtual == Modo.CORPO) {
             val poseDetector = ensureBodyModelsLoaded()
@@ -198,7 +213,7 @@ class LibrasAnalyzer(
                 imageProxy.close()
                 return
             }
-            val poseResult = poseDetector.detect(mpImage)
+            val poseResult = poseDetector.detectForVideo(mpImage, timestamp)
             analisarCorpo(result, poseResult)
             imageProxy.close()
             return
@@ -323,7 +338,7 @@ class LibrasAnalyzer(
                 .build()
             val poseOptions = PoseLandmarkerOptions.builder()
                 .setBaseOptions(poseBaseOptions)
-                .setRunningMode(RunningMode.IMAGE)
+                .setRunningMode(RunningMode.VIDEO)
                 .setMinPoseDetectionConfidence(0.35f)
                 .setMinPosePresenceConfidence(0.35f)
                 .setMinTrackingConfidence(0.35f)
