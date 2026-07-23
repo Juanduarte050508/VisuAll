@@ -42,6 +42,9 @@ class LibrasAnalyzer(
 
     companion object {
         const val JANELA_MLP             = 10
+        // Lado menor da imagem enviada ao MediaPipe. Igual à referência Python
+        // (480x360). Reduzir a resolução é o que mais acelera a inferência.
+        const val INPUT_SHORT_SIDE       = 360
         // Alinhado ao pipeline Python de referência (que já funcionava bem):
         // uma única confiança mínima de 0.90 vale para estático e dinâmico.
         const val CONFIANCA_MINIMA       = 0.90f
@@ -321,14 +324,21 @@ class LibrasAnalyzer(
     }
 
     // ── Preparar o bitmap para o MediaPipe ────────────────────────────────
-    // 1) rotaciona para deixar a pessoa em pé;
-    // 2) espelha na horizontal na câmera frontal (para casar com o dataset,
-    //    que foi gravado espelhado).
+    // 1) reduz a resolução (lado menor -> INPUT_SHORT_SIDE, como o Python fazia
+    //    com 480x360): a inferência do MediaPipe/ONNX é o gargalo, e o custo
+    //    cresce com o tamanho da imagem. Reduzir acelera MUITO sem desalinhar o
+    //    overlay (landmarks vêm normalizados 0..1) nem mudar as features;
+    // 2) rotaciona para deixar a pessoa em pé;
+    // 3) espelha na horizontal na câmera frontal (para casar com o dataset).
     // A proporção 4:3 do treino é corrigida depois, no nível das features
-    // (ver aspectX), o que mantém os landmarks no espaço real do preview e
-    // permite desenhar as linhas de reconhecimento alinhadas.
+    // (ver aspectX).
     private fun prepararBitmap(src: Bitmap, degrees: Float, espelhar: Boolean): Bitmap {
+        val shortSide = minOf(src.width, src.height)
+        val escala = if (shortSide > INPUT_SHORT_SIDE) {
+            INPUT_SHORT_SIDE.toFloat() / shortSide
+        } else 1f
         val matrix = Matrix()
+        if (escala != 1f) matrix.postScale(escala, escala)
         if (degrees != 0f) matrix.postRotate(degrees)
         if (espelhar) matrix.postScale(-1f, 1f)
         if (matrix.isIdentity) return src
