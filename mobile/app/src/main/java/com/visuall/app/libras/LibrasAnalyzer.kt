@@ -65,20 +65,16 @@ class LibrasAnalyzer(
         const val BODY_MOV_WINDOW        = 5
         const val BODY_POINT_LEFT_SHOULDER = 11
         const val BODY_POINT_RIGHT_SHOULDER = 12
-        const val BODY_START_MOTION      = 0.045f
+        // Valores de referência do pipeline Python (modo corpo):
+        // LIMIAR_INICIO=0.050, LIMIAR_FIM=0.030, CONFIANCA_CORPO=0.85, cooldown 2s.
+        const val BODY_START_MOTION      = 0.050f
         const val BODY_END_MOTION        = 0.030f
         const val BODY_START_FRAMES      = 3
         const val BODY_END_FRAMES        = 5
         const val BODY_MIN_FRAMES        = 10
         const val BODY_MAX_FRAMES        = 60
-        const val BODY_CONFIDENCE        = 0.80f
-        const val BODY_CONFIDENCE_MARGIN = 0.06f
-        const val BODY_GESTURE_VARIATION = 0.015f
-        const val BODY_START_HAND_PATH   = 0.045f
-        const val BODY_START_HAND_RANGE  = 0.030f
-        const val BODY_GESTURE_HAND_PATH = 0.070f
-        const val BODY_GESTURE_HAND_RANGE = 0.035f
-        const val BODY_COOLDOWN          = 2_500L
+        const val BODY_CONFIDENCE        = 0.85f
+        const val BODY_COOLDOWN          = 2_000L
         const val CALIBRATION_MIN_FRAMES = 8
         const val CALIBRATION_MAX_FRAMES = 45
         const val CALIBRATION_TARGET_FRAMES = 24
@@ -568,13 +564,14 @@ class LibrasAnalyzer(
             return
         }
 
+        // NÃO re-zeramos as mãos ausentes: o Python normaliza o frame inteiro
+        // (incluindo os zeros das mãos que faltam), então o modelo foi treinado
+        // com esses pontos deslocados pela normalização, não com zeros.
         val normalized = normalizeBodyFrame(bodyFrame.points)
-        clearMissingHands(normalized, bodyFrame)
         bodyMovementBuffer.addLast(normalized)
         while (bodyMovementBuffer.size > BODY_MOV_WINDOW) bodyMovementBuffer.removeFirst()
 
         val movimento = bodyMotion()
-        val movimentoMao = bodyHandMotion(bodyMovementBuffer.toList())
         val agora = System.currentTimeMillis()
         onGestoLimpar(0f)
 
@@ -589,10 +586,12 @@ class LibrasAnalyzer(
 
         when (bodyState) {
             BodyState.OCIOSO -> {
-                val gestoComecou = bodyMovementBuffer.size >= BODY_MOV_WINDOW &&
-                    movimento > BODY_START_MOTION &&
-                    movimentoMao.path >= BODY_START_HAND_PATH &&
-                    movimentoMao.range >= BODY_START_HAND_RANGE
+                // Igual ao Python: basta ter mão no quadro e movimento acima do
+                // limiar de início. As "trancas" extras de trajeto/amplitude da
+                // mão foram removidas porque bloqueavam gestos de menor amplitude.
+                val gestoComecou = bodyFrame.hasHand &&
+                    bodyMovementBuffer.size >= BODY_MOV_WINDOW &&
+                    movimento > BODY_START_MOTION
 
                 if (gestoComecou) {
                     bodyStartCount++
@@ -650,11 +649,6 @@ class LibrasAnalyzer(
         val hasPose: Boolean,
         val hasLeftHand: Boolean,
         val hasRightHand: Boolean
-    )
-
-    private data class BodyHandMotion(
-        val path: Float,
-        val range: Float
     )
 
     private fun extractBodyFrame(
@@ -722,20 +716,6 @@ class LibrasAnalyzer(
         return normalized
     }
 
-    private fun clearMissingHands(frame: FloatArray, bodyFrame: BodyFrame) {
-        if (!bodyFrame.hasLeftHand) clearHandBlock(frame, BODY_POSE_POINTS)
-        if (!bodyFrame.hasRightHand) clearHandBlock(frame, BODY_POSE_POINTS + BODY_HAND_POINTS)
-    }
-
-    private fun clearHandBlock(frame: FloatArray, offset: Int) {
-        for (point in offset until offset + BODY_HAND_POINTS) {
-            val base = point * 3
-            frame[base] = 0f
-            frame[base + 1] = 0f
-            frame[base + 2] = 0f
-        }
-    }
-
     private fun bodyMotion(): Float {
         if (bodyMovementBuffer.size < 3) return 0f
         var total = 0f
@@ -754,10 +734,6 @@ class LibrasAnalyzer(
         val interpreter = bodyInterpreter ?: return null
         val labels = labelsCorpo
         if (frames.size < BODY_MIN_FRAMES || labels.isEmpty()) return null
-        val movimentoMao = bodyHandMotion(frames)
-        if (movimentoMao.path < BODY_GESTURE_HAND_PATH ||
-            movimentoMao.range < BODY_GESTURE_HAND_RANGE) return null
-        if (bodyGestureVariation(frames) < BODY_GESTURE_VARIATION) return null
 
         val sampled = resampleBodyFrames(frames, BODY_WINDOW)
         val input = Array(1) { Array(BODY_WINDOW) { FloatArray(BODY_FEATURES) } }
@@ -775,70 +751,9 @@ class LibrasAnalyzer(
     }
 
     private fun isReliableBodyPrediction(prediction: Prediction): Boolean {
-        return prediction.letra != "-" &&
-            prediction.confianca >= BODY_CONFIDENCE &&
-            prediction.margem >= BODY_CONFIDENCE_MARGIN
-    }
-
-    private fun bodyGestureVariation(frames: List<FloatArray>): Float {
-        if (frames.size < BODY_MIN_FRAMES) return 0f
-        var total = 0f
-        var count = 0
-        for (point in BODY_POSE_POINTS until BODY_TOTAL_POINTS) {
-            for (coord in 0..1) {
-                total += std(frames.map { it[point * 3 + coord] })
-                count++
-            }
-        }
-        return if (count == 0) 0f else total / count
-    }
-
-    private fun bodyHandMotion(frames: List<FloatArray>): BodyHandMotion {
-        if (frames.size < 2) return BodyHandMotion(0f, 0f)
-        val left = handBlockMotion(frames, BODY_POSE_POINTS)
-        val right = handBlockMotion(frames, BODY_POSE_POINTS + BODY_HAND_POINTS)
-        return if (left.path + left.range >= right.path + right.range) left else right
-    }
-
-    private fun handBlockMotion(frames: List<FloatArray>, offset: Int): BodyHandMotion {
-        val centers = frames.mapNotNull { handCenter(it, offset) }
-        if (centers.size < 2) return BodyHandMotion(0f, 0f)
-
-        var path = 0f
-        for (i in 1 until centers.size) {
-            path += distance(centers[i - 1], centers[i])
-        }
-
-        val minX = centers.minOf { it.first }
-        val maxX = centers.maxOf { it.first }
-        val minY = centers.minOf { it.second }
-        val maxY = centers.maxOf { it.second }
-        val range = sqrt((maxX - minX) * (maxX - minX) + (maxY - minY) * (maxY - minY))
-        return BodyHandMotion(path, range)
-    }
-
-    private fun handCenter(frame: FloatArray, offset: Int): Pair<Float, Float>? {
-        var x = 0f
-        var y = 0f
-        var count = 0
-        for (point in offset until offset + BODY_HAND_POINTS) {
-            val base = point * 3
-            val px = frame[base]
-            val py = frame[base + 1]
-            if (px != 0f || py != 0f) {
-                x += px
-                y += py
-                count++
-            }
-        }
-        if (count < 8) return null
-        return Pair(x / count, y / count)
-    }
-
-    private fun distance(a: Pair<Float, Float>, b: Pair<Float, Float>): Float {
-        val dx = a.first - b.first
-        val dy = a.second - b.second
-        return sqrt(dx * dx + dy * dy)
+        // Python aceita a palavra apenas com confiança >= 0.85 (e != NEUTRO,
+        // tratado em analisarCorpo). Sem exigência de margem.
+        return prediction.letra != "-" && prediction.confianca >= BODY_CONFIDENCE
     }
 
     private fun resetBodyCapture() {
