@@ -60,6 +60,7 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
 
     // Controle de histórico: rastreia a frase completa anterior
     private var fraseAnterior = ""
+    private var ultimaLetraChip = ""
     private var linhasAtivas = true
     private var modoAtual = LibrasAnalyzer.Modo.ALFABETO
     private val letrasCalibracao = listOf(
@@ -776,8 +777,18 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
                     ColorStateList.valueOf(confidenceColor(confianca))
                 binding.progressConfidence.progressBackgroundTintList =
                     ColorStateList.valueOf(0x33242424)
+                // Bump: pequena pulsada quando a letra reconhecida muda.
+                if (letra != ultimaLetraChip) {
+                    binding.chipResult.animate().scaleX(1.14f).scaleY(1.14f).setDuration(90)
+                        .withEndAction {
+                            _binding?.chipResult?.animate()?.scaleX(1f)?.scaleY(1f)
+                                ?.setDuration(90)?.start()
+                        }.start()
+                }
+                ultimaLetraChip = letra
                 updateCalibrationCaptureProgress()
             } else {
+                ultimaLetraChip = ""
                 binding.chipResult.visibility = View.INVISIBLE
                 binding.progressConfidence.visibility = View.INVISIBLE
                 binding.progressConfidence.progress = 0
