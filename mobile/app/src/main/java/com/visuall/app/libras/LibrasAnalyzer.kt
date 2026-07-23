@@ -47,13 +47,15 @@ class LibrasAnalyzer(
         // o estático. 0.30 é o valor de referência do Python.
         const val LIMIAR_MOVIMENTO       = 0.30f
         const val TEMPO_PRA_LIMPAR       = 3_000L
-        // Frames consecutivos com a mesma letra antes de aceitá-la. Estático
-        // exige mais estabilidade (mão parada); dinâmico aceita mais rápido.
+        // Frames consecutivos com a mesma letra antes de aceitá-la. Com o
+        // rastreamento VIDEO os landmarks já são estáveis, então baixamos
+        // bastante em relação ao Python (que rodava a FPS altíssimo) para o
+        // celular escrever rápido: a letra sai depois de poucos frames firmes.
         const val ESTAB_MIN_DINAMICO     = 2
-        const val ESTAB_MIN_ESTATICO     = 12
-        const val COOLDOWN_DINAMICO      = 300L
-        const val COOLDOWN_ESTATICO      = 1_000L
-        const val COOLDOWN_REPETICAO     = 1_000L
+        const val ESTAB_MIN_ESTATICO     = 4
+        const val COOLDOWN_DINAMICO      = 350L
+        const val COOLDOWN_ESTATICO      = 450L
+        const val COOLDOWN_REPETICAO     = 700L
         const val NO_HAND_TOLERANCE      = 3
         const val FEATURES_ESTATICO      = 42
         const val FEATURES_DINAMICO      = 420
