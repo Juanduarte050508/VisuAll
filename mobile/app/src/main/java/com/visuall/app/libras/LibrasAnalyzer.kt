@@ -36,8 +36,11 @@ class LibrasAnalyzer(
     private val onFeedback: (mensagem: String, nivel: Int) -> Unit,
     // Landmarks crus (normalizados 0..1 no espaço do preview) para desenhar as
     // linhas de reconhecimento. hands = lista de mãos (21 pontos x,y cada);
-    // pose = 33 pontos x,y (só no modo corpo) ou null.
-    private val onLandmarks: (hands: List<FloatArray>, pose: FloatArray?) -> Unit = { _, _ -> }
+    // pose = 33 pontos x,y (só no modo corpo) ou null; frameAspect = proporção
+    // (largura/altura) da imagem analisada, para o overlay alinhar com o preview.
+    private val onLandmarks: (
+        hands: List<FloatArray>, pose: FloatArray?, frameAspect: Float
+    ) -> Unit = { _, _, _ -> }
 ) : ImageAnalysis.Analyzer {
 
     companion object {
@@ -189,6 +192,8 @@ class LibrasAnalyzer(
     // usada no treino (multiplica o x). Substitui o antigo letterbox: em vez
     // de distorcer a imagem, corrigimos só as features. Calculado por frame.
     private var aspectX               = 0.5625f
+    // Proporção real (largura/altura) do frame analisado, repassada ao overlay.
+    private var frameAspect           = 0.75f
 
     private fun nextVideoTimestamp(): Long {
         val now = SystemClock.uptimeMillis()
@@ -204,7 +209,8 @@ class LibrasAnalyzer(
             bitmap, imageProxy.imageInfo.rotationDegrees.toFloat(), espelharImagem)
         val mpImage = BitmapImageBuilder(preparedBitmap).build()
         // Corrige o x para a proporção 4:3 do treino (quadro retrato -> 4:3).
-        aspectX = 0.75f * preparedBitmap.width / preparedBitmap.height
+        frameAspect = preparedBitmap.width.toFloat() / preparedBitmap.height
+        aspectX = 0.75f * frameAspect
 
         val timestamp = nextVideoTimestamp()
         val result = handLandmarker.detectForVideo(mpImage, timestamp)
@@ -224,7 +230,7 @@ class LibrasAnalyzer(
         }
 
         if (result.landmarks().isEmpty()) {
-            onLandmarks(emptyList(), null)
+            onLandmarks(emptyList(), null, frameAspect)
             framesSemMao++
             if (framesSemMao >= NO_HAND_TOLERANCE) {
                 ultimaPredicao       = ""
@@ -241,7 +247,7 @@ class LibrasAnalyzer(
         }
 
         framesSemMao = 0
-        onLandmarks(handsToArrays(result), null)
+        onLandmarks(handsToArrays(result), null, frameAspect)
         val lms    = result.landmarks()[0]
         // x corrigido para 4:3 (features + geometria); o desenho usa o cru.
         val pontos = lms.map { Pair(it.x() * aspectX, it.y()) }
@@ -572,7 +578,7 @@ class LibrasAnalyzer(
         handResult: com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarkerResult,
         poseResult: com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarkerResult
     ) {
-        onLandmarks(handsToArrays(handResult), poseToArray(poseResult))
+        onLandmarks(handsToArrays(handResult), poseToArray(poseResult), frameAspect)
         val bodyFrame = extractBodyFrame(handResult, poseResult)
         if (!bodyFrame.hasPose || !bodyFrame.hasHand) {
             resetBodyCapture()

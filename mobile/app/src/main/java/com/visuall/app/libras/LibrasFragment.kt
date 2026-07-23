@@ -253,7 +253,9 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
                 onGestoLimpar = { prog -> onGestoLimpar(prog) },
                 onRepeticaoPendente = { letra -> onRepeticaoPendente(letra) },
                 onFeedback = { mensagem, nivel -> onFeedback(mensagem, nivel) },
-                onLandmarks = { hands, pose -> onLandmarksDetected(hands, pose) }
+                onLandmarks = { hands, pose, frameAspect ->
+                    onLandmarksDetected(hands, pose, frameAspect)
+                }
             ).also {
                 it.setModo(modoAtual)
                 it.setEspelhamento(usandoCameraFrontal)
@@ -1225,9 +1227,13 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
 
     // Chamado da thread do analyzer. update()/clear() usam postInvalidate(),
     // então são seguros fora da UI thread.
-    private fun onLandmarksDetected(hands: List<FloatArray>, pose: FloatArray?) {
+    private fun onLandmarksDetected(
+        hands: List<FloatArray>,
+        pose: FloatArray?,
+        frameAspect: Float
+    ) {
         if (!linhasAtivas) return
-        _binding?.landmarkOverlay?.update(hands, pose)
+        _binding?.landmarkOverlay?.update(hands, pose, frameAspect)
     }
 
     private fun onRepeticaoPendente(letra: String?) {

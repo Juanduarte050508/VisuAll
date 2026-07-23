@@ -11,9 +11,12 @@ import android.view.View
  * Desenha as linhas de reconhecimento (esqueleto da mão e do corpo) por cima
  * do preview da câmera. Recebe landmarks normalizados (0..1) no MESMO espaço
  * do preview (imagem já rotacionada e espelhada como a câmera frontal mostra),
- * então basta mapear com a mesma lógica FILL_CENTER que a PreviewView usa.
+ * então basta mapear com a mesma lógica FIT_CENTER que a PreviewView usa
+ * (app:scaleType="fitCenter"): o conteúdo cabe inteiro dentro da View,
+ * com barras nas sobras.
  *
- * A proporção do conteúdo é 3:4 (retrato), porque a câmera é 4:3.
+ * A proporção do conteúdo NÃO é fixa — ela vem do analyzer a cada frame
+ * (muda entre retrato e paisagem), então o desenho acompanha a imagem real.
  */
 class LandmarkOverlayView @JvmOverloads constructor(
     context: Context,
@@ -22,7 +25,8 @@ class LandmarkOverlayView @JvmOverloads constructor(
 ) : View(context, attrs, defStyle) {
 
     companion object {
-        private const val CONTENT_ASPECT = 3f / 4f  // largura / altura (retrato)
+        // Proporção inicial (retrato 3:4) até o primeiro frame chegar.
+        private const val CONTENT_ASPECT_PADRAO = 3f / 4f  // largura / altura
 
         // Topologia da mão do MediaPipe (21 pontos).
         private val HAND_CONNECTIONS = arrayOf(
@@ -45,6 +49,8 @@ class LandmarkOverlayView @JvmOverloads constructor(
 
     private var hands: List<FloatArray> = emptyList()
     private var pose: FloatArray? = null
+    // Proporção (largura/altura) da imagem que o analyzer processou.
+    private var contentAspect = CONTENT_ASPECT_PADRAO
 
     private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#E8A020")
@@ -67,9 +73,10 @@ class LandmarkOverlayView @JvmOverloads constructor(
         style = Paint.Style.FILL
     }
 
-    fun update(hands: List<FloatArray>, pose: FloatArray?) {
+    fun update(hands: List<FloatArray>, pose: FloatArray?, frameAspect: Float) {
         this.hands = hands
         this.pose = pose
+        if (frameAspect > 0f) this.contentAspect = frameAspect
         postInvalidate()
     }
 
@@ -79,8 +86,9 @@ class LandmarkOverlayView @JvmOverloads constructor(
         postInvalidate()
     }
 
-    // Mapeamento FILL_CENTER: escala o conteúdo para cobrir a View, cortando o
-    // excesso — igual ao app:scaleType="fillCenter" da PreviewView.
+    // Mapeamento FIT_CENTER: encaixa o conteúdo INTEIRO dentro da View,
+    // centralizado, deixando barras na sobra — igual ao
+    // app:scaleType="fitCenter" da PreviewView.
     private var dispW = 0f
     private var dispH = 0f
     private var offX = 0f
@@ -91,16 +99,18 @@ class LandmarkOverlayView @JvmOverloads constructor(
         val vh = height.toFloat()
         if (vw <= 0f || vh <= 0f) return
         val viewAspect = vw / vh
-        if (viewAspect > CONTENT_ASPECT) {
-            dispW = vw
-            dispH = vw / CONTENT_ASPECT
-            offX = 0f
-            offY = (vh - dispH) / 2f
-        } else {
+        if (viewAspect > contentAspect) {
+            // View mais larga que o conteúdo: encaixa pela altura (barras nas laterais).
             dispH = vh
-            dispW = vh * CONTENT_ASPECT
+            dispW = vh * contentAspect
             offY = 0f
             offX = (vw - dispW) / 2f
+        } else {
+            // View mais estreita/alta: encaixa pela largura (barras em cima/baixo).
+            dispW = vw
+            dispH = vw / contentAspect
+            offX = 0f
+            offY = (vh - dispH) / 2f
         }
     }
 
