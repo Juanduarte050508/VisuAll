@@ -585,16 +585,33 @@ class LibrasAnalyzer(
 
         val movimento = bodyMotion()
         val agora = System.currentTimeMillis()
-        onGestoLimpar(0f)
 
-        if (bodyFrame.hasHand) {
-            bodyNoHandSince = 0L
-        } else {
-            if (bodyNoHandSince == 0L) bodyNoHandSince = agora
-            if (agora - bodyNoHandSince > 1_500L) {
+        // Gesto de limpar: mão toda aberta e parada por TEMPO_PRA_LIMPAR limpa
+        // a frase — o mesmo gesto do modo alfabeto (a barra vermelha mostra o
+        // progresso). Responde à dúvida "manter a mão aberta reseta as palavras".
+        val maoAberta = handResult.landmarks().firstOrNull()?.let { hand ->
+            detectarDedosEsticados(hand.map { Pair(it.x() * aspectX, it.y()) })
+        } ?: false
+        if (maoAberta) {
+            if (tempoInicioEsticado == 0L) tempoInicioEsticado = agora
+            val progresso = ((agora - tempoInicioEsticado).toFloat() / TEMPO_PRA_LIMPAR)
+                .coerceIn(0f, 1f)
+            onGestoLimpar(progresso)
+            if ((agora - tempoInicioEsticado) >= TEMPO_PRA_LIMPAR &&
+                (agora - ultimoTempoLimpar) > 2_000L) {
+                frase = ""; tempoInicioEsticado = 0L; ultimoTempoLimpar = agora
                 ultimaClasseCorpo = ""
+                onFraseUpdate("")
             }
+            resetBodyCapture()
+            onLetra("-", 0f, "corpo")
+            return
+        } else {
+            tempoInicioEsticado = 0L
+            onGestoLimpar(0f)
         }
+
+        bodyNoHandSince = 0L
 
         when (bodyState) {
             BodyState.OCIOSO -> {
@@ -616,7 +633,7 @@ class LibrasAnalyzer(
                     }
                 } else {
                     bodyStartCount = 0
-                    onFeedback("FAÇA O GESTO NO QUADRO", FEEDBACK_NEUTRO)
+                    onFeedback("PRONTO - FAÇA O SINAL", FEEDBACK_BOM)
                 }
             }
             BodyState.CAPTURANDO -> {
