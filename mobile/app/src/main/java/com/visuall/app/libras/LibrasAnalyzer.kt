@@ -63,7 +63,6 @@ class LibrasAnalyzer(
         const val ESTAB_MIN_ESTATICO     = 4
         const val COOLDOWN_DINAMICO      = 350L
         const val COOLDOWN_ESTATICO      = 450L
-        const val COOLDOWN_REPETICAO     = 700L
         const val NO_HAND_TOLERANCE      = 3
         const val FEATURES_ESTATICO      = 42
         const val FEATURES_DINAMICO      = 420
@@ -238,6 +237,9 @@ class LibrasAnalyzer(
                 tempoInicioEsticado  = 0L
                 bufferLm.clear()
                 letraRepetidaPendente = ""
+                // Libera a mesma letra para ser digitada de novo: tirar a mão
+                // do quadro e refazer o sinal é a forma natural de repetir.
+                ultimaLetraAdicionada = ""
                 onRepeticaoPendente(null)
                 onFeedback("MAO FORA DO QUADRO", FEEDBACK_ALERTA)
                 onNoHand()
@@ -322,8 +324,10 @@ class LibrasAnalyzer(
                 contadorEstabilidade  = 0
             }
 
-            if ((agora - ultimoTempoAdicao) > COOLDOWN_REPETICAO)
-                ultimaLetraAdicionada = ""
+            // NÃO limpamos ultimaLetraAdicionada por tempo: fazer isso digitava
+            // a mesma letra repetidamente enquanto a mão ficava parada no sinal.
+            // Ela só é liberada quando a mão sai do quadro (ver bloco sem mão)
+            // ou pelo botão REPETIR, deixando a repetição sempre intencional.
         }
 
         imageProxy.close()
@@ -750,9 +754,14 @@ class LibrasAnalyzer(
         val rightShoulder = BODY_POINT_RIGHT_SHOULDER * 3
         val centerX = (frame[leftShoulder] + frame[rightShoulder]) / 2f
         val centerY = (frame[leftShoulder + 1] + frame[rightShoulder + 1]) / 2f
+        // A escala é a distância entre os ombros em 3D — o Python faz
+        // np.linalg.norm(frame[11] - frame[12]) sobre vetores (x,y,z), então o
+        // dz ENTRA na conta. Usar só dx/dy deixava todas as features do corpo
+        // numa escala diferente da do treino.
         val dx = frame[leftShoulder] - frame[rightShoulder]
         val dy = frame[leftShoulder + 1] - frame[rightShoulder + 1]
-        val scale = sqrt(dx * dx + dy * dy).takeIf { it > 0.0001f } ?: 1f
+        val dz = frame[leftShoulder + 2] - frame[rightShoulder + 2]
+        val scale = sqrt(dx * dx + dy * dy + dz * dz).takeIf { it > 0.0001f } ?: 1f
         for (point in 0 until BODY_TOTAL_POINTS) {
             val base = point * 3
             normalized[base] = (normalized[base] - centerX) / scale

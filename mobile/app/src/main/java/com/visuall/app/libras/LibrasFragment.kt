@@ -33,7 +33,7 @@ import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.constraintlayout.widget.ConstraintSet
+import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.core.view.isVisible
@@ -278,15 +278,19 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
     }
 
     private fun applyPreviewAspectRatio() {
-        val ratio = if (isLandscapeByBounds()) {
-            "4:3"
-        } else {
-            "3:4"
-        }
-        val cs = ConstraintSet()
-        cs.clone(binding.root)
-        cs.setDimensionRatio(R.id.preview_view, ratio)
-        cs.applyTo(binding.root)
+        val ratio = if (isLandscapeByBounds()) "4:3" else "3:4"
+        val params = binding.previewView.layoutParams
+                as? ConstraintLayout.LayoutParams ?: return
+        // Só mexe se a proporção realmente mudou. Reaplicar layout à toa
+        // destrói e recria a surface do preview.
+        if (params.dimensionRatio == ratio) return
+        // Alteramos APENAS os params do preview. Antes usávamos
+        // ConstraintSet.clone()/applyTo() na raiz inteira, o que reconstruía
+        // todo o layout logo após o bind da câmera e derrubava a surface —
+        // era por isso que a câmera "fechava" ao entrar no modo Libras e só
+        // voltava ao inverter a câmera (que refaz o bind).
+        params.dimensionRatio = ratio
+        binding.previewView.layoutParams = params
     }
 
     private fun applyHudLayout() {
