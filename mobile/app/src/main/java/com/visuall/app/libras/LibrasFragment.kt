@@ -174,9 +174,12 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         val requestedLensFacing = lensFacing
         val selector = cameraSelectorForAvailableLens(requestedLensFacing)
 
-        val preview = Preview.Builder().build().also { p ->
-            p.setSurfaceProvider(binding.previewView.surfaceProvider)
-        }
+        val preview = Preview.Builder()
+            // Mesma proporção 4:3 da análise, para o overlay de landmarks
+            // alinhar com o que a PreviewView mostra.
+            .setTargetAspectRatio(AspectRatio.RATIO_4_3)
+            .build()
+            .also { p -> p.setSurfaceProvider(binding.previewView.surfaceProvider) }
 
         // Para o analyzer atual — seta null ANTES de unbindAll para evitar
         // que o executor entregue frames enquanto o provider já foi desvinculado
@@ -218,7 +221,8 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
                 onNoHand      = { onSemMao() },
                 onGestoLimpar = { prog -> onGestoLimpar(prog) },
                 onRepeticaoPendente = { letra -> onRepeticaoPendente(letra) },
-                onFeedback = { mensagem, nivel -> onFeedback(mensagem, nivel) }
+                onFeedback = { mensagem, nivel -> onFeedback(mensagem, nivel) },
+                onLandmarks = { hands, pose -> onLandmarksDetected(hands, pose) }
             ).also {
                 it.setModo(modoAtual)
                 it.setEspelhamento(usandoCameraFrontal)
@@ -360,7 +364,8 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
 
         binding.btnLines.setOnClickListener {
             linhasAtivas = !linhasAtivas
-            binding.scanFrame.isVisible = linhasAtivas
+            binding.landmarkOverlay.isVisible = linhasAtivas
+            if (!linhasAtivas) binding.landmarkOverlay.clear()
             binding.btnLines.text = if (linhasAtivas) "LINHAS: ON" else "LINHAS: OFF"
         }
 
@@ -1013,6 +1018,13 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
             binding.progressConfidence.progress = 0
             binding.progressClear.isVisible = false
         }
+    }
+
+    // Chamado da thread do analyzer. update()/clear() usam postInvalidate(),
+    // então são seguros fora da UI thread.
+    private fun onLandmarksDetected(hands: List<FloatArray>, pose: FloatArray?) {
+        if (!linhasAtivas) return
+        _binding?.landmarkOverlay?.update(hands, pose)
     }
 
     private fun onRepeticaoPendente(letra: String?) {

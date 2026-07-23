@@ -5,8 +5,6 @@ import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.Matrix
 import android.os.SystemClock
 import androidx.camera.core.ExperimentalGetImage
@@ -35,7 +33,11 @@ class LibrasAnalyzer(
     private val onNoHand: () -> Unit,
     private val onGestoLimpar: (progresso: Float) -> Unit,
     private val onRepeticaoPendente: (letra: String?) -> Unit,
-    private val onFeedback: (mensagem: String, nivel: Int) -> Unit
+    private val onFeedback: (mensagem: String, nivel: Int) -> Unit,
+    // Landmarks crus (normalizados 0..1 no espaço do preview) para desenhar as
+    // linhas de reconhecimento. hands = lista de mãos (21 pontos x,y cada);
+    // pose = 33 pontos x,y (só no modo corpo) ou null.
+    private val onLandmarks: (hands: List<FloatArray>, pose: FloatArray?) -> Unit = { _, _ -> }
 ) : ImageAnalysis.Analyzer {
 
     companion object {
@@ -180,6 +182,10 @@ class LibrasAnalyzer(
     // Timestamp monotônico exigido pelo modo VIDEO do MediaPipe. Precisa ser
     // estritamente crescente a cada frame para o rastreamento funcionar.
     private var videoTimestamp        = 0L
+    // Fator que corrige a proporção do quadro retrato do celular para a 4:3
+    // usada no treino (multiplica o x). Substitui o antigo letterbox: em vez
+    // de distorcer a imagem, corrigimos só as features. Calculado por frame.
+    private var aspectX               = 0.5625f
 
     private fun nextVideoTimestamp(): Long {
         val now = SystemClock.uptimeMillis()
@@ -194,6 +200,8 @@ class LibrasAnalyzer(
         val preparedBitmap = prepararBitmap(
             bitmap, imageProxy.imageInfo.rotationDegrees.toFloat(), espelharImagem)
         val mpImage = BitmapImageBuilder(preparedBitmap).build()
+        // Corrige o x para a proporção 4:3 do treino (quadro retrato -> 4:3).
+        aspectX = 0.75f * preparedBitmap.width / preparedBitmap.height
 
         val timestamp = nextVideoTimestamp()
         val result = handLandmarker.detectForVideo(mpImage, timestamp)
@@ -213,6 +221,7 @@ class LibrasAnalyzer(
         }
 
         if (result.landmarks().isEmpty()) {
+            onLandmarks(emptyList(), null)
             framesSemMao++
             if (framesSemMao >= NO_HAND_TOLERANCE) {
                 ultimaPredicao       = ""
@@ -229,8 +238,10 @@ class LibrasAnalyzer(
         }
 
         framesSemMao = 0
+        onLandmarks(handsToArrays(result), null)
         val lms    = result.landmarks()[0]
-        val pontos = lms.map { Pair(it.x(), it.y()) }
+        // x corrigido para 4:3 (features + geometria); o desenho usa o cru.
+        val pontos = lms.map { Pair(it.x() * aspectX, it.y()) }
         val dedicosEsticados = detectarDedosEsticados(pontos)
 
         if (dedicosEsticados) {
@@ -312,43 +323,41 @@ class LibrasAnalyzer(
     // ── Preparar o bitmap para o MediaPipe ────────────────────────────────
     // 1) rotaciona para deixar a pessoa em pé;
     // 2) espelha na horizontal na câmera frontal (para casar com o dataset,
-    //    que foi gravado espelhado);
-    // 3) faz "letterbox" para proporção 4:3, a MESMA usada no treino
-    //    (o Python redimensionava para 480x360). Sem isso, o quadro retrato
-    //    do celular (3:4) estica a mão na horizontal frente ao que os
-    //    modelos aprenderam, degradando muito os sinais estáticos.
+    //    que foi gravado espelhado).
+    // A proporção 4:3 do treino é corrigida depois, no nível das features
+    // (ver aspectX), o que mantém os landmarks no espaço real do preview e
+    // permite desenhar as linhas de reconhecimento alinhadas.
     private fun prepararBitmap(src: Bitmap, degrees: Float, espelhar: Boolean): Bitmap {
         val matrix = Matrix()
         if (degrees != 0f) matrix.postRotate(degrees)
         if (espelhar) matrix.postScale(-1f, 1f)
-        val orientado = if (matrix.isIdentity) {
-            src
-        } else {
-            Bitmap.createBitmap(src, 0, 0, src.width, src.height, matrix, true)
-        }
-        return letterbox43(orientado)
-    }
-
-    private fun letterbox43(bitmap: Bitmap): Bitmap {
-        val alvo = 4f / 3f
-        val w = bitmap.width
-        val h = bitmap.height
-        val aspecto = w.toFloat() / h.toFloat()
-        val (largura, altura) = if (aspecto < alvo) {
-            Math.round(h * alvo) to h          // retrato: preenche as laterais
-        } else {
-            w to Math.round(w / alvo)          // paisagem: preenche topo/base
-        }
-        if (largura == w && altura == h) return bitmap
-        val out = Bitmap.createBitmap(largura, altura, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(out)
-        canvas.drawColor(Color.BLACK)
-        canvas.drawBitmap(bitmap, (largura - w) / 2f, (altura - h) / 2f, null)
-        return out
+        if (matrix.isIdentity) return src
+        return Bitmap.createBitmap(src, 0, 0, src.width, src.height, matrix, true)
     }
 
     fun setEspelhamento(cameraFrontal: Boolean) {
         espelharImagem = cameraFrontal
+    }
+
+    // Converte as mãos detectadas em arrays crus [x0,y0,x1,y1,...] normalizados
+    // no espaço do preview, para o overlay desenhar.
+    private fun handsToArrays(
+        result: com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarkerResult
+    ): List<FloatArray> = result.landmarks().map { hand ->
+        FloatArray(hand.size * 2).also { arr ->
+            hand.forEachIndexed { i, lm -> arr[i * 2] = lm.x(); arr[i * 2 + 1] = lm.y() }
+        }
+    }
+
+    private fun poseToArray(
+        poseResult: com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarkerResult
+    ): FloatArray? {
+        val poses = poseResult.landmarks()
+        if (poses.isEmpty()) return null
+        val p = poses[0]
+        return FloatArray(p.size * 2).also { arr ->
+            p.forEachIndexed { i, lm -> arr[i * 2] = lm.x(); arr[i * 2 + 1] = lm.y() }
+        }
     }
     private fun ensureBodyModelsLoaded(): PoseLandmarker? {
         poseLandmarker?.let { return it }
@@ -553,6 +562,7 @@ class LibrasAnalyzer(
         handResult: com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarkerResult,
         poseResult: com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarkerResult
     ) {
+        onLandmarks(handsToArrays(handResult), poseToArray(poseResult))
         val bodyFrame = extractBodyFrame(handResult, poseResult)
         if (!bodyFrame.hasPose || !bodyFrame.hasHand) {
             resetBodyCapture()
@@ -662,7 +672,7 @@ class LibrasAnalyzer(
         val hasPose = poses.isNotEmpty()
         if (poses.isNotEmpty()) {
             poses[0].take(BODY_POSE_POINTS).forEachIndexed { index, lm ->
-                writeBodyPoint(frame, index, lm.x(), lm.y(), lm.z())
+                writeBodyPoint(frame, index, lm.x() * aspectX, lm.y(), lm.z())
             }
         }
 
@@ -681,7 +691,7 @@ class LibrasAnalyzer(
                 if (avgX < 0.5) BODY_POSE_POINTS else BODY_POSE_POINTS + BODY_HAND_POINTS
             }
             landmarks.take(BODY_HAND_POINTS).forEachIndexed { index, lm ->
-                writeBodyPoint(frame, offset + index, lm.x(), lm.y(), lm.z())
+                writeBodyPoint(frame, offset + index, lm.x() * aspectX, lm.y(), lm.z())
             }
             hasHand = true
             if (offset == BODY_POSE_POINTS) {
