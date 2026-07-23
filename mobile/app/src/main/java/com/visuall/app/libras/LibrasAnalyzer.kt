@@ -5,6 +5,9 @@ import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Matrix
 import android.os.SystemClock
 import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageAnalysis
@@ -124,6 +127,11 @@ class LibrasAnalyzer(
     private var bodyInterpreter: Interpreter? = null
     private var labelsCorpo: List<String> = emptyList()
     @Volatile private var modoAtual = Modo.ALFABETO
+    // Espelha a imagem na horizontal quando estamos na câmera frontal. O
+    // dataset foi gravado com a webcam espelhada (cv2.flip no Python), então
+    // a câmera frontal precisa do mesmo espelhamento para o "lado" da mão
+    // bater com o treino. Câmera traseira não é espelhada por natureza.
+    @Volatile private var espelharImagem = true
 
     init {
         val baseOptions = BaseOptions.builder()
@@ -199,8 +207,9 @@ class LibrasAnalyzer(
     override fun analyze(imageProxy: ImageProxy) {
         // ── Converter YUV → RGBA_8888 (exigido pelo MediaPipe) ────────────
         val bitmap = imageProxy.toBitmap()
-        val rotatedBitmap = rotateBitmap(bitmap, imageProxy.imageInfo.rotationDegrees.toFloat())
-        val mpImage = BitmapImageBuilder(rotatedBitmap).build()
+        val preparedBitmap = prepararBitmap(
+            bitmap, imageProxy.imageInfo.rotationDegrees.toFloat(), espelharImagem)
+        val mpImage = BitmapImageBuilder(preparedBitmap).build()
 
         val timestamp = nextVideoTimestamp()
         val result = handLandmarker.detectForVideo(mpImage, timestamp)
@@ -323,11 +332,46 @@ class LibrasAnalyzer(
         imageProxy.close()
     }
 
-    // ── Rotacionar bitmap conforme a orientação da câmera ─────────────────
-    private fun rotateBitmap(bitmap: Bitmap, degrees: Float): Bitmap {
-        if (degrees == 0f) return bitmap
-        val matrix = android.graphics.Matrix().apply { postRotate(degrees) }
-        return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+    // ── Preparar o bitmap para o MediaPipe ────────────────────────────────
+    // 1) rotaciona para deixar a pessoa em pé;
+    // 2) espelha na horizontal na câmera frontal (para casar com o dataset,
+    //    que foi gravado espelhado);
+    // 3) faz "letterbox" para proporção 4:3, a MESMA usada no treino
+    //    (o Python redimensionava para 480x360). Sem isso, o quadro retrato
+    //    do celular (3:4) estica a mão na horizontal frente ao que os
+    //    modelos aprenderam, degradando muito os sinais estáticos.
+    private fun prepararBitmap(src: Bitmap, degrees: Float, espelhar: Boolean): Bitmap {
+        val matrix = Matrix()
+        if (degrees != 0f) matrix.postRotate(degrees)
+        if (espelhar) matrix.postScale(-1f, 1f)
+        val orientado = if (matrix.isIdentity) {
+            src
+        } else {
+            Bitmap.createBitmap(src, 0, 0, src.width, src.height, matrix, true)
+        }
+        return letterbox43(orientado)
+    }
+
+    private fun letterbox43(bitmap: Bitmap): Bitmap {
+        val alvo = 4f / 3f
+        val w = bitmap.width
+        val h = bitmap.height
+        val aspecto = w.toFloat() / h.toFloat()
+        val (largura, altura) = if (aspecto < alvo) {
+            Math.round(h * alvo) to h          // retrato: preenche as laterais
+        } else {
+            w to Math.round(w / alvo)          // paisagem: preenche topo/base
+        }
+        if (largura == w && altura == h) return bitmap
+        val out = Bitmap.createBitmap(largura, altura, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(out)
+        canvas.drawColor(Color.BLACK)
+        canvas.drawBitmap(bitmap, (largura - w) / 2f, (altura - h) / 2f, null)
+        return out
+    }
+
+    fun setEspelhamento(cameraFrontal: Boolean) {
+        espelharImagem = cameraFrontal
     }
     private fun ensureBodyModelsLoaded(): PoseLandmarker? {
         poseLandmarker?.let { return it }
@@ -486,13 +530,11 @@ class LibrasAnalyzer(
     }
 
     private fun escolherClassificacao(dados: FloatArray, movimento: Float): Prediction {
-        val estatico = classificarEstatico(dados)
-        val estaticoEspelhado = classificarEstatico(mirrorLandmarks(dados))
-        val melhorEstatico = if (estaticoEspelhado.confianca > estatico.confianca) {
-            estaticoEspelhado.copy(modo = "estatico espelhado")
-        } else {
-            estatico
-        }
+        // A imagem já vem espelhada corretamente na câmera frontal (ver
+        // prepararBitmap), então NÃO tentamos mais adivinhar a orientação
+        // rodando o modelo com landmarks espelhados — isso só dobrava a
+        // chance de um falso positivo confiante na letra errada.
+        val melhorEstatico = classificarEstatico(dados)
         val estaticoComCalibracao = if (movimento < LIMIAR_MOVIMENTO * 0.8f) {
             aplicarCalibracaoPessoal(dados, melhorEstatico)
         } else {
@@ -500,13 +542,7 @@ class LibrasAnalyzer(
         }
         if (bufferLm.size < JANELA_MLP) return estaticoComCalibracao
 
-        val dinamico = classificarDinamico()
-        val dinamicoEspelhado = classificarDinamico(espelhar = true)
-        val melhorDinamico = if (dinamicoEspelhado.confianca > dinamico.confianca) {
-            dinamicoEspelhado.copy(modo = "dinamico espelhado")
-        } else {
-            dinamico
-        }
+        val melhorDinamico = classificarDinamico()
         val dinamicoConfiavel = melhorDinamico.letra != "-" &&
             movimento >= LIMIAR_MOVIMENTO &&
             melhorDinamico.margem >= MARGEM_DINAMICA_MINIMA &&
@@ -547,11 +583,10 @@ class LibrasAnalyzer(
         return Prediction(letra, conf, "estatico", margem)
     }
 
-    private fun classificarDinamico(espelhar: Boolean = false): Prediction {
+    private fun classificarDinamico(): Prediction {
         val entrada = FloatArray(FEATURES_DINAMICO)
         bufferLm.toList().takeLast(JANELA_MLP).forEachIndexed { i, frame ->
-            val fonte = if (espelhar) mirrorLandmarks(frame) else frame
-            fonte.copyInto(entrada, i * FEATURES_ESTATICO)
+            frame.copyInto(entrada, i * FEATURES_ESTATICO)
         }
         val tensor = OnnxTensor.createTensor(
             ortEnv, FloatBuffer.wrap(entrada), longArrayOf(1, FEATURES_DINAMICO.toLong()))

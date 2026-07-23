@@ -21,6 +21,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
+import androidx.camera.core.AspectRatio
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
@@ -192,7 +193,11 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
 
         val analysis = ImageAnalysis.Builder()
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+            // 4:3 é a proporção usada no treino dos modelos (Python 480x360).
+            .setTargetAspectRatio(AspectRatio.RATIO_4_3)
             .build()
+
+        val usandoCameraFrontal = lensFacing == CameraSelector.LENS_FACING_FRONT
 
         try {
             provider.bindToLifecycle(viewLifecycleOwner, selector, preview, analysis)
@@ -214,7 +219,10 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
                 onGestoLimpar = { prog -> onGestoLimpar(prog) },
                 onRepeticaoPendente = { letra -> onRepeticaoPendente(letra) },
                 onFeedback = { mensagem, nivel -> onFeedback(mensagem, nivel) }
-            ).also { it.setModo(modoAtual) }
+            ).also {
+                it.setModo(modoAtual)
+                it.setEspelhamento(usandoCameraFrontal)
+            }
 
             if (!isAdded || _binding == null || cameraExecutor.isShutdown) {
                 newAnalyzer.close()
