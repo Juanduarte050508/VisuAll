@@ -2,6 +2,7 @@ package com.visuall.app.camera
 
 import android.content.ContentValues
 import android.content.Intent
+import android.content.res.Configuration
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
@@ -9,8 +10,10 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
+import android.view.Surface
 import android.view.LayoutInflater
 import android.view.MotionEvent
+import android.view.OrientationEventListener
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
@@ -65,6 +68,9 @@ class CameraFragment : Fragment() {
     private var flashMode   = ImageCapture.FLASH_MODE_AUTO
     private var isVideoMode = false
     private var isRecording = false
+    private var isPhysicalLandscape = false
+    private var orientationListener: OrientationEventListener? = null
+    private var landscapeHud: View? = null
 
     // Aspect ratio: true = 4:3 (padrão), false = 16:9
     private var is4to3 = true
@@ -90,6 +96,11 @@ class CameraFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         cameraExecutor = Executors.newSingleThreadExecutor()
+        view.post {
+            applyHudLayout()
+            applyAspectRatioToPreview()
+        }
+        setupOrientationHudListener()
         startCamera()
         setupButtons()
         loadLastThumbnail()
@@ -111,6 +122,7 @@ class CameraFragment : Fragment() {
         if (!isAdded || view == null) return
         val provider = cameraProvider ?: return
         val selector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
+        val targetRotation = currentTargetRotation()
 
         val aspectRatioStrategy = if (is4to3)
             AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY
@@ -123,6 +135,7 @@ class CameraFragment : Fragment() {
 
         val preview = Preview.Builder()
             .setResolutionSelector(resolutionSelector)
+            .setTargetRotation(targetRotation)
             .build()
             .also { it.setSurfaceProvider(currentBinding.previewView.surfaceProvider) }
 
@@ -139,6 +152,7 @@ class CameraFragment : Fragment() {
                 imageCapture = ImageCapture.Builder()
                     .setFlashMode(flashMode)
                     .setResolutionSelector(resolutionSelector)
+                    .setTargetRotation(targetRotation)
                     .build()
                 provider.bindToLifecycle(viewLifecycleOwner, selector, preview, imageCapture!!)
             }
@@ -147,15 +161,142 @@ class CameraFragment : Fragment() {
         } catch (e: Exception) { e.printStackTrace() }
     }
 
-    // ── Aspect Ratio: H,4:3 = altura derivada da largura (match_parent) ───
     private fun applyAspectRatioToPreview() {
-        // width=match_parent, height=0dp → ratio H,4:3 = altura = largura * 4/3
-        val ratio = if (is4to3) "H,3:4" else "H,9:16"
+        val isLandscape = isLandscapeByBounds()
+        val ratio = when {
+            is4to3 && isLandscape -> "4:3"
+            is4to3 -> "3:4"
+            isLandscape -> "16:9"
+            else -> "9:16"
+        }
         val cs = ConstraintSet()
         cs.clone(binding.root)
         cs.setDimensionRatio(R.id.preview_view, ratio)
         cs.applyTo(binding.root)
         _binding?.btnAspectRatio?.text = if (is4to3) "4:3" else "16:9"
+    }
+
+    private fun applyHudLayout() {
+        if (!isLandscapeByBounds()) {
+            applyPortraitHudLayout()
+            return
+        }
+
+        setPortraitHudVisible(false)
+        ensureLandscapeHud()
+    }
+
+    private fun applyPortraitHudLayout() {
+        removeLandscapeHud()
+        setPortraitHudVisible(true)
+    }
+
+    private fun dp(value: Int): Int {
+        return (value * resources.displayMetrics.density).roundToInt()
+    }
+
+    private fun setPortraitHudVisible(visible: Boolean) {
+        val visibility = if (visible) View.VISIBLE else View.GONE
+        binding.btnFlash.visibility = visibility
+        binding.btnAspectRatio.visibility = visibility
+        binding.tvTimer.visibility = if (visible && isRecording) View.VISIBLE else View.GONE
+        binding.zoomContainer.visibility = visibility
+        binding.modesRow.visibility = visibility
+        binding.controlsRow.visibility = visibility
+    }
+
+    private fun ensureLandscapeHud() {
+        if (landscapeHud != null) return
+        val hud = layoutInflater.inflate(R.layout.hud_camera_land, binding.root, false)
+        hud.id = R.id.hud_camera_land_root
+        binding.root.addView(
+            hud,
+            ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        )
+        hud.findViewById<View>(R.id.btn_libras_land).setOnClickListener {
+            releaseCamera()
+            findNavController().navigate(R.id.action_camera_to_libras)
+        }
+        hud.findViewById<View>(R.id.btn_flip_land).setOnClickListener {
+            lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK)
+                CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK
+            bindCamera()
+        }
+        hud.findViewById<android.widget.TextView>(R.id.btn_aspect_ratio_land).apply {
+            text = if (is4to3) "4:3" else "16:9"
+            setOnClickListener {
+                is4to3 = !is4to3
+                text = if (is4to3) "4:3" else "16:9"
+                bindCamera()
+            }
+        }
+        landscapeHud = hud
+    }
+
+    private fun removeLandscapeHud() {
+        landscapeHud?.let { binding.root.removeView(it) }
+        landscapeHud = null
+    }
+
+    private fun setupOrientationHudListener() {
+        val context = context ?: return
+        orientationListener = object : OrientationEventListener(context) {
+            override fun onOrientationChanged(orientation: Int) {
+                if (orientation == ORIENTATION_UNKNOWN) return
+                val landscape = orientation in 60..120 || orientation in 240..300
+                if (landscape == isPhysicalLandscape) return
+
+                isPhysicalLandscape = landscape
+                _binding?.root?.post {
+                    applyHudLayout()
+                    applyAspectRatioToPreview()
+                }
+            }
+        }.also { listener ->
+            if (listener.canDetectOrientation()) listener.enable()
+        }
+    }
+
+    private fun isLandscapeByBounds(): Boolean {
+        if (isPhysicalLandscape) return true
+
+        val displayRotation = _binding?.previewView?.display?.rotation
+            ?: activity?.windowManager?.defaultDisplay?.rotation
+        if (displayRotation == Surface.ROTATION_90 || displayRotation == Surface.ROTATION_270) {
+            return true
+        }
+
+        val rootWidth = _binding?.root?.width ?: 0
+        val rootHeight = _binding?.root?.height ?: 0
+        return if (rootWidth > 0 && rootHeight > 0) {
+            rootWidth > rootHeight
+        } else {
+            resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        _binding?.root?.post {
+            applyHudLayout()
+            applyAspectRatioToPreview()
+        }
+        if (_binding != null && camera == null) {
+            if (cameraProvider != null) {
+                bindCamera()
+            } else {
+                startCamera()
+            }
+        }
+    }
+
+    private fun currentTargetRotation(): Int {
+        return _binding?.previewView?.display?.rotation
+            ?: activity?.windowManager?.defaultDisplay?.rotation
+            ?: Surface.ROTATION_0
     }
 
     // ── Zoom ───────────────────────────────────────────────────────────────
@@ -400,6 +541,9 @@ class CameraFragment : Fragment() {
 
     override fun onDestroyView() {
         super.onDestroyView()
+        orientationListener?.disable()
+        orientationListener = null
+        landscapeHud = null
         timerHandler.removeCallbacks(timerRunnable)
         releaseCamera()
         zoomStateObserver?.let { observer ->

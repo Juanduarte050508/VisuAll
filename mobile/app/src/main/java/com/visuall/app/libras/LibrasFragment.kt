@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.content.res.ColorStateList
 import android.net.Uri
 import android.os.Build
@@ -12,17 +13,19 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.speech.RecognizerIntent
 import android.speech.tts.TextToSpeech
+import android.view.Surface
 import android.view.LayoutInflater
+import android.view.OrientationEventListener
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import android.util.Size
-import androidx.camera.core.AspectRatio
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
@@ -30,6 +33,7 @@ import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.constraintlayout.widget.ConstraintSet
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.core.view.isVisible
@@ -44,6 +48,7 @@ import java.text.Normalizer
 import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import kotlin.math.roundToInt
 
 class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
 
@@ -54,6 +59,9 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
     private var librasAnalyzer: LibrasAnalyzer? = null
     private var cameraProvider: ProcessCameraProvider? = null
     private var tts: TextToSpeech? = null
+    private var isPhysicalLandscape = false
+    private var orientationListener: OrientationEventListener? = null
+    private var landscapeHud: View? = null
 
     private var lensFacing = CameraSelector.LENS_FACING_FRONT
 
@@ -134,9 +142,14 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         cameraExecutor = Executors.newSingleThreadExecutor()
         tts = TextToSpeech(requireContext(), this)
         carregarConversaSalva()
+        view.post {
+            applyPreviewAspectRatio()
+            applyHudLayout()
+        }
         startCamera()
         setupButtons()
         updateModeButtons()
+        setupOrientationHudListener()
     }
 
     // ── Inicia provider uma única vez ──────────────────────────────────────
@@ -178,11 +191,21 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
 
         val requestedLensFacing = lensFacing
         val selector = cameraSelectorForAvailableLens(requestedLensFacing)
+        val targetRotation = currentTargetRotation()
+
+        val resolutionSelector = ResolutionSelector.Builder()
+            .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY)
+            .setResolutionStrategy(
+                ResolutionStrategy(
+                    Size(640, 480),
+                    ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER
+                )
+            )
+            .build()
 
         val preview = Preview.Builder()
-            // Mesma proporção 4:3 da análise, para o overlay de landmarks
-            // alinhar com o que a PreviewView mostra.
-            .setTargetAspectRatio(AspectRatio.RATIO_4_3)
+            .setResolutionSelector(resolutionSelector)
+            .setTargetRotation(targetRotation)
             .build()
             .also { p -> p.setSurfaceProvider(binding.previewView.surfaceProvider) }
 
@@ -202,19 +225,10 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         // Pede uma análise de baixa resolução (~640x480, 4:3) para a inferência
         // ficar rápida — igual à referência Python (480x360). Menos pixels =
         // muito menos latência no MediaPipe/ONNX.
-        val resolutionSelector = ResolutionSelector.Builder()
-            .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY)
-            .setResolutionStrategy(
-                ResolutionStrategy(
-                    Size(640, 480),
-                    ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER
-                )
-            )
-            .build()
-
         val analysis = ImageAnalysis.Builder()
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
             .setResolutionSelector(resolutionSelector)
+            .setTargetRotation(targetRotation)
             .build()
 
         val usandoCameraFrontal = lensFacing == CameraSelector.LENS_FACING_FRONT
@@ -252,6 +266,142 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
 
             librasAnalyzer = newAnalyzer
             analysis.setAnalyzer(cameraExecutor, newAnalyzer)
+        }
+    }
+
+    private fun currentTargetRotation(): Int {
+        return _binding?.previewView?.display?.rotation
+            ?: activity?.windowManager?.defaultDisplay?.rotation
+            ?: Surface.ROTATION_0
+    }
+
+    private fun applyPreviewAspectRatio() {
+        val ratio = if (isLandscapeByBounds()) {
+            "4:3"
+        } else {
+            "3:4"
+        }
+        val cs = ConstraintSet()
+        cs.clone(binding.root)
+        cs.setDimensionRatio(R.id.preview_view, ratio)
+        cs.applyTo(binding.root)
+    }
+
+    private fun applyHudLayout() {
+        if (!isLandscapeHudCompact()) {
+            applyPortraitHudLayout()
+            return
+        }
+
+        setPortraitHudVisible(false)
+        ensureLandscapeHud()
+    }
+
+    private fun dp(value: Int): Int {
+        return (value * resources.displayMetrics.density).roundToInt()
+    }
+
+    private fun isLandscapeHudCompact(): Boolean {
+        return isLandscapeByBounds()
+    }
+
+    private fun applyPortraitHudLayout() {
+        removeLandscapeHud()
+        setPortraitHudVisible(true)
+    }
+
+    private fun setPortraitHudVisible(visible: Boolean) {
+        val visibility = if (visible) View.VISIBLE else View.GONE
+        binding.gradTop.visibility = visibility
+        binding.gradBottom.visibility = visibility
+        binding.btnExitLibras.visibility = visibility
+        binding.tvLive.visibility = visibility
+        binding.tvModeLabel.visibility = visibility
+        binding.scanFrame.visibility = visibility
+        binding.actionRow.visibility = visibility
+        binding.modesRow.visibility = visibility
+        binding.controlsRow.visibility = visibility
+        binding.chipResult.visibility = if (visible) View.INVISIBLE else View.GONE
+        binding.progressConfidence.visibility = if (visible) View.INVISIBLE else View.GONE
+        binding.tvFeedback.visibility = if (visible) View.INVISIBLE else View.GONE
+        binding.progressClear.visibility = View.GONE
+        binding.replyBubble.visibility = View.GONE
+        binding.phraseBubble.visibility = View.GONE
+        binding.suggestionsRow.visibility = View.GONE
+        binding.replyPanel.visibility = View.GONE
+        binding.calibrationPanel.visibility = View.GONE
+    }
+
+    private fun ensureLandscapeHud() {
+        if (landscapeHud != null) return
+        val hud = layoutInflater.inflate(R.layout.hud_libras_land, binding.root, false)
+        hud.id = R.id.hud_libras_land_root
+        binding.root.addView(
+            hud,
+            ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        )
+        hud.findViewById<View>(R.id.btn_exit_libras_land).setOnClickListener {
+            exitLibrasMode()
+        }
+        hud.findViewById<View>(R.id.btn_flip_libras_land).setOnClickListener {
+            lensFacing = if (lensFacing == CameraSelector.LENS_FACING_FRONT)
+                CameraSelector.LENS_FACING_BACK
+            else CameraSelector.LENS_FACING_FRONT
+            bindCamera()
+        }
+        landscapeHud = hud
+    }
+
+    private fun removeLandscapeHud() {
+        landscapeHud?.let { binding.root.removeView(it) }
+        landscapeHud = null
+    }
+
+    private fun isLandscapeByBounds(): Boolean {
+        if (isPhysicalLandscape) return true
+
+        val displayRotation = _binding?.previewView?.display?.rotation
+            ?: activity?.windowManager?.defaultDisplay?.rotation
+        if (displayRotation == Surface.ROTATION_90 || displayRotation == Surface.ROTATION_270) {
+            return true
+        }
+
+        val rootWidth = _binding?.root?.width ?: 0
+        val rootHeight = _binding?.root?.height ?: 0
+        return if (rootWidth > 0 && rootHeight > 0) {
+            rootWidth > rootHeight
+        } else {
+            resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        }
+    }
+
+    private fun setupOrientationHudListener() {
+        val context = context ?: return
+        orientationListener = object : OrientationEventListener(context) {
+            override fun onOrientationChanged(orientation: Int) {
+                if (orientation == ORIENTATION_UNKNOWN) return
+                val landscape = orientation in 60..120 || orientation in 240..300
+                if (landscape == isPhysicalLandscape) return
+
+                isPhysicalLandscape = landscape
+                _binding?.root?.post {
+                    applyPreviewAspectRatio()
+                    applyHudLayout()
+                }
+            }
+        }.also { listener ->
+            if (listener.canDetectOrientation()) listener.enable()
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        _binding?.root?.post {
+            applyPreviewAspectRatio()
+            applyHudLayout()
         }
     }
 
@@ -433,6 +583,12 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
     private fun currentCalibrationLetter(): String = letrasCalibracao[indiceCalibracao]
 
     private fun openCalibrationPanel() {
+        if (isLandscapeHudCompact()) {
+            closeReplyPanel()
+            binding.calibrationPanel.isVisible = false
+            Toast.makeText(requireContext(), "Calibracao ocultada no HUD compacto", Toast.LENGTH_SHORT).show()
+            return
+        }
         if (modoAtual != LibrasAnalyzer.Modo.ALFABETO) {
             modoAtual = LibrasAnalyzer.Modo.ALFABETO
             librasAnalyzer?.setModo(modoAtual)
@@ -719,6 +875,11 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
     }
 
     private fun openReplyPanel(focus: Boolean = false) {
+        if (isLandscapeHudCompact()) {
+            binding.replyPanel.isVisible = false
+            Toast.makeText(requireContext(), "Resposta ocultada no HUD compacto", Toast.LENGTH_SHORT).show()
+            return
+        }
         binding.replyPanel.isVisible = true
         val respostaAtual = binding.tvReply.text?.toString().orEmpty()
         if (binding.etReply.text.isNullOrBlank() && respostaAtual.isNotBlank()) {
@@ -783,6 +944,11 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
     private fun onLetraDetectada(letra: String, confianca: Float) {
         activity?.runOnUiThread {
             if (_binding == null) return@runOnUiThread
+            if (isLandscapeHudCompact()) {
+                binding.chipResult.visibility = View.GONE
+                binding.progressConfidence.visibility = View.GONE
+                return@runOnUiThread
+            }
             if (letra != "-") {
                 val porcentagem = (confianca * 100).toInt().coerceIn(0, 100)
                 binding.chipResult.text = "$letra   $porcentagem% conf"
@@ -824,6 +990,10 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
     private fun onFeedback(mensagem: String, nivel: Int) {
         activity?.runOnUiThread {
             if (_binding == null) return@runOnUiThread
+            if (isLandscapeHudCompact()) {
+                binding.tvFeedback.visibility = View.GONE
+                return@runOnUiThread
+            }
             if (mensagem.isBlank()) {
                 binding.tvFeedback.visibility = View.INVISIBLE
                 return@runOnUiThread
@@ -848,6 +1018,12 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
     private fun onFraseAtualizada(frase: String) {
         activity?.runOnUiThread {
             if (_binding == null) return@runOnUiThread
+            if (isLandscapeHudCompact()) {
+                binding.phraseBubble.isVisible = false
+                hideSuggestions()
+                fraseAnterior = frase
+                return@runOnUiThread
+            }
             binding.tvPhrase.text = frase
             binding.phraseBubble.isVisible = frase.isNotBlank()
             updateWordSuggestions(frase)
@@ -1040,8 +1216,8 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
     private fun onSemMao() {
         activity?.runOnUiThread {
             if (_binding == null) return@runOnUiThread
-            binding.chipResult.visibility = View.INVISIBLE
-            binding.progressConfidence.visibility = View.INVISIBLE
+            binding.chipResult.visibility = if (isLandscapeHudCompact()) View.GONE else View.INVISIBLE
+            binding.progressConfidence.visibility = if (isLandscapeHudCompact()) View.GONE else View.INVISIBLE
             binding.progressConfidence.progress = 0
             binding.progressClear.isVisible = false
         }
@@ -1089,22 +1265,13 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
     }
 
     private fun exitLibrasMode() {
-        try {
-            librasAnalyzer?.close()
-            librasAnalyzer = null
-            cameraProvider?.unbindAll()
-            cameraProvider = null
-            if (!cameraExecutor.isShutdown) cameraExecutor.shutdown()
-        } catch (e: Exception) {
-            e.printStackTrace()
-        } finally {
-            if (isAdded && view != null) {
-                val navController = findNavController()
-                val voltouParaCamera = navController.popBackStack(R.id.nav_camera, false)
-                if (!voltouParaCamera && navController.currentDestination?.id == R.id.nav_libras) {
-                    navController.navigate(R.id.action_libras_to_camera)
-                }
-            }
+        if (!isAdded || view == null) return
+        val navController = findNavController()
+        if (navController.currentDestination?.id != R.id.nav_libras) return
+
+        val voltouParaCamera = navController.popBackStack(R.id.nav_camera, false)
+        if (!voltouParaCamera && navController.currentDestination?.id == R.id.nav_libras) {
+            navController.navigate(R.id.action_libras_to_camera)
         }
     }
 
@@ -1114,6 +1281,9 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
 
     override fun onDestroyView() {
         super.onDestroyView()
+        orientationListener?.disable()
+        orientationListener = null
+        landscapeHud = null
         try {
             librasAnalyzer?.close()
             librasAnalyzer = null
