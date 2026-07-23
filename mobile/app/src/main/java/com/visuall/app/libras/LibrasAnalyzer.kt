@@ -40,29 +40,20 @@ class LibrasAnalyzer(
 
     companion object {
         const val JANELA_MLP             = 10
-        // Reduzido de 0.90 → 0.82: o limiar antigo rejeitava quase tudo
-        // quando a câmera do celular (ângulo/luz diferentes do dataset original)
-        // gerava confiança um pouco mais baixa que o esperado.
+        // Alinhado ao pipeline Python de referência (que já funcionava bem):
+        // uma única confiança mínima de 0.90 vale para estático e dinâmico.
         const val CONFIANCA_MINIMA       = 0.90f
-        const val CONFIANCA_ESTATICA     = 0.88f
-        const val CONFIANCA_ESTATICA_DIFICIL = 0.82f
-        const val CONFIANCA_DINAMICA     = 0.74f
-        const val CONFIANCA_DINAMICA_FORTE = 0.64f
-        const val MARGEM_ESTATICA_MINIMA = 0.05f
-        const val MARGEM_DINAMICA_MINIMA = 0.04f
-        const val MARGEM_DINAMICA_CONTRA_ESTATICO = 0.16f
-        // Reduzido de 0.30 → 0.25: a letra X (e outras dinâmicas) tem um
-        // movimento mais sutil que muitas vezes não cruzava o limiar antigo,
-        // fazendo o sistema tentar classificar como estática e falhar.
-        const val LIMIAR_MOVIMENTO       = 0.12f
-        const val LIMIAR_MOVIMENTO_FORTE = 0.20f
+        // Acima deste movimento usamos o modelo dinâmico (H,J,K,X,Z); abaixo,
+        // o estático. 0.30 é o valor de referência do Python.
+        const val LIMIAR_MOVIMENTO       = 0.30f
         const val TEMPO_PRA_LIMPAR       = 3_000L
-        const val ESTAB_MIN_DINAMICO     = 1
-        // Reduzido de 12 → 10: resposta mais rápida sem perder estabilidade.
-        const val ESTAB_MIN_ESTATICO     = 6
-        const val COOLDOWN_DINAMICO      = 550L
-        const val COOLDOWN_ESTATICO      = 850L
-        const val COOLDOWN_REPETICAO     = 650L
+        // Frames consecutivos com a mesma letra antes de aceitá-la. Estático
+        // exige mais estabilidade (mão parada); dinâmico aceita mais rápido.
+        const val ESTAB_MIN_DINAMICO     = 2
+        const val ESTAB_MIN_ESTATICO     = 12
+        const val COOLDOWN_DINAMICO      = 300L
+        const val COOLDOWN_ESTATICO      = 1_000L
+        const val COOLDOWN_REPETICAO     = 1_000L
         const val NO_HAND_TOLERANCE      = 3
         const val FEATURES_ESTATICO      = 42
         const val FEATURES_DINAMICO      = 420
@@ -94,13 +85,11 @@ class LibrasAnalyzer(
         const val TRAINING_BASIC_TARGET_SAMPLES = CALIBRATION_TARGET_FRAMES
         const val TRAINING_STRONG_TARGET_SAMPLES = 96
         const val CALIBRATION_MATCH_LIMIT = 0.18f
-        const val CALIBRATION_OVERRIDE_GAP = 0.04f
         const val FEEDBACK_NEUTRO = 0
         const val FEEDBACK_BOM = 1
         const val FEEDBACK_ALERTA = 2
         const val TRAINING_FILE_NAME = "visuall_libras_phone_dataset.csv"
         const val DYNAMIC_TRAINING_FILE_NAME = "visuall_libras_dynamic_phone_dataset.csv"
-        val LETRAS_ESTATICAS_DIFICEIS    = setOf("E", "I", "U", "F", "G", "P", "Q", "T", "V", "W", "Y")
         val LETRAS_REPETICAO_AUTO        = setOf("S", "R")
     }
 
@@ -175,9 +164,6 @@ class LibrasAnalyzer(
     private val calibrationLock       = Any()
     private val calibrationBuffer     = ArrayList<FloatArray>()
     @Volatile private var calibrationTarget: String? = null
-    // NOVO: pequeno buffer de votação para suavizar ruído de 1 frame isolado
-    // (ex.: confunde X com outra letra por 1 frame e volta) — evita "flicker".
-    private val bufVotacao            = ArrayDeque<String>()
     private var ultimaPredicao        = ""
     private var contadorEstabilidade  = 0
     private var ultimaLetraAdicionada = ""
@@ -235,7 +221,6 @@ class LibrasAnalyzer(
                 contadorEstabilidade = 0
                 tempoInicioEsticado  = 0L
                 bufferLm.clear()
-                bufVotacao.clear()
                 letraRepetidaPendente = ""
                 onRepeticaoPendente(null)
                 onFeedback("MAO FORA DO QUADRO", FEEDBACK_ALERTA)
@@ -275,16 +260,10 @@ class LibrasAnalyzer(
 
             val movimento = calcularMovimento()
             val predicao = escolherClassificacao(dados, movimento)
-            val letraBruta = predicao.letra
+            val letra = predicao.letra
             val confianca = predicao.confianca
             val modo = predicao.modo
             emitirFeedbackAlfabeto(predicao, movimento)
-
-            // Suavização por votação: só aceita a letra se ela apareceu
-            // em pelo menos 2 dos últimos 3 frames analisados.
-            bufVotacao.addLast(letraBruta)
-            if (bufVotacao.size > 3) bufVotacao.removeFirst()
-            val letra = if (bufVotacao.count { it == letraBruta } >= 2) letraBruta else "-"
 
             onLetra(letra, confianca, modo)
 
@@ -466,14 +445,12 @@ class LibrasAnalyzer(
     }
 
     private fun aplicarCalibracaoPessoal(dados: FloatArray, base: Prediction): Prediction {
+        // Só usamos a calibração pessoal quando o modelo não reconheceu nada,
+        // para nunca sobrescrever uma decisão confiante do modelo por um
+        // vizinho-mais-próximo que pode estar errado.
+        if (base.letra != "-") return base
         val calibrado = melhorCalibracao(dados)
-        if (calibrado.letra == "-") return base
-
-        val deveUsarCalibrado = base.letra == "-" ||
-            calibrado.confianca >= base.confianca - CALIBRATION_OVERRIDE_GAP ||
-            calibrado.letra in LETRAS_ESTATICAS_DIFICEIS
-
-        return if (deveUsarCalibrado) calibrado else base
+        return if (calibrado.letra != "-") calibrado else base
     }
 
     private fun melhorCalibracao(dados: FloatArray): Prediction {
@@ -530,34 +507,16 @@ class LibrasAnalyzer(
     }
 
     private fun escolherClassificacao(dados: FloatArray, movimento: Float): Prediction {
-        // A imagem já vem espelhada corretamente na câmera frontal (ver
-        // prepararBitmap), então NÃO tentamos mais adivinhar a orientação
-        // rodando o modelo com landmarks espelhados — isso só dobrava a
-        // chance de um falso positivo confiante na letra errada.
-        val melhorEstatico = classificarEstatico(dados)
-        val estaticoComCalibracao = if (movimento < LIMIAR_MOVIMENTO * 0.8f) {
-            aplicarCalibracaoPessoal(dados, melhorEstatico)
-        } else {
-            melhorEstatico
+        // Mesma decisão do pipeline Python de referência: com movimento acima
+        // do limiar e o buffer cheio, usamos o modelo dinâmico (H,J,K,X,Z);
+        // caso contrário, o estático. Os dois nunca disputam no mesmo frame,
+        // o que elimina a principal fonte de "letra parada virando outra".
+        if (movimento > LIMIAR_MOVIMENTO && bufferLm.size >= JANELA_MLP) {
+            return classificarDinamico()
         }
-        if (bufferLm.size < JANELA_MLP) return estaticoComCalibracao
-
-        val melhorDinamico = classificarDinamico()
-        val dinamicoConfiavel = melhorDinamico.letra != "-" &&
-            movimento >= LIMIAR_MOVIMENTO &&
-            melhorDinamico.margem >= MARGEM_DINAMICA_MINIMA &&
-            (
-                (
-                    melhorDinamico.confianca >= CONFIANCA_DINAMICA &&
-                    (
-                        estaticoComCalibracao.letra == "-" ||
-                        melhorDinamico.confianca + MARGEM_DINAMICA_CONTRA_ESTATICO >= estaticoComCalibracao.confianca
-                    )
-                ) ||
-                (movimento >= LIMIAR_MOVIMENTO_FORTE && melhorDinamico.confianca >= CONFIANCA_DINAMICA_FORTE)
-            )
-
-        return if (dinamicoConfiavel) melhorDinamico else estaticoComCalibracao
+        // Calibração pessoal entra apenas como reforço quando o modelo não
+        // reconheceu nada (ver aplicarCalibracaoPessoal).
+        return aplicarCalibracaoPessoal(dados, classificarEstatico(dados))
     }
 
     private fun classificarEstatico(dados: FloatArray): Prediction {
@@ -567,20 +526,11 @@ class LibrasAnalyzer(
         @Suppress("UNCHECKED_CAST")
         val probs  = (out[1].value as Array<FloatArray>)[0]
         val idx    = probs.indices.maxByOrNull { probs[it] } ?: 0
-        val second = probs.indices
-            .filter { it != idx }
-            .maxOfOrNull { probs[it] } ?: 0f
         val conf   = probs[idx]
         val label  = labelsEstatico.getOrNull(idx)
-        val minimo = if (label in LETRAS_ESTATICAS_DIFICEIS) {
-            CONFIANCA_ESTATICA_DIFICIL
-        } else {
-            CONFIANCA_ESTATICA
-        }
-        val margem = conf - second
-        val letra  = if (label != null && conf >= minimo && margem >= MARGEM_ESTATICA_MINIMA) label else "-"
+        val letra  = if (label != null && conf >= CONFIANCA_MINIMA) label else "-"
         tensor.close(); out.close()
-        return Prediction(letra, conf, "estatico", margem)
+        return Prediction(letra, conf, "estatico")
     }
 
     private fun classificarDinamico(): Prediction {
@@ -594,15 +544,11 @@ class LibrasAnalyzer(
         @Suppress("UNCHECKED_CAST")
         val probs  = (out[1].value as Array<FloatArray>)[0]
         val idx    = probs.indices.maxByOrNull { probs[it] } ?: 0
-        val second = probs.indices
-            .filter { it != idx }
-            .maxOfOrNull { probs[it] } ?: 0f
         val conf   = probs[idx]
-        val margem = conf - second
-        val letra  = if (conf >= CONFIANCA_DINAMICA_FORTE && idx < labelsDinamico.size)
+        val letra  = if (conf >= CONFIANCA_MINIMA && idx < labelsDinamico.size)
                          labelsDinamico[idx] else "-"
         tensor.close(); out.close()
-        return Prediction(letra, conf, "dinamico", margem)
+        return Prediction(letra, conf, "dinamico")
     }
 
     private fun analisarCorpo(
