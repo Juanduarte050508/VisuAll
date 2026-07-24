@@ -48,19 +48,24 @@ class LibrasAnalyzer(
         // Lado menor da imagem enviada ao MediaPipe. Igual à referência Python
         // (480x360). Reduzir a resolução é o que mais acelera a inferência.
         const val INPUT_SHORT_SIDE       = 360
-        // Alinhado ao pipeline Python de referência (que já funcionava bem):
-        // uma única confiança mínima de 0.90 vale para estático e dinâmico.
+        // O MLP é "superconfiante": cospe ~0.99 quase sempre, então só a
+        // confiança filtra muito pouco. A MARGEM (1ª menos 2ª opção) é o
+        // critério que realmente separa um sinal claro de um chute.
         const val CONFIANCA_MINIMA       = 0.90f
+        const val MARGEM_ESTATICA_MINIMA = 0.25f
+        // O modelo dinâmico só conhece 5 classes (H,J,K,X,Z) e não tem classe
+        // "nenhuma": qualquer movimento vira uma delas. Por isso ele exige
+        // confiança e margem bem maiores, senão sai J o tempo todo.
+        const val CONFIANCA_DINAMICA     = 0.95f
+        const val MARGEM_DINAMICA_MINIMA = 0.35f
         // Acima deste movimento usamos o modelo dinâmico (H,J,K,X,Z); abaixo,
         // o estático. 0.30 é o valor de referência do Python.
         const val LIMIAR_MOVIMENTO       = 0.30f
         const val TEMPO_PRA_LIMPAR       = 3_000L
-        // Frames consecutivos com a mesma letra antes de aceitá-la. Com o
-        // rastreamento VIDEO os landmarks já são estáveis, então baixamos
-        // bastante em relação ao Python (que rodava a FPS altíssimo) para o
-        // celular escrever rápido: a letra sai depois de poucos frames firmes.
-        const val ESTAB_MIN_DINAMICO     = 2
-        const val ESTAB_MIN_ESTATICO     = 4
+        // Frames consecutivos com a mesma letra antes de aceitá-la. Subimos em
+        // relação ao ajuste anterior (4/2), que confirmava letra fácil demais.
+        const val ESTAB_MIN_DINAMICO     = 4
+        const val ESTAB_MIN_ESTATICO     = 8
         const val COOLDOWN_DINAMICO      = 350L
         const val COOLDOWN_ESTATICO      = 450L
         const val NO_HAND_TOLERANCE      = 3
@@ -554,10 +559,15 @@ class LibrasAnalyzer(
         val probs  = (out[1].value as Array<FloatArray>)[0]
         val idx    = probs.indices.maxByOrNull { probs[it] } ?: 0
         val conf   = probs[idx]
+        // Margem contra a segunda melhor opção: se o modelo está dividido
+        // (ex.: C vs mão aberta), rejeitamos em vez de chutar.
+        val second = probs.indices.filter { it != idx }.maxOfOrNull { probs[it] } ?: 0f
+        val margem = conf - second
         val label  = labelsEstatico.getOrNull(idx)
-        val letra  = if (label != null && conf >= CONFIANCA_MINIMA) label else "-"
+        val letra  = if (label != null && conf >= CONFIANCA_MINIMA &&
+                         margem >= MARGEM_ESTATICA_MINIMA) label else "-"
         tensor.close(); out.close()
-        return Prediction(letra, conf, "estatico")
+        return Prediction(letra, conf, "estatico", margem)
     }
 
     private fun classificarDinamico(): Prediction {
@@ -572,10 +582,12 @@ class LibrasAnalyzer(
         val probs  = (out[1].value as Array<FloatArray>)[0]
         val idx    = probs.indices.maxByOrNull { probs[it] } ?: 0
         val conf   = probs[idx]
-        val letra  = if (conf >= CONFIANCA_MINIMA && idx < labelsDinamico.size)
-                         labelsDinamico[idx] else "-"
+        val second = probs.indices.filter { it != idx }.maxOfOrNull { probs[it] } ?: 0f
+        val margem = conf - second
+        val letra  = if (conf >= CONFIANCA_DINAMICA && margem >= MARGEM_DINAMICA_MINIMA &&
+                         idx < labelsDinamico.size) labelsDinamico[idx] else "-"
         tensor.close(); out.close()
-        return Prediction(letra, conf, "dinamico")
+        return Prediction(letra, conf, "dinamico", margem)
     }
 
     private fun analisarCorpo(
