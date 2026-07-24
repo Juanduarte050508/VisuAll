@@ -549,8 +549,14 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
             bindCamera()
         }
 
+        // Toque: limpa a frase inteira (a lixeira zera tudo de uma vez).
+        // Toque longo: apaga só a última letra/sinal, para quem quer corrigir.
         binding.btnDeleteLetter.setOnClickListener {
+            librasAnalyzer?.limparFrase()
+        }
+        binding.btnDeleteLetter.setOnLongClickListener {
             librasAnalyzer?.apagarUltima()
+            true
         }
 
         binding.btnHistory.setOnClickListener {

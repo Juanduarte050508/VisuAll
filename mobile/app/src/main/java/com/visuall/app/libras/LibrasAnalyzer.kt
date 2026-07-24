@@ -59,12 +59,14 @@ class LibrasAnalyzer(
         const val CONFIANCA_DINAMICA     = 0.95f
         const val MARGEM_DINAMICA_MINIMA = 0.35f
         // Acima deste movimento usamos o modelo dinâmico (H,J,K,X,Z); abaixo,
-        // o estático. 0.30 é o valor de referência do Python.
-        const val LIMIAR_MOVIMENTO       = 0.30f
+        // o estático. Subido de 0.30 -> 0.55: o modelo dinâmico não tem classe
+        // "nenhuma", então qualquer tremidinha da mão virava J. Agora ele só
+        // entra quando há um movimento claro e intencional.
+        const val LIMIAR_MOVIMENTO       = 0.55f
         const val TEMPO_PRA_LIMPAR       = 3_000L
-        // Frames consecutivos com a mesma letra antes de aceitá-la. Subimos em
-        // relação ao ajuste anterior (4/2), que confirmava letra fácil demais.
-        const val ESTAB_MIN_DINAMICO     = 4
+        // Frames consecutivos com a mesma letra antes de aceitá-la. Dinâmico
+        // exige bastante para não sair H/J/K/X/Z por acidente.
+        const val ESTAB_MIN_DINAMICO     = 6
         const val ESTAB_MIN_ESTATICO     = 8
         const val COOLDOWN_DINAMICO      = 350L
         const val COOLDOWN_ESTATICO      = 450L
@@ -189,6 +191,10 @@ class LibrasAnalyzer(
     private var ultimoTempoCorpo      = 0L
     private var ultimaClasseCorpo     = ""
     private var bodyNoHandSince       = 0L
+    // Sinais de corpo reconhecidos, em sequência (rótulos: PESSOA, SURDO...).
+    // A frase é montada traduzindo ESTA lista (com artigo/gênero/verbo), igual
+    // ao traduzir_frase do Python — não dá pra fazer só concatenando palavras.
+    private val bodyTokens            = ArrayList<String>()
     // Timestamp monotônico exigido pelo modo VIDEO do MediaPipe. Precisa ser
     // estritamente crescente a cada frame para o rastreamento funcionar.
     private var videoTimestamp        = 0L
@@ -633,6 +639,7 @@ class LibrasAnalyzer(
                 (agora - ultimoTempoLimpar) > 2_000L) {
                 frase = ""; tempoInicioEsticado = 0L; ultimoTempoLimpar = agora
                 ultimaClasseCorpo = ""
+                bodyTokens.clear()
                 onFraseUpdate("")
             }
             resetBodyCapture()
@@ -685,8 +692,10 @@ class LibrasAnalyzer(
                         if (prediction.letra != "NEUTRO" &&
                             prediction.letra != ultimaClasseCorpo &&
                             agora - ultimoTempoCorpo > BODY_COOLDOWN) {
-                            val palavra = traduzirCorpo(prediction.letra)
-                            frase = (frase.trim() + " " + palavra).trim()
+                            // Guarda o rótulo e re-traduz a frase inteira, para a
+                            // concordância (artigo/gênero/verbo) sair certa.
+                            bodyTokens.add(prediction.letra.uppercase())
+                            frase = traduzirFrase(bodyTokens)
                             ultimoTempoCorpo = agora
                             ultimaClasseCorpo = prediction.letra
                             onFraseUpdate(frase)
@@ -849,6 +858,63 @@ class LibrasAnalyzer(
         }
     }
 
+    // ── Tradução de frase (concordância) — portado do traduzir_frase do Python ─
+    private data class VocabEntry(
+        val tipo: String,          // "subst" | "adj" | "verbo"
+        val genero: String? = null,
+        val palavra: String? = null,
+        val artigo: String? = null,
+        val masc: String? = null,
+        val fem: String? = null,
+        val conj: String? = null,
+        val inf: String? = null
+    )
+
+    private val vocabulario = mapOf(
+        "PESSOA"     to VocabEntry(tipo = "subst", genero = "f", palavra = "pessoa", artigo = "a"),
+        "SURDO"      to VocabEntry(tipo = "adj", masc = "surdo", fem = "surda"),
+        "CONVERSAR"  to VocabEntry(tipo = "verbo", conj = "conversa", inf = "conversar"),
+        "COMPUTADOR" to VocabEntry(tipo = "subst", genero = "m", palavra = "computador", artigo = "o"),
+        "AJUDAR"     to VocabEntry(tipo = "verbo", conj = "ajuda", inf = "ajudar")
+    )
+
+    private fun traduzirFrase(palavras: List<String>): String {
+        val partes = ArrayList<String>()
+        var ultGen: String? = null
+        var ultTipo: String? = null
+        palavras.forEachIndexed { i, raw ->
+            val p = raw.uppercase()
+            if (p == "NEUTRO") return@forEachIndexed
+            val v = vocabulario[p]
+            if (v == null) {
+                partes.add(p.lowercase().replaceFirstChar { it.uppercase() })
+                ultGen = "m"; ultTipo = "subst"
+                return@forEachIndexed
+            }
+            when (v.tipo) {
+                "subst" -> {
+                    val art = if (i == 0) {
+                        v.artigo.orEmpty().replaceFirstChar { it.uppercase() }
+                    } else {
+                        v.artigo.orEmpty()
+                    }
+                    partes.add("$art ${v.palavra}")
+                    ultGen = v.genero; ultTipo = "subst"
+                }
+                "adj" -> {
+                    partes.add(if (ultGen == "f") v.fem.orEmpty() else v.masc.orEmpty())
+                    ultTipo = "adj"
+                }
+                "verbo" -> {
+                    partes.add(if (ultTipo == "verbo") "a ${v.inf}" else v.conj.orEmpty())
+                    ultTipo = "verbo"
+                }
+            }
+        }
+        if (partes.isEmpty()) return ""
+        return partes.joinToString(" ").replaceFirstChar { it.uppercase() }
+    }
+
     fun setModo(novoModo: Modo) {
         modoAtual = novoModo
         bodyState = BodyState.OCIOSO
@@ -861,6 +927,12 @@ class LibrasAnalyzer(
         ultimaPredicao = ""
         contadorEstabilidade = 0
         letraRepetidaPendente = ""
+        // Troca de modo começa uma frase nova (letras e sinais de corpo não se
+        // misturam na mesma frase).
+        bodyTokens.clear()
+        ultimaLetraAdicionada = ""
+        frase = ""
+        onFraseUpdate("")
         onRepeticaoPendente(null)
         onLetra("-", 0f, novoModo.name.lowercase())
         if (novoModo == Modo.CORPO) {
@@ -980,8 +1052,28 @@ class LibrasAnalyzer(
             onFraseUpdate(frase)
         }
     }
-    fun apagarUltima()     { if (frase.isNotEmpty()) { frase = frase.dropLast(1); letraRepetidaPendente = ""; ultimaLetraAdicionada = ""; onRepeticaoPendente(null); onFraseUpdate(frase) } }
-    fun limparFrase()      { frase = ""; letraRepetidaPendente = ""; ultimaLetraAdicionada = ""; onRepeticaoPendente(null); onFraseUpdate(frase) }
+    fun apagarUltima() {
+        if (modoAtual == Modo.CORPO) {
+            // No corpo apagamos o último SINAL (token) e re-traduzimos.
+            if (bodyTokens.isNotEmpty()) {
+                bodyTokens.removeAt(bodyTokens.size - 1)
+                frase = traduzirFrase(bodyTokens)
+                ultimaClasseCorpo = ""
+                onFraseUpdate(frase)
+            }
+            return
+        }
+        if (frase.isNotEmpty()) {
+            frase = frase.dropLast(1)
+            letraRepetidaPendente = ""; ultimaLetraAdicionada = ""
+            onRepeticaoPendente(null); onFraseUpdate(frase)
+        }
+    }
+    fun limparFrase() {
+        frase = ""; letraRepetidaPendente = ""; ultimaLetraAdicionada = ""
+        bodyTokens.clear(); ultimaClasseCorpo = ""
+        onRepeticaoPendente(null); onFraseUpdate(frase)
+    }
     fun getFrase(): String = frase
 
     fun close() {
