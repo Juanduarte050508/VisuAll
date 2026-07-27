@@ -45,30 +45,30 @@ class LibrasAnalyzer(
 
     companion object {
         const val JANELA_MLP             = 10
-        // Lado menor da imagem enviada ao MediaPipe. Igual à referência Python
-        // (480x360). Reduzir a resolução é o que mais acelera a inferência.
-        const val INPUT_SHORT_SIDE       = 360
+        // Lado menor da imagem enviada ao MediaPipe. O preview continua na
+        // resolução da câmera; este valor só reduz o bitmap analisado. 255 tem
+        // ~50% da área de 360, o que dobra aproximadamente a taxa efetiva de
+        // frames processados quando o gargalo é MediaPipe/ONNX.
+        const val INPUT_SHORT_SIDE       = 255
         // O MLP é "superconfiante": cospe ~0.99 quase sempre, então só a
         // confiança filtra muito pouco. A MARGEM (1ª menos 2ª opção) é o
         // critério que realmente separa um sinal claro de um chute.
         const val CONFIANCA_MINIMA       = 0.90f
         const val MARGEM_ESTATICA_MINIMA = 0.25f
         // O modelo dinâmico só conhece 5 classes (H,J,K,X,Z) e não tem classe
-        // "nenhuma": qualquer movimento vira uma delas. Por isso ele exige
-        // confiança e margem bem maiores, senão sai J o tempo todo.
-        const val CONFIANCA_DINAMICA     = 0.95f
-        const val MARGEM_DINAMICA_MINIMA = 0.35f
-        // Acima deste movimento usamos o modelo dinâmico (H,J,K,X,Z); abaixo,
-        // o estático. Subido de 0.30 -> 0.55: o modelo dinâmico não tem classe
-        // "nenhuma", então qualquer tremidinha da mão virava J. Agora ele só
-        // entra quando há um movimento claro e intencional.
-        const val LIMIAR_MOVIMENTO       = 0.55f
+        // "nenhuma". Mantemos margem, mas sem bloquear o gesto: letras com
+        // movimento aparecem por poucos frames e precisam ser aceitas rápido.
+        const val CONFIANCA_DINAMICA     = 0.90f
+        const val MARGEM_DINAMICA_MINIMA = 0.20f
+        // Mesmo limiar do backend Python de referência. Com 0.55, movimentos
+        // reais de H/J/K/X/Z ficavam frequentemente presos no modelo estático.
+        const val LIMIAR_MOVIMENTO       = 0.30f
         const val TEMPO_PRA_LIMPAR       = 3_000L
-        // Frames consecutivos com a mesma letra antes de aceitá-la. Dinâmico
-        // exige bastante para não sair H/J/K/X/Z por acidente.
-        const val ESTAB_MIN_DINAMICO     = 6
+        // Dinâmicas são transitórias; exigir muitos frames consecutivos faz a
+        // janela passar do gesto antes da letra ser adicionada.
+        const val ESTAB_MIN_DINAMICO     = 3
         const val ESTAB_MIN_ESTATICO     = 8
-        const val COOLDOWN_DINAMICO      = 350L
+        const val COOLDOWN_DINAMICO      = 250L
         const val COOLDOWN_ESTATICO      = 450L
         const val NO_HAND_TOLERANCE      = 3
         const val FEATURES_ESTATICO      = 42

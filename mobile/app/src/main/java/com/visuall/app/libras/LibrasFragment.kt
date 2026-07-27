@@ -13,6 +13,8 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.speech.RecognizerIntent
 import android.speech.tts.TextToSpeech
+import android.hardware.camera2.CaptureRequest
+import android.util.Range
 import android.view.Surface
 import android.view.LayoutInflater
 import android.view.OrientationEventListener
@@ -26,6 +28,7 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import android.util.Size
+import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
@@ -225,11 +228,18 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         // Pede uma análise de baixa resolução (~640x480, 4:3) para a inferência
         // ficar rápida — igual à referência Python (480x360). Menos pixels =
         // muito menos latência no MediaPipe/ONNX.
-        val analysis = ImageAnalysis.Builder()
+        val analysisBuilder = ImageAnalysis.Builder()
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
             .setResolutionSelector(resolutionSelector)
             .setTargetRotation(targetRotation)
-            .build()
+
+        Camera2Interop.Extender(analysisBuilder)
+            .setCaptureRequestOption(
+                CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
+                Range(60, 60)
+            )
+
+        val analysis = analysisBuilder.build()
 
         val usandoCameraFrontal = lensFacing == CameraSelector.LENS_FACING_FRONT
 

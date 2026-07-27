@@ -10,6 +10,7 @@ Estrutura esperada:
 
 Gera: dataset_mlp_estatico.npz  (X com shape [N, 42], y com shape [N])
 """
+import csv
 import cv2
 import mediapipe as mp
 import numpy as np
@@ -17,8 +18,10 @@ import os
 from pathlib import Path
 
 # ============ CONFIGURAÇÃO ============
-PASTA_IMAGENS = "../../data/raw_images"   # pasta raiz com subpastas por letra
-SAIDA         = "../../data/dataset_static.npz"
+ROOT          = Path(__file__).resolve().parents[3]
+PASTA_IMAGENS = ROOT / "data" / "raw_images"   # pasta raiz com subpastas por letra
+SAIDA         = ROOT / "data" / "dataset_static.npz"
+SAIDA_CSV     = ROOT / "data" / "static_external_dataset.csv"
 EXTENSOES     = [".jpg", ".jpeg", ".png", ".bmp", ".webp"]
 # ======================================
 
@@ -38,7 +41,7 @@ hands = mp.solutions.hands.Hands(
     min_detection_confidence=0.5,
 )
 
-X_all, y_all = [], []
+X_all, y_all, rows_csv = [], [], []
 letras = sorted([d for d in os.listdir(PASTA_IMAGENS)
                  if os.path.isdir(os.path.join(PASTA_IMAGENS, d))])
 print(f"Letras encontradas: {letras}\n")
@@ -63,6 +66,7 @@ for letra in letras:
             dados  = normalize_landmarks(pontos)   # 42 valores (21 pontos * x,y)
             X_all.append(dados)
             y_all.append(letra)
+            rows_csv.append((img_path.stat().st_mtime_ns, letra, "external_image", dados))
             amostras_letra += 1
         else:
             falhas += 1
@@ -78,8 +82,16 @@ else:
     X = np.array(X_all, dtype=np.float32)
     y = np.array(y_all)
 
+    SAIDA.parent.mkdir(parents=True, exist_ok=True)
     np.savez(SAIDA, X=X, y=y)
+    with SAIDA_CSV.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["timestamp", "label", "source"] + [f"f{i}" for i in range(42)])
+        for timestamp, label, source, dados in rows_csv:
+            writer.writerow([timestamp, label, source] + list(dados))
+
     print(f"\n✅ Dataset salvo em '{SAIDA}'")
+    print(f"✅ CSV mobile salvo em '{SAIDA_CSV}'")
     print(f"   Total de amostras: {len(X)}")
     print(f"   Shape X: {X.shape}")
     print(f"   Distribuição: { {l: int((y==l).sum()) for l in letras} }")

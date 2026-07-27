@@ -11,6 +11,7 @@ Estrutura esperada:
 
 Gera: dataset_mlp.npz  (X com shape [N, 420], y com shape [N])
 """
+import csv
 import cv2
 import mediapipe as mp
 import numpy as np
@@ -18,10 +19,12 @@ import os
 from pathlib import Path
 
 # ============ CONFIGURAÇÃO ============
-PASTA_VIDEOS  = "../../data/raw_videos"   # pasta raiz com subpastas por letra
+ROOT          = Path(__file__).resolve().parents[3]
+PASTA_VIDEOS  = ROOT / "data" / "raw_videos"   # pasta raiz com subpastas por letra
 JANELA        = 10                        # quantos frames por amostra
 PULO          = 3                         # pula N frames entre janelas (evita amostras idênticas)
-SAIDA         = "../../data/dataset_dynamic.npz"
+SAIDA         = ROOT / "data" / "dataset_dynamic.npz"
+SAIDA_CSV     = ROOT / "data" / "dynamic_external_dataset.csv"
 # ======================================
 
 def normalize_landmarks(pontos):
@@ -41,7 +44,7 @@ hands = mp.solutions.hands.Hands(
     min_tracking_confidence=0.5
 )
 
-X_all, y_all = [], []
+X_all, y_all, rows_csv = [], [], []
 letras = sorted([d for d in os.listdir(PASTA_VIDEOS)
                  if os.path.isdir(os.path.join(PASTA_VIDEOS, d))])
 print(f"Letras encontradas: {letras}\n")
@@ -77,8 +80,10 @@ for letra in letras:
         i = 0
         while i + JANELA <= len(frames_lm):
             janela = frames_lm[i:i + JANELA]
-            X_all.append(np.array(janela).flatten())  # 10 * 42 = 420 valores
+            features = np.array(janela).flatten()  # 10 * 42 = 420 valores
+            X_all.append(features)
             y_all.append(letra)
+            rows_csv.append((video_path.stat().st_mtime_ns + i, letra, "external_video", features))
             amostras_letra += 1
             i += PULO
 
@@ -89,8 +94,16 @@ hands.close()
 X = np.array(X_all, dtype=np.float32)
 y = np.array(y_all)
 
+SAIDA.parent.mkdir(parents=True, exist_ok=True)
 np.savez(SAIDA, X=X, y=y)
+with SAIDA_CSV.open("w", newline="", encoding="utf-8") as f:
+    writer = csv.writer(f)
+    writer.writerow(["timestamp", "label", "source"] + [f"f{i}" for i in range(420)])
+    for timestamp, label, source, dados in rows_csv:
+        writer.writerow([timestamp, label, source] + list(dados))
+
 print(f"\n✅ Dataset salvo em '{SAIDA}'")
+print(f"✅ CSV mobile salvo em '{SAIDA_CSV}'")
 print(f"   Total de amostras: {len(X)}")
 print(f"   Shape X: {X.shape}")
 print(f"   Distribuição: { {l: int((y==l).sum()) for l in letras} }")
