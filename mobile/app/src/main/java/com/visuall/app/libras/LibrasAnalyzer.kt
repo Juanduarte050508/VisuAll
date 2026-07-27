@@ -46,10 +46,17 @@ class LibrasAnalyzer(
     companion object {
         const val JANELA_MLP             = 10
         // Lado menor da imagem enviada ao MediaPipe. O preview continua na
-        // resolução da câmera; este valor só reduz o bitmap analisado. 255 tem
-        // ~50% da área de 360, o que dobra aproximadamente a taxa efetiva de
-        // frames processados quando o gargalo é MediaPipe/ONNX.
-        const val INPUT_SHORT_SIDE       = 255
+        // resolução da câmera; este valor só reduz o bitmap analisado.
+        // Estava em 255 (baixado de 360, o valor do Python) para ganhar
+        // velocidade, mas isso não foi validado com teste real de acurácia
+        // em dispositivo — 255 pode prejudicar letras difíceis (mão
+        // pequena/longe do quadro perde detalhe do landmark). 300 é um
+        // meio-termo: ~31% menos área que 360 (ainda ganha velocidade
+        // real), mas ~38% mais área que 255 (perde menos detalhe). Antes de
+        // fixar o valor final, comparar a taxa de acerto das letras
+        // difíceis (E, I, U, F, G, P, Q, T, V, W, Y) nos três valores num
+        // celular real.
+        const val INPUT_SHORT_SIDE       = 300
         // O MLP é "superconfiante": cospe ~0.99 quase sempre, então só a
         // confiança filtra muito pouco. A MARGEM (1ª menos 2ª opção) é o
         // critério que realmente separa um sinal claro de um chute.
@@ -213,13 +220,25 @@ class LibrasAnalyzer(
 
     @ExperimentalGetImage
     override fun analyze(imageProxy: ImageProxy) {
+      // rawBitmap/preparedBitmap precisam existir fora do try para o finally
+      // poder reciclá-los (variável declarada dentro do try não é visível lá).
+      var rawBitmap: Bitmap? = null
+      var preparedBitmap: Bitmap? = null
+      try {
         // ── Converter YUV → RGBA_8888 (exigido pelo MediaPipe) ────────────
-        val bitmap = imageProxy.toBitmap()
-        val preparedBitmap = prepararBitmap(
-            bitmap, imageProxy.imageInfo.rotationDegrees.toFloat(), espelharImagem)
-        val mpImage = BitmapImageBuilder(preparedBitmap).build()
+        // Os dois são reciclados no finally: detectForVideo é síncrono (sem
+        // callback), então quando este método termina nenhum dos dois é mais
+        // usado — reciclar aqui libera a memória nativa do bitmap na hora, em
+        // vez de esperar o coletor de lixo (a alocação de 1-2 bitmaps por
+        // frame de câmera é uma fonte real de pressão de GC).
+        val raw = imageProxy.toBitmap()
+        rawBitmap = raw
+        val prepared = prepararBitmap(
+            raw, imageProxy.imageInfo.rotationDegrees.toFloat(), espelharImagem)
+        preparedBitmap = prepared
+        val mpImage = BitmapImageBuilder(prepared).build()
         // Corrige o x para a proporção 4:3 do treino (quadro retrato -> 4:3).
-        frameAspect = preparedBitmap.width.toFloat() / preparedBitmap.height
+        frameAspect = prepared.width.toFloat() / prepared.height
         aspectX = 0.75f * frameAspect
 
         val timestamp = nextVideoTimestamp()
@@ -230,12 +249,10 @@ class LibrasAnalyzer(
             if (poseDetector == null) {
                 onLetra("-", 0f, "corpo")
                 onFeedback("MODELO DE CORPO INDISPONIVEL", FEEDBACK_ALERTA)
-                imageProxy.close()
                 return
             }
             val poseResult = poseDetector.detectForVideo(mpImage, timestamp)
             analisarCorpo(result, poseResult)
-            imageProxy.close()
             return
         }
 
@@ -255,7 +272,6 @@ class LibrasAnalyzer(
                 onFeedback("MAO FORA DO QUADRO", FEEDBACK_ALERTA)
                 onNoHand()
             }
-            imageProxy.close()
             return
         }
 
@@ -340,8 +356,11 @@ class LibrasAnalyzer(
             // Ela só é liberada quando a mão sai do quadro (ver bloco sem mão)
             // ou pelo botão REPETIR, deixando a repetição sempre intencional.
         }
-
+      } finally {
+        if (rawBitmap !== preparedBitmap) rawBitmap?.recycle()
+        preparedBitmap?.recycle()
         imageProxy.close()
+      }
     }
 
     // ── Preparar o bitmap para o MediaPipe ────────────────────────────────
