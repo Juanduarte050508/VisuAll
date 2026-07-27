@@ -78,6 +78,11 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
 
     // Controle de histórico: rastreia a frase completa anterior
     private var fraseAnterior = ""
+    // Texto bruto vindo do analyzer (letras/tokens, sem "?"). O "?" do
+    // marcador de sobrancelha é só de EXIBIÇÃO — igual ao Python, que nunca
+    // grava a interrogação no texto, só no que é mostrado na tela.
+    private var fraseBase = ""
+    private var interrogativoAtivo = false
     private var ultimaLetraChip = ""
     private var linhasAtivas = true
     private var modoAtual = LibrasAnalyzer.Modo.ALFABETO
@@ -273,7 +278,8 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
                 onFeedback = { mensagem, nivel -> onFeedback(mensagem, nivel) },
                 onLandmarks = { hands, pose, frameAspect ->
                     onLandmarksDetected(hands, pose, frameAspect)
-                }
+                },
+                onInterrogativo = { ativo -> onInterrogativoAtualizado(ativo) }
             ).also {
                 it.setModo(modoAtual)
                 it.setEspelhamento(usandoCameraFrontal)
@@ -1087,13 +1093,14 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
     private fun onFraseAtualizada(frase: String) {
         activity?.runOnUiThread {
             if (_binding == null) return@runOnUiThread
+            fraseBase = frase
             if (isLandscapeHudCompact()) {
                 binding.phraseBubble.isVisible = false
                 hideSuggestions()
                 fraseAnterior = frase
                 return@runOnUiThread
             }
-            binding.tvPhrase.text = frase
+            binding.tvPhrase.text = fraseExibida()
             binding.phraseBubble.isVisible = frase.isNotBlank()
             updateWordSuggestions(frase)
 
@@ -1113,6 +1120,28 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
 
             registrarMensagemLibras(frase)
             fraseAnterior = frase
+        }
+    }
+
+    // Porta de montar_exibicao (app.py): acrescenta "?" ao texto mostrado
+    // quando a sobrancelha está levantada, sem mexer na frase armazenada.
+    private fun fraseExibida(): String {
+        val base = fraseBase
+        return if (interrogativoAtivo && base.isNotBlank() && !base.trimEnd().endsWith("?")) {
+            base.trimEnd() + "?"
+        } else {
+            base
+        }
+    }
+
+    private fun onInterrogativoAtualizado(ativo: Boolean) {
+        activity?.runOnUiThread {
+            if (_binding == null) return@runOnUiThread
+            if (interrogativoAtivo == ativo) return@runOnUiThread
+            interrogativoAtivo = ativo
+            if (!isLandscapeHudCompact()) {
+                binding.tvPhrase.text = fraseExibida()
+            }
         }
     }
 

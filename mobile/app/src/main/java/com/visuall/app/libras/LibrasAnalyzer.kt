@@ -13,6 +13,9 @@ import androidx.camera.core.ImageProxy
 import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.vision.core.RunningMode
+import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarker
+import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarker.FaceLandmarkerOptions
+import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarkerResult
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker.HandLandmarkerOptions
 import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarker
@@ -40,7 +43,10 @@ class LibrasAnalyzer(
     // (largura/altura) da imagem analisada, para o overlay alinhar com o preview.
     private val onLandmarks: (
         hands: List<FloatArray>, pose: FloatArray?, frameAspect: Float
-    ) -> Unit = { _, _, _ -> }
+    ) -> Unit = { _, _, _ -> },
+    // Sobrancelha levantada (marcador de pergunta) — igual ao Python, entra
+    // nos DOIS modos. Chamado só quando o estado muda (não a cada frame).
+    private val onInterrogativo: (ativo: Boolean) -> Unit = { }
 ) : ImageAnalysis.Analyzer {
 
     companion object {
@@ -63,13 +69,25 @@ class LibrasAnalyzer(
         const val CONFIANCA_MINIMA       = 0.90f
         const val MARGEM_ESTATICA_MINIMA = 0.25f
         // O modelo dinâmico só conhece 5 classes (H,J,K,X,Z) e não tem classe
-        // "nenhuma". Mantemos margem, mas sem bloquear o gesto: letras com
-        // movimento aparecem por poucos frames e precisam ser aceitas rápido.
-        const val CONFIANCA_DINAMICA     = 0.90f
-        const val MARGEM_DINAMICA_MINIMA = 0.20f
-        // Mesmo limiar do backend Python de referência. Com 0.55, movimentos
-        // reais de H/J/K/X/Z ficavam frequentemente presos no modelo estático.
+        // "nenhuma". Meio-termo entre o valor solto do Rafael (0.90/0.20) e o
+        // apertado que eu tinha deixado (0.95/0.35) — ainda pendente de
+        // validação real (ver LIMIAR_MOVIMENTO abaixo para a mudança principal
+        // que ataca o falso-J).
+        const val CONFIANCA_DINAMICA     = 0.92f
+        const val MARGEM_DINAMICA_MINIMA = 0.28f
+        // Eu e o Rafael tínhamos valores incompatíveis aqui: 0.30 (dele, igual
+        // ao Python) deixava o J disparar com qualquer tremida; 0.55 (meu)
+        // travava gestos reais de H/J/K/X/Z no modelo estático. Os dois
+        // usavam a MESMA variável pra duas coisas diferentes: magnitude do
+        // movimento E se ele é intencional. Separamos isso: LIMIAR_MOVIMENTO
+        // volta a 0.30 (não perde gesto real, como o Rafael queria), mas só
+        // é CONFIADO depois de sustentado por alguns frames seguidos
+        // (MOVIMENTO_SUSTENTADO_FRAMES) — uma tremida de 1 frame não basta,
+        // um traço real de H/J/K/X/Z (que dura vários frames) sim. Precisa
+        // validar em celular real; se ainda sair J fácil, subir
+        // MOVIMENTO_SUSTENTADO_FRAMES antes de mexer em LIMIAR_MOVIMENTO de novo.
         const val LIMIAR_MOVIMENTO       = 0.30f
+        const val MOVIMENTO_SUSTENTADO_FRAMES = 3
         const val TEMPO_PRA_LIMPAR       = 3_000L
         // Dinâmicas são transitórias; exigir muitos frames consecutivos faz a
         // janela passar do gesto antes da letra ser adicionada.
@@ -110,6 +128,19 @@ class LibrasAnalyzer(
         const val TRAINING_FILE_NAME = "visuall_libras_phone_dataset.csv"
         const val DYNAMIC_TRAINING_FILE_NAME = "visuall_libras_dynamic_phone_dataset.csv"
         val LETRAS_REPETICAO_AUTO        = setOf("S", "R")
+
+        // Marcador de sobrancelha (frase vira pergunta) — portado 1:1 de
+        // m01_visuall_config.py / app.py (ler_marcador). Os índices são da
+        // topologia de 468 pontos do FaceMesh, a mesma usada pelo
+        // FaceLandmarker da Tasks API — não precisou remapear nada.
+        const val LIMIAR_SOBRANCELHA = 0.38f
+        const val JANELA_SOBR = 5
+        const val IDX_BROW_L = 105
+        const val IDX_BROW_R = 334
+        const val IDX_EYE_TOP_L = 159
+        const val IDX_EYE_TOP_R = 386
+        const val IDX_EYE_OUT_L = 33
+        const val IDX_EYE_OUT_R = 263
     }
 
     enum class Modo {
@@ -131,9 +162,13 @@ class LibrasAnalyzer(
 
     private val handLandmarker: HandLandmarker
     private var poseLandmarker: PoseLandmarker? = null
+    private var faceLandmarker: FaceLandmarker? = null
+    private var faceModelIndisponivel = false
     private var flexDelegate: FlexDelegate? = null
     private var bodyInterpreter: Interpreter? = null
     private var labelsCorpo: List<String> = emptyList()
+    private val bufferSobrancelha = ArrayDeque<Float>()
+    private var interrogativoAtivo = false
     @Volatile private var modoAtual = Modo.ALFABETO
     // Espelha a imagem na horizontal quando estamos na câmera frontal. O
     // dataset foi gravado com a webcam espelhada (cv2.flip no Python), então
@@ -186,6 +221,10 @@ class LibrasAnalyzer(
     private var ultimaPredicao        = ""
     private var contadorEstabilidade  = 0
     private var ultimaLetraAdicionada = ""
+    // Frames seguidos com movimento acima de LIMIAR_MOVIMENTO. Só confiamos
+    // no modelo dinâmico depois de sustentado — ver comentário do
+    // LIMIAR_MOVIMENTO.
+    private var movimentoSustentadoCount = 0
     private var ultimoTempoAdicao     = 0L
     private var tempoInicioEsticado   = 0L
     private var ultimoTempoLimpar     = 0L
@@ -244,6 +283,17 @@ class LibrasAnalyzer(
         val timestamp = nextVideoTimestamp()
         val result = handLandmarker.detectForVideo(mpImage, timestamp)
 
+        // Rosto roda nos DOIS modos, igual ao Holistic do Python ("Em AMBOS
+        // os modos o ROSTO entra como marcador não-manual"). É um 3º modelo
+        // rodando todo frame — custo real de latência; se ficar pesado,
+        // considerar detectar só a cada N frames.
+        val faceResult = ensureFaceModelLoaded()?.detectForVideo(mpImage, timestamp)
+        val sobrancelhaAtiva = lerMarcador(faceResult)
+        if (sobrancelhaAtiva != interrogativoAtivo) {
+            interrogativoAtivo = sobrancelhaAtiva
+            onInterrogativo(sobrancelhaAtiva)
+        }
+
         if (modoAtual == Modo.CORPO) {
             val poseDetector = ensureBodyModelsLoaded()
             if (poseDetector == null) {
@@ -263,6 +313,7 @@ class LibrasAnalyzer(
                 ultimaPredicao       = ""
                 contadorEstabilidade = 0
                 tempoInicioEsticado  = 0L
+                movimentoSustentadoCount = 0
                 bufferLm.clear()
                 letraRepetidaPendente = ""
                 // Libera a mesma letra para ser digitada de novo: tirar a mão
@@ -449,6 +500,58 @@ class LibrasAnalyzer(
         }
     }
 
+    // Carrega o FaceLandmarker sob demanda, como o de corpo. Roda nos DOIS
+    // modos (igual ao Holistic do Python, que sempre lê o rosto), mas se a
+    // inicialização falhar (aparelho fraco/sem o asset) o app segue sem o
+    // marcador de pergunta em vez de quebrar — mesma filosofia defensiva do
+    // ensureBodyModelsLoaded.
+    private fun ensureFaceModelLoaded(): FaceLandmarker? {
+        faceLandmarker?.let { return it }
+        if (faceModelIndisponivel) return null
+
+        return try {
+            val baseOptions = BaseOptions.builder()
+                .setModelAssetPath("face_landmarker.task")
+                .build()
+            val options = FaceLandmarkerOptions.builder()
+                .setBaseOptions(baseOptions)
+                .setRunningMode(RunningMode.VIDEO)
+                .setNumFaces(1)
+                .setMinFaceDetectionConfidence(0.5f)
+                .setMinFacePresenceConfidence(0.5f)
+                .setMinTrackingConfidence(0.5f)
+                .build()
+            FaceLandmarker.createFromOptions(context, options).also { faceLandmarker = it }
+        } catch (error: Throwable) {
+            faceLandmarker = null
+            faceModelIndisponivel = true
+            null
+        }
+    }
+
+    // Porta fiel de ler_marcador (app.py): sobrancelha levantada em relação à
+    // distância entre os cantos externos dos olhos (escala invariante à
+    // distância da câmera), suavizada numa janela de JANELA_SOBR frames.
+    private fun lerMarcador(faceResult: FaceLandmarkerResult?): Boolean {
+        val rosto = faceResult?.faceLandmarks()?.firstOrNull() ?: return false
+        val maxIdx = maxOf(IDX_BROW_L, IDX_BROW_R, IDX_EYE_TOP_L, IDX_EYE_TOP_R,
+            IDX_EYE_OUT_L, IDX_EYE_OUT_R)
+        if (rosto.size <= maxIdx) return false
+
+        val dx = rosto[IDX_EYE_OUT_L].x() - rosto[IDX_EYE_OUT_R].x()
+        val dy = rosto[IDX_EYE_OUT_L].y() - rosto[IDX_EYE_OUT_R].y()
+        val escala = sqrt(dx * dx + dy * dy)
+        if (escala < 1e-6f) return false
+
+        val gl = rosto[IDX_EYE_TOP_L].y() - rosto[IDX_BROW_L].y()
+        val gr = rosto[IDX_EYE_TOP_R].y() - rosto[IDX_BROW_R].y()
+        bufferSobrancelha.addLast(((gl + gr) / 2f) / escala)
+        while (bufferSobrancelha.size > JANELA_SOBR) bufferSobrancelha.removeFirst()
+
+        val suavizado = bufferSobrancelha.average().toFloat()
+        return suavizado >= LIMIAR_SOBRANCELHA
+    }
+
     private fun normalizeLandmarks(pontos: List<Pair<Float, Float>>): FloatArray {
         val baseX = pontos[0].first
         val baseY = pontos[0].second
@@ -564,11 +667,18 @@ class LibrasAnalyzer(
     }
 
     private fun escolherClassificacao(dados: FloatArray, movimento: Float): Prediction {
-        // Mesma decisão do pipeline Python de referência: com movimento acima
-        // do limiar e o buffer cheio, usamos o modelo dinâmico (H,J,K,X,Z);
-        // caso contrário, o estático. Os dois nunca disputam no mesmo frame,
-        // o que elimina a principal fonte de "letra parada virando outra".
-        if (movimento > LIMIAR_MOVIMENTO && bufferLm.size >= JANELA_MLP) {
+        // Histerese: LIMIAR_MOVIMENTO sozinho não distingue "tremida de 1
+        // frame" de "traço real de H/J/K/X/Z" — os dois cruzam o mesmo valor
+        // de magnitude. A diferença é a DURAÇÃO: um gesto de verdade sustenta
+        // o movimento por vários frames seguidos; ruído da câmera não.
+        movimentoSustentadoCount = if (movimento > LIMIAR_MOVIMENTO) {
+            movimentoSustentadoCount + 1
+        } else {
+            0
+        }
+        val movimentoConfiavel = movimentoSustentadoCount >= MOVIMENTO_SUSTENTADO_FRAMES
+
+        if (movimentoConfiavel && bufferLm.size >= JANELA_MLP) {
             return classificarDinamico()
         }
         // Calibração pessoal entra apenas como reforço quando o modelo não
@@ -945,6 +1055,7 @@ class LibrasAnalyzer(
         bodyNoHandSince = 0L
         ultimaPredicao = ""
         contadorEstabilidade = 0
+        movimentoSustentadoCount = 0
         letraRepetidaPendente = ""
         // Troca de modo começa uma frase nova (letras e sinais de corpo não se
         // misturam na mesma frase).
