@@ -883,7 +883,7 @@ class LibrasAnalyzer(
         var hasLeftHand = false
         var hasRightHand = false
         handResult.landmarks().forEachIndexed { handIndex, landmarks ->
-            val handedness = handResult.handednesses().getOrNull(handIndex)
+            val handedness = handResult.handedness().getOrNull(handIndex)
                 ?.firstOrNull()?.categoryName().orEmpty()
             val offset = if (handedness.equals("Left", ignoreCase = true)) {
                 BODY_POSE_POINTS
