@@ -141,6 +141,10 @@ class LibrasAnalyzer(
         const val IDX_EYE_TOP_R = 386
         const val IDX_EYE_OUT_L = 33
         const val IDX_EYE_OUT_R = 263
+        // A sobrancelha não muda de estado tão rápido quanto uma letra: rodar
+        // o 3º modelo (FaceLandmarker) 1 a cada N frames economiza latência
+        // sem atraso perceptível no marcador de pergunta.
+        const val FACE_DETECT_STRIDE = 3
     }
 
     enum class Modo {
@@ -169,6 +173,7 @@ class LibrasAnalyzer(
     private var labelsCorpo: List<String> = emptyList()
     private val bufferSobrancelha = ArrayDeque<Float>()
     private var interrogativoAtivo = false
+    private var faceFrameCounter = 0
     @Volatile private var modoAtual = Modo.ALFABETO
     // Espelha a imagem na horizontal quando estamos na câmera frontal. O
     // dataset foi gravado com a webcam espelhada (cv2.flip no Python), então
@@ -251,6 +256,17 @@ class LibrasAnalyzer(
     // Proporção real (largura/altura) do frame analisado, repassada ao overlay.
     private var frameAspect           = 0.75f
 
+    // Campos de estado do reconhecimento de letra que precisam ser zerados
+    // juntos sempre que a mão some do quadro ou o modo troca — extraído para
+    // não depender de lembrar a mesma lista de resets em cada lugar.
+    private fun resetEstadoAlfabeto() {
+        ultimaPredicao = ""
+        contadorEstabilidade = 0
+        movimentoSustentadoCount = 0
+        letraRepetidaPendente = ""
+        ultimaLetraAdicionada = ""
+    }
+
     private fun nextVideoTimestamp(): Long {
         val now = SystemClock.uptimeMillis()
         videoTimestamp = if (now <= videoTimestamp) videoTimestamp + 1 else now
@@ -284,14 +300,18 @@ class LibrasAnalyzer(
         val result = handLandmarker.detectForVideo(mpImage, timestamp)
 
         // Rosto roda nos DOIS modos, igual ao Holistic do Python ("Em AMBOS
-        // os modos o ROSTO entra como marcador não-manual"). É um 3º modelo
-        // rodando todo frame — custo real de latência; se ficar pesado,
-        // considerar detectar só a cada N frames.
-        val faceResult = ensureFaceModelLoaded()?.detectForVideo(mpImage, timestamp)
-        val sobrancelhaAtiva = lerMarcador(faceResult)
-        if (sobrancelhaAtiva != interrogativoAtivo) {
-            interrogativoAtivo = sobrancelhaAtiva
-            onInterrogativo(sobrancelhaAtiva)
+        // os modos o ROSTO entra como marcador não-manual"), mas só a cada
+        // FACE_DETECT_STRIDE frames: é um 3º modelo completo, e a sobrancelha
+        // não muda de estado tão rápido quanto uma letra, então detectar todo
+        // frame só gastava latência sem ganho perceptível.
+        faceFrameCounter++
+        if (faceFrameCounter % FACE_DETECT_STRIDE == 0) {
+            val faceResult = ensureFaceModelLoaded()?.detectForVideo(mpImage, timestamp)
+            val sobrancelhaAtiva = lerMarcador(faceResult)
+            if (sobrancelhaAtiva != interrogativoAtivo) {
+                interrogativoAtivo = sobrancelhaAtiva
+                onInterrogativo(sobrancelhaAtiva)
+            }
         }
 
         if (modoAtual == Modo.CORPO) {
@@ -310,15 +330,11 @@ class LibrasAnalyzer(
             onLandmarks(emptyList(), null, frameAspect)
             framesSemMao++
             if (framesSemMao >= NO_HAND_TOLERANCE) {
-                ultimaPredicao       = ""
-                contadorEstabilidade = 0
-                tempoInicioEsticado  = 0L
-                movimentoSustentadoCount = 0
+                resetEstadoAlfabeto()
+                tempoInicioEsticado = 0L
                 bufferLm.clear()
-                letraRepetidaPendente = ""
                 // Libera a mesma letra para ser digitada de novo: tirar a mão
                 // do quadro e refazer o sinal é a forma natural de repetir.
-                ultimaLetraAdicionada = ""
                 onRepeticaoPendente(null)
                 onFeedback("MAO FORA DO QUADRO", FEEDBACK_ALERTA)
                 onNoHand()
@@ -1053,14 +1069,10 @@ class LibrasAnalyzer(
         bodyGestureBuffer.clear()
         ultimaClasseCorpo = ""
         bodyNoHandSince = 0L
-        ultimaPredicao = ""
-        contadorEstabilidade = 0
-        movimentoSustentadoCount = 0
-        letraRepetidaPendente = ""
+        resetEstadoAlfabeto()
         // Troca de modo começa uma frase nova (letras e sinais de corpo não se
         // misturam na mesma frase).
         bodyTokens.clear()
-        ultimaLetraAdicionada = ""
         frase = ""
         onFraseUpdate("")
         onRepeticaoPendente(null)
