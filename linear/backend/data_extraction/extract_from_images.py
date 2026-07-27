@@ -15,6 +15,8 @@ import cv2
 import mediapipe as mp
 import numpy as np
 import os
+from mediapipe.tasks.python import vision
+from mediapipe.tasks.python.core.base_options import BaseOptions
 from pathlib import Path
 
 # ============ CONFIGURAÇÃO ============
@@ -23,6 +25,12 @@ PASTA_IMAGENS = ROOT / "data" / "raw_images"   # pasta raiz com subpastas por le
 SAIDA         = ROOT / "data" / "dataset_static.npz"
 SAIDA_CSV     = ROOT / "data" / "static_external_dataset.csv"
 EXTENSOES     = [".jpg", ".jpeg", ".png", ".bmp", ".webp"]
+# Mesmo arquivo .task usado no celular (assets/hand_landmarker.task) em vez
+# de baixar/duplicar outro modelo: garante que o dataset de treino é extraído
+# com o MESMO modelo que roda na inferência do app, eliminando divergência
+# entre o legado mp.solutions.hands (usado antes aqui) e a Tasks API do
+# mobile (LibrasAnalyzer.kt).
+MODELO_MAOS   = ROOT / "mobile" / "app" / "src" / "main" / "assets" / "hand_landmarker.task"
 # ======================================
 
 def normalize_landmarks(pontos):
@@ -34,11 +42,15 @@ def normalize_landmarks(pontos):
     max_v = max(abs(v) for v in norm) or 1.0
     return [v / max_v for v in norm]
 
-hands = mp.solutions.hands.Hands(
-    static_image_mode=True,       # True para imagens estáticas
-    max_num_hands=1,
-    model_complexity=0,
-    min_detection_confidence=0.5,
+hands = vision.HandLandmarker.create_from_options(
+    vision.HandLandmarkerOptions(
+        base_options=BaseOptions(model_asset_path=str(MODELO_MAOS)),
+        running_mode=vision.RunningMode.IMAGE,
+        num_hands=1,
+        # Mesmos limiares do HandLandmarker do celular (LibrasAnalyzer.kt).
+        min_hand_detection_confidence=0.4,
+        min_hand_presence_confidence=0.4,
+    )
 )
 
 X_all, y_all, rows_csv = [], [], []
@@ -58,11 +70,12 @@ for letra in letras:
             falhas += 1
             continue
 
-        rgb     = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        results = hands.process(rgb)
+        rgb      = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+        results  = hands.detect(mp_image)
 
-        if results.multi_hand_landmarks:
-            pontos = [[lm.x, lm.y] for lm in results.multi_hand_landmarks[0].landmark]
+        if results.hand_landmarks:
+            pontos = [[lm.x, lm.y] for lm in results.hand_landmarks[0]]
             dados  = normalize_landmarks(pontos)   # 42 valores (21 pontos * x,y)
             X_all.append(dados)
             y_all.append(letra)

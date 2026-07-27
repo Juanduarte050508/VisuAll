@@ -16,6 +16,8 @@ import cv2
 import mediapipe as mp
 import numpy as np
 import os
+from mediapipe.tasks.python import vision
+from mediapipe.tasks.python.core.base_options import BaseOptions
 from pathlib import Path
 
 # ============ CONFIGURAÇÃO ============
@@ -25,6 +27,8 @@ JANELA        = 10                        # quantos frames por amostra
 PULO          = 3                         # pula N frames entre janelas (evita amostras idênticas)
 SAIDA         = ROOT / "data" / "dataset_dynamic.npz"
 SAIDA_CSV     = ROOT / "data" / "dynamic_external_dataset.csv"
+# Mesmo arquivo .task usado no celular — ver comentário em extract_from_images.py.
+MODELO_MAOS   = ROOT / "mobile" / "app" / "src" / "main" / "assets" / "hand_landmarker.task"
 # ======================================
 
 def normalize_landmarks(pontos):
@@ -36,13 +40,20 @@ def normalize_landmarks(pontos):
     max_v = max(abs(v) for v in norm) or 1.0
     return [v / max_v for v in norm]
 
-hands = mp.solutions.hands.Hands(
-    static_image_mode=False,
-    max_num_hands=1,
-    model_complexity=0,
-    min_detection_confidence=0.5,
-    min_tracking_confidence=0.5
-)
+def novo_detector():
+    # RunningMode.VIDEO ativa o rastreamento temporal entre frames (igual ao
+    # HandLandmarker do celular) em vez de redetectar do zero a cada frame —
+    # reduz jitter nos landmarks e casa a extração com a inferência real.
+    return vision.HandLandmarker.create_from_options(
+        vision.HandLandmarkerOptions(
+            base_options=BaseOptions(model_asset_path=str(MODELO_MAOS)),
+            running_mode=vision.RunningMode.VIDEO,
+            num_hands=1,
+            min_hand_detection_confidence=0.4,
+            min_hand_presence_confidence=0.4,
+            min_tracking_confidence=0.4,
+        )
+    )
 
 X_all, y_all, rows_csv = [], [], []
 letras = sorted([d for d in os.listdir(PASTA_VIDEOS)
@@ -56,24 +67,33 @@ for letra in letras:
 
     for video_path in videos:
         cap = cv2.VideoCapture(str(video_path))
+        # Um detector novo por vídeo: RunningMode.VIDEO exige timestamps
+        # estritamente crescentes dentro de UM stream contínuo, e cada vídeo
+        # aqui é uma sequência independente (não um único stream ao vivo).
+        hands = novo_detector()
+        frame_idx = 0
         frames_lm = []  # landmarks de cada frame do vídeo
 
         while True:
             ok, frame = cap.read()
             if not ok:
                 break
-            small   = cv2.resize(frame, (320, 240))
-            rgb     = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
-            results = hands.process(rgb)
+            small      = cv2.resize(frame, (320, 240))
+            rgb        = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
+            mp_image   = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+            timestamp_ms = frame_idx * 33  # ~30fps; só precisa ser crescente
+            results    = hands.detect_for_video(mp_image, timestamp_ms)
+            frame_idx += 1
 
-            if results.multi_hand_landmarks:
-                pontos = [[lm.x, lm.y] for lm in results.multi_hand_landmarks[0].landmark]
+            if results.hand_landmarks:
+                pontos = [[lm.x, lm.y] for lm in results.hand_landmarks[0]]
                 dados  = normalize_landmarks(pontos)
                 frames_lm.append(dados)
             else:
                 # frame sem mão — reseta sequência
                 frames_lm = []
 
+        hands.close()
         cap.release()
 
         # Monta janelas deslizantes
@@ -88,8 +108,6 @@ for letra in letras:
             i += PULO
 
     print(f"  {letra}: {len(videos)} vídeos → {amostras_letra} amostras")
-
-hands.close()
 
 X = np.array(X_all, dtype=np.float32)
 y = np.array(y_all)
