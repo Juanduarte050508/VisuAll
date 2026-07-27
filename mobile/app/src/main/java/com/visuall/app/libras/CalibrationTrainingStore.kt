@@ -9,6 +9,12 @@ class CalibrationTrainingStore(
     private val staticLabels: List<String>,
     private val dynamicLabels: List<String>
 ) {
+    private companion object {
+        // Teto de linhas guardadas por arquivo — ver appendCapped().
+        const val MAX_STATIC_SAMPLE_ROWS = 6_000
+        const val MAX_DYNAMIC_SAMPLE_ROWS = 1_500
+    }
+
     data class Match(val letter: String, val distance: Float)
 
     private val calibrationPrefs =
@@ -89,27 +95,15 @@ class CalibrationTrainingStore(
     fun saveStaticSamples(letter: String, frames: List<FloatArray>) {
         if (frames.isEmpty()) return
         val file = File(context.filesDir, LibrasAnalyzer.TRAINING_FILE_NAME)
-        val writeHeader = !file.exists() || file.length() == 0L
+        val header = staticHeader()
         val now = System.currentTimeMillis()
-        val text = buildString {
-            if (writeHeader) {
-                append("timestamp,label,source")
-                for (i in 0 until LibrasAnalyzer.FEATURES_ESTATICO) append(",f$i")
-                appendLine()
-            }
-            frames.forEachIndexed { index, frame ->
-                append(now + index)
-                append(',')
-                append(letter)
-                append(",phone_calibration")
-                frame.forEach { value ->
-                    append(',')
-                    append(value)
-                }
-                appendLine()
+        val newLines = frames.mapIndexed { index, frame ->
+            buildString {
+                append(now + index); append(','); append(letter); append(",phone_calibration")
+                frame.forEach { append(','); append(it) }
             }
         }
-        runCatching { file.appendText(text) }
+        appendCapped(file, header, newLines, MAX_STATIC_SAMPLE_ROWS)
     }
 
     fun saveDynamicSamples(letter: String, frames: List<FloatArray>): Int {
@@ -122,30 +116,43 @@ class CalibrationTrainingStore(
         if (windows.isEmpty()) return 0
 
         val file = File(context.filesDir, LibrasAnalyzer.DYNAMIC_TRAINING_FILE_NAME)
-        val writeHeader = !file.exists() || file.length() == 0L
+        val header = dynamicHeader()
         val now = System.currentTimeMillis()
-        val text = buildString {
-            if (writeHeader) {
-                append("timestamp,label,source")
-                for (i in 0 until LibrasAnalyzer.FEATURES_DINAMICO) append(",f$i")
-                appendLine()
-            }
-            windows.forEachIndexed { windowIndex, window ->
-                append(now + windowIndex)
-                append(',')
-                append(letter)
-                append(",phone_dynamic")
-                window.forEach { frame ->
-                    frame.forEach { value ->
-                        append(',')
-                        append(value)
-                    }
-                }
-                appendLine()
+        val newLines = windows.mapIndexed { windowIndex, window ->
+            buildString {
+                append(now + windowIndex); append(','); append(letter); append(",phone_dynamic")
+                window.forEach { frame -> frame.forEach { append(','); append(it) } }
             }
         }
-        runCatching { file.appendText(text) }
+        appendCapped(file, header, newLines, MAX_DYNAMIC_SAMPLE_ROWS)
         return windows.size
+    }
+
+    private fun staticHeader(): String = buildString {
+        append("timestamp,label,source")
+        for (i in 0 until LibrasAnalyzer.FEATURES_ESTATICO) append(",f$i")
+    }
+
+    private fun dynamicHeader(): String = buildString {
+        append("timestamp,label,source")
+        for (i in 0 until LibrasAnalyzer.FEATURES_DINAMICO) append(",f$i")
+    }
+
+    // Cada calibração acrescenta linhas, sem limite, para sempre — em uso
+    // contínuo o CSV cresceria indefinidamente (linhas dinâmicas têm 420
+    // valores cada). Em vez de só anexar, mantemos as MAX_*_SAMPLE_ROWS
+    // linhas mais recentes: reescreve o arquivo com (dados antigos + novos)
+    // cortado às últimas N linhas. É mais I/O que um append puro, mas
+    // calibração é uma ação manual e rara do usuário, não por frame.
+    private fun appendCapped(file: File, header: String, newLines: List<String>, maxRows: Int) {
+        if (newLines.isEmpty()) return
+        val existing = if (file.exists() && file.length() > 0L) file.readLines().drop(1) else emptyList()
+        val kept = (existing + newLines).takeLast(maxRows)
+        val text = buildString {
+            appendLine(header)
+            kept.forEach { appendLine(it) }
+        }
+        runCatching { file.writeText(text) }
     }
 
     private fun calibrationKey(letter: String): String = "letter_${letter.uppercase()}"
