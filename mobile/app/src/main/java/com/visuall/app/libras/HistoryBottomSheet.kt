@@ -44,7 +44,7 @@ class HistoryBottomSheet : BottomSheetDialogFragment() {
     companion object {
         private const val ARG_WORDS = "words"
 
-        fun newInstance(words: ArrayList<HistoryEntry>): HistoryBottomSheet {
+        fun newInstance(words: List<HistoryEntry>): HistoryBottomSheet {
             return HistoryBottomSheet().also { sheet ->
                 sheet.arguments = Bundle().apply {
                     // Cópia defensiva: em processo único, um Bundle guarda a

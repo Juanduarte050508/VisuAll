@@ -47,8 +47,6 @@ import androidx.fragment.app.Fragment
 import androidx.navigation.fragment.findNavController
 import com.visuall.app.R
 import com.visuall.app.databinding.FragmentLibrasBinding
-import org.json.JSONArray
-import org.json.JSONObject
 import java.io.File
 import java.text.Normalizer
 import java.util.Locale
@@ -78,10 +76,7 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
 
     private var lensFacing = CameraSelector.LENS_FACING_FRONT
 
-    private val historicoEntries = arrayListOf<HistoryEntry>()
-    private var ultimaMensagemLibras = ""
-    private var indiceLibrasAtual = -1
-    private var indiceRespostaAtual = -1
+    private val historyStore by lazy { ConversationHistoryStore(requireContext().applicationContext) }
 
     // Controle de histórico: rastreia a frase completa anterior
     private var fraseAnterior = ""
@@ -159,7 +154,7 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         super.onViewCreated(view, savedInstanceState)
         cameraExecutor = Executors.newSingleThreadExecutor()
         tts = TextToSpeech(requireContext(), this)
-        carregarConversaSalva()
+        historyStore.load()
         view.post {
             applyPreviewAspectRatio()
             applyHudLayout()
@@ -641,9 +636,9 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         }
 
         binding.btnHistory.setOnClickListener {
-            HistoryBottomSheet.newInstance(historicoEntries)
+            HistoryBottomSheet.newInstance(historyStore.entries)
                 .also { sheet ->
-                    sheet.onClearConversation = { limparConversa() }
+                    sheet.onClearConversation = { historyStore.limpar() }
                 }
                 .show(childFragmentManager, "history")
         }
@@ -1008,12 +1003,12 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         }
         binding.tvReply.text = texto
         binding.replyBubble.isVisible = true
-        registrarMensagemResposta(texto)
+        historyStore.registrarMensagemResposta(texto)
         return true
     }
 
     private fun clearReply() {
-        removerRespostaAtual()
+        historyStore.removerRespostaAtual()
         binding.etReply.setText("")
         binding.tvReply.text = ""
         binding.replyBubble.isVisible = false
@@ -1136,7 +1131,7 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
                 vibrateConfirmation()
             }
 
-            registrarMensagemLibras(frase)
+            historyStore.registrarMensagemLibras(frase)
             fraseAnterior = frase
         }
     }
@@ -1160,172 +1155,6 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
             if (!isLandscapeHudCompact()) {
                 binding.tvPhrase.text = fraseExibida()
             }
-        }
-    }
-
-    /**
-     * HISTÓRICO SIMPLIFICADO:
-     * - Divide a frase em palavras por espaço
-     * - A última palavra (incompleta ou não) é sempre mantida/atualizada
-     *   na última entrada do histórico — nunca duplica
-     * - Palavras anteriores (já com espaço depois) ficam fixas
-     */
-    private fun salvarPalavrasNoHistorico(fraseNova: String) {
-        if (fraseNova.isEmpty()) return
-
-        val tokens = fraseNova.trim().split(" ").filter { it.isNotEmpty() }
-        if (tokens.isEmpty()) return
-
-        val terminalComEspaco = fraseNova.endsWith(" ")
-
-        if (terminalComEspaco) {
-            // Todas as palavras estão completas — garante que cada uma existe
-            // no histórico exatamente uma vez (sem duplicar)
-            tokens.forEach { token ->
-                val jaExiste = historicoEntries.any { it.word == token }
-                if (!jaExiste) historicoEntries.add(HistoryEntry(token))
-            }
-        } else {
-            // A última palavra ainda está sendo digitada
-            val palavrasCompletas = tokens.dropLast(1)
-            val ultimaPalavra = tokens.last()
-
-            // Garante palavras completas no histórico
-            palavrasCompletas.forEach { token ->
-                val jaExiste = historicoEntries.any { it.word == token }
-                if (!jaExiste) historicoEntries.add(HistoryEntry(token))
-            }
-
-            // Atualiza ou cria a entrada da última palavra (em construção)
-            val ultimoIdx = historicoEntries.indexOfLast { entry ->
-                ultimaPalavra.startsWith(entry.word) || entry.word.startsWith(ultimaPalavra)
-            }
-            if (ultimoIdx >= 0) {
-                // Substitui no lugar — mantém o timestamp original
-                historicoEntries[ultimoIdx] = HistoryEntry(ultimaPalavra, historicoEntries[ultimoIdx].timestamp)
-            } else {
-                historicoEntries.add(HistoryEntry(ultimaPalavra))
-            }
-        }
-    }
-
-    private fun registrarMensagemLibras(fraseNova: String) {
-        val texto = fraseNova.trim()
-        if (texto.isBlank()) {
-            ultimaMensagemLibras = ""
-            indiceLibrasAtual = -1
-            return
-        }
-        if (texto == ultimaMensagemLibras) return
-
-        if (indiceLibrasAtual in historicoEntries.indices &&
-            historicoEntries[indiceLibrasAtual].source == "LIBRAS") {
-            val anterior = historicoEntries[indiceLibrasAtual]
-            historicoEntries[indiceLibrasAtual] = HistoryEntry(texto, anterior.timestamp, "LIBRAS")
-        } else {
-            historicoEntries.add(HistoryEntry(texto, source = "LIBRAS"))
-            indiceLibrasAtual = historicoEntries.lastIndex
-            indiceRespostaAtual = -1
-        }
-        ultimaMensagemLibras = texto
-        limitarConversa()
-        salvarConversa()
-    }
-
-    private fun registrarMensagemResposta(textoResposta: String) {
-        val texto = textoResposta.trim()
-        if (texto.isBlank()) return
-
-        if (indiceRespostaAtual in historicoEntries.indices &&
-            historicoEntries[indiceRespostaAtual].source == "RESPOSTA") {
-            val anterior = historicoEntries[indiceRespostaAtual]
-            historicoEntries[indiceRespostaAtual] = HistoryEntry(texto, anterior.timestamp, "RESPOSTA")
-        } else {
-            historicoEntries.add(HistoryEntry(texto, source = "RESPOSTA"))
-            indiceRespostaAtual = historicoEntries.lastIndex
-            indiceLibrasAtual = -1
-        }
-        limitarConversa()
-        salvarConversa()
-    }
-
-    private fun removerRespostaAtual() {
-        if (indiceRespostaAtual in historicoEntries.indices &&
-            historicoEntries[indiceRespostaAtual].source == "RESPOSTA") {
-            historicoEntries.removeAt(indiceRespostaAtual)
-        }
-        indiceRespostaAtual = -1
-        salvarConversa()
-    }
-
-    private fun limitarConversa() {
-        while (historicoEntries.size > 80) {
-            historicoEntries.removeAt(0)
-            if (indiceRespostaAtual > 0) {
-                indiceRespostaAtual--
-            } else if (indiceRespostaAtual == 0) {
-                indiceRespostaAtual = -1
-            }
-            if (indiceLibrasAtual > 0) {
-                indiceLibrasAtual--
-            } else if (indiceLibrasAtual == 0) {
-                indiceLibrasAtual = -1
-            }
-        }
-    }
-
-    private fun limparConversa() {
-        historicoEntries.clear()
-        ultimaMensagemLibras = ""
-        indiceLibrasAtual = -1
-        indiceRespostaAtual = -1
-        salvarConversa()
-    }
-
-    private fun salvarConversa() {
-        val json = JSONArray()
-        historicoEntries.forEach { entry ->
-            json.put(JSONObject().apply {
-                put("word", entry.word)
-                put("timestamp", entry.timestamp)
-                put("source", entry.source)
-            })
-        }
-        requireContext()
-            .getSharedPreferences("visuall_conversa", Context.MODE_PRIVATE)
-            .edit()
-            .putString("entries", json.toString())
-            .apply()
-    }
-
-    private fun carregarConversaSalva() {
-        val raw = requireContext()
-            .getSharedPreferences("visuall_conversa", Context.MODE_PRIVATE)
-            .getString("entries", null)
-            ?: return
-
-        try {
-            val json = JSONArray(raw)
-            historicoEntries.clear()
-            for (index in 0 until json.length()) {
-                val item = json.optJSONObject(index) ?: continue
-                val texto = item.optString("word").trim()
-                if (texto.isBlank()) continue
-                historicoEntries.add(
-                    HistoryEntry(
-                        word = texto,
-                        timestamp = item.optLong("timestamp", System.currentTimeMillis()),
-                        source = item.optString("source", "LIBRAS")
-                    )
-                )
-            }
-            indiceLibrasAtual = -1
-            indiceRespostaAtual = -1
-            ultimaMensagemLibras = ""
-            limitarConversa()
-        } catch (e: Exception) {
-            historicoEntries.clear()
-            salvarConversa()
         }
     }
 
