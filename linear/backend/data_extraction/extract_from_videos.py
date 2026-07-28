@@ -16,6 +16,7 @@ import cv2
 import mediapipe as mp
 import numpy as np
 import os
+from collections import Counter
 from mediapipe.tasks.python import vision
 from mediapipe.tasks.python.core.base_options import BaseOptions
 from pathlib import Path
@@ -124,4 +125,7 @@ print(f"\n✅ Dataset salvo em '{SAIDA}'")
 print(f"✅ CSV mobile salvo em '{SAIDA_CSV}'")
 print(f"   Total de amostras: {len(X)}")
 print(f"   Shape X: {X.shape}")
-print(f"   Distribuição: { {l: int((y==l).sum()) for l in letras} }")
+# Counter em vez de (y==l).sum(): com y vazio, a comparação numpy retorna um
+# escalar (não um array), e .sum() quebra com AttributeError.
+contagem = Counter(y.tolist())
+print(f"   Distribuição: { {l: contagem.get(l, 0) for l in letras} }")
