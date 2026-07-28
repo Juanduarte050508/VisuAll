@@ -15,10 +15,6 @@ STATIC_LABELS = [
     "P", "Q", "R", "S", "T", "U", "V", "W", "Y",
 ]
 DYNAMIC_LABELS = ["H", "J", "K", "X", "Z"]
-# Ordem alfabética = mesma ordem de mobile/app/src/main/assets/body_labels.txt.
-# NEUTRO é uma classe real (não "sem gesto"): o modelo precisa de exemplos de
-# gente parada/sem sinalizar pra não confundir estar-parado com um dos sinais.
-BODY_LABELS = ["AJUDAR", "COMPUTADOR", "CONVERSAR", "NEUTRO", "PESSOA", "SURDO"]
 
 
 def ensure_dirs():

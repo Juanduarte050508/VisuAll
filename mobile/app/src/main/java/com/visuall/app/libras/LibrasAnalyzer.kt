@@ -60,15 +60,29 @@ class LibrasAnalyzer(
         // O MLP é "superconfiante": cospe ~0.99 quase sempre, então só a
         // confiança filtra muito pouco. A MARGEM (1ª menos 2ª opção) é o
         // critério que realmente separa um sinal claro de um chute.
-        const val CONFIANCA_MINIMA       = 0.90f
-        const val MARGEM_ESTATICA_MINIMA = 0.25f
+        //
+        // Subidos de 0.90/0.25 depois de relato de reconhecimento fácil
+        // demais (letra confirmada mesmo sem estar sendo feita). Ainda
+        // pendente de validação real — se ficar difícil demais de acertar
+        // letras de verdade, é o primeiro lugar pra abaixar de novo.
+        const val CONFIANCA_MINIMA       = 0.93f
+        const val MARGEM_ESTATICA_MINIMA = 0.30f
         // O modelo dinâmico só conhece 5 classes (H,J,K,X,Z) e não tem classe
-        // "nenhuma". Meio-termo entre o valor solto do Rafael (0.90/0.20) e o
-        // apertado que eu tinha deixado (0.95/0.35) — ainda pendente de
-        // validação real (ver LIMIAR_MOVIMENTO abaixo para a mudança principal
-        // que ataca o falso-J).
-        const val CONFIANCA_DINAMICA     = 0.92f
-        const val MARGEM_DINAMICA_MINIMA = 0.28f
+        // "nenhuma". Subidos de 0.92/0.28 pelo mesmo motivo do
+        // CONFIANCA_MINIMA acima (ver LIMIAR_MOVIMENTO abaixo para a mudança
+        // que ataca o falso-J por outro ângulo, o de tempo/histerese).
+        const val CONFIANCA_DINAMICA     = 0.95f
+        const val MARGEM_DINAMICA_MINIMA = 0.32f
+        // Usado só pelos modelos INDIVIDUAIS (um classificador binário "é
+        // esta letra ou não" por letra, treinado pela ferramenta em
+        // treinamento/). Diferente do modelo geral (multiclasse, softmax
+        // sobre TODAS as letras reais), um binário nunca viu "mão se
+        // mexendo sem sinalizar nada" como exemplo negativo — só viu outras
+        // letras reais. Isso o deixa mais propenso a "confiante" demais
+        // (overconfident) em movimento que não é sinal nenhum, porque nunca
+        // aprendeu a rejeitar o que não é nenhuma das classes que conhece.
+        // Por isso a barra aqui é mais alta que a do modelo geral.
+        const val CONFIANCA_INDIVIDUAL   = 0.97f
         // Eu e o Rafael tínhamos valores incompatíveis aqui: 0.30 (dele, igual
         // ao Python) deixava o J disparar com qualquer tremida; 0.55 (meu)
         // travava gestos reais de H/J/K/X/Z no modelo estático. Os dois
@@ -116,7 +130,9 @@ class LibrasAnalyzer(
         const val BODY_END_FRAMES        = 5
         const val BODY_MIN_FRAMES        = 10
         const val BODY_MAX_FRAMES        = 60
-        const val BODY_CONFIDENCE        = 0.85f
+        // Subido de 0.85 junto com os outros limiares de confiança, mesmo
+        // motivo (reconhecimento fácil demais relatado pelo usuário).
+        const val BODY_CONFIDENCE        = 0.90f
         const val BODY_COOLDOWN          = 2_000L
         const val CALIBRATION_MIN_FRAMES = 8
         const val CALIBRATION_MAX_FRAMES = 45

@@ -1,8 +1,8 @@
 @echo off
-REM Chamado via "call _ambiente.bat" pelos launchers Capturar.bat e
-REM Treinar.bat -- nao roda nada sozinho. Cria (se preciso) um venv Python
-REM isolado dentro de treinamento\.venv e instala as dependencias do
-REM requirements.txt da raiz do repo, so na primeira vez.
+REM Chamado via "call _ambiente.bat" pelos launchers Capturar.bat,
+REM Treinar.bat e abrir_treinamento.bat -- nao roda nada sozinho. Cria (se
+REM preciso) um venv Python isolado dentro de treinamento\.venv e instala as
+REM dependencias do requirements.txt da raiz do repo, so na primeira vez.
 
 set "VENV=%~dp0.venv"
 set "MARCA=%VENV%\.deps_ok"

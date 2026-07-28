@@ -13,17 +13,42 @@ Formato: **Constante(s)** — valor atual — decisão e por quê — status.
 
 ## Não lançado
 
-- **Pipeline de treino de gestos corporais (novo)** — não existia NENHUM
-  treino publicado neste repositório pro `body_model.tflite` (ele vinha de
-  um pipeline externo, ver docstring de `linear/backend/app.py`). Criados
-  `linear/backend/data_extraction/extract_from_videos_corpo.py` (extração
-  de 225 features/frame — pose+mãos, normalização por ombros — reconstruída
-  a partir do consumidor real `BodyGestureEngine.kt`, não do treino
-  original) e `linear/backend/training/train_body_model.py` (LSTM Keras →
-  TFLite com Select TF Ops, arquitetura nova, não é port de nada). Pasta
-  `treinamento/` com `Capturar.bat`/`Treinar.bat` dá um jeito fácil de
-  gravar clipes e rodar os dois. Pendente: validar com dados reais — ainda
-  não há nenhum modelo de corpo treinado a partir desse pipeline.
+- **`CONFIANCA_MINIMA` 0.90→0.93, `MARGEM_ESTATICA_MINIMA` 0.25→0.30,
+  `CONFIANCA_DINAMICA` 0.92→0.95, `MARGEM_DINAMICA_MINIMA` 0.28→0.32,
+  `BODY_CONFIDENCE` 0.85→0.90, `CONFIANCA_INDIVIDUAL` novo em 0.97** —
+  usuário relatou reconhecimento fácil demais depois dos modelos
+  individuais por letra entrarem (ver entrada de unificação abaixo):
+  letras/gestos sendo confirmados sem estar sendo feitos. Causa mais
+  provável: os modelos individuais são classificadores binários ("é esta
+  letra ou não"), treinados só contra OUTRAS LETRAS REAIS como exemplo
+  negativo — nunca viram "mão se mexendo sem sinalizar nada" no treino, e
+  por isso tendem a ficar confiantes demais (overconfident) em movimento
+  que não é sinal nenhum. `CONFIANCA_INDIVIDUAL` é uma barra bem mais alta
+  usada só por esse nível (o geral e o parcial continuam usando
+  `CONFIANCA_MINIMA`/`CONFIANCA_DINAMICA`, só um pouco mais estritos que
+  antes). Estabilidade/cooldown (`ESTAB_MIN_*`, `COOLDOWN_*`, ver entrada
+  mais abaixo) não foram mexidos — pedido explícito de manter, é o que
+  segura a mesma letra por mais tempo antes de comitar. Pendente: validar
+  em celular real que ainda reconhece letras/gestos de verdade sem travar
+  demais.
+
+- **Ferramentas de treino unificadas em `treinamento/`** — duas pessoas
+  construíram, em paralelo e sem saber uma da outra, ferramentas pro mesmo
+  problema (dados de treino insuficientes pra letras com movimento e
+  gestos corporais). Fundidas em uma: `Capturar.bat` (câmera com botão
+  GRAVAR, contagem de 3s, grava e salva sozinho) agora grava direto em
+  `treinamento/dados/raw_*`, o layout que `treinar_visuall.py` já lia;
+  `Treinar.bat` virou um atalho rápido pra esse motor (extrai+treina tudo
+  sem perguntar nada); `abrir_treinamento.bat` continua a interface
+  completa (importar pasta externa, treinar só uma categoria, ver status).
+  Os modelos individuais/parciais/gerais (H/J/K/Z já commitados) e o
+  suporte a gestos corporais (extração de 225 features/frame — pose+mãos,
+  normalização por ombros — e treino LSTM→TFLite) são do
+  `treinar_visuall.py`; a implementação equivalente que existia em
+  `linear/backend/` (`extract_from_videos_corpo.py`, `train_body_model.py`)
+  foi removida por ficar duplicada depois da fusão. Documentação
+  consolidada em `treinamento/README.md` (era dois arquivos,
+  `README.md` + `COMO_USAR.md`, com instruções diferentes).
 
 - **Delegate GPU com fallback pra CPU** (`HandLandmarker`,
   `PoseLandmarker`, `FaceLandmarker`) — os três detectores MediaPipe

@@ -1,5 +1,9 @@
 # Treinamento dos modelos
 
+> Pra gravar amostras novas com a webcam e treinar sem mexer em código, veja
+> `treinamento/README.md` na raiz do repo. Este arquivo aqui documenta o
+> formato/requisitos dos modelos em si.
+
 Este app usa dois tipos de reconhecimento:
 
 - **Estatico:** uma mao parada, com `42` features por amostra.

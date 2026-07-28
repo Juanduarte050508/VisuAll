@@ -1,13 +1,20 @@
 """
-Capturar — grava clipes de treino pra letras com movimento e gestos
-corporais (e fotos pra letras paradas), direto da webcam.
+Capturar — grava clipes de treino pra letras (paradas e com movimento) e
+gestos corporais, direto da webcam.
 
 Fluxo: escolhe categoria + rótulo, clica GRAVAR, espera a contagem de 3s,
-grava ~3s sozinho e já salva no lugar certo. Ver treinamento/README.md pra
-instruções completas e quantas amostras gravar de cada.
+grava ~3s sozinho e já salva no lugar certo. Ver treinamento/COMO_USAR.md
+pra instruções completas e quantas amostras gravar de cada.
 
-Não mexe em nada do app Android — só produz arquivos em VisuAll/data/, que
-depois viram um .onnx/.tflite novo rodando treinamento/Treinar.bat.
+Salva em treinamento/dados/raw_*/<RÓTULO>/ — o mesmo lugar que
+treinar_visuall.py (interface_treinamento.py / abrir_treinamento.bat) já lê,
+inclusive pra letra parada: em vez de tirar fotos aqui, grava o clipe
+inteiro e deixa o extract_static_dataset() de lá tirar os quadros (ele já
+faz isso pra vídeo estático, com frame_stride=5) — uma lógica a menos
+duplicada entre as duas ferramentas.
+
+Não mexe em nada do app Android — só produz vídeos que viram um
+.onnx/.tflite novo rodando Treinar.bat (ou a interface de treino).
 """
 import sys
 import time
@@ -21,12 +28,24 @@ from PIL import Image, ImageTk
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "linear" / "backend" / "training"))
-from training_common import BODY_LABELS, DYNAMIC_LABELS, STATIC_LABELS  # noqa: E402
+from training_common import DYNAMIC_LABELS, STATIC_LABELS  # noqa: E402
 
 CONTAGEM_S = 3.0
 GRAVACAO_S = 3.0
-FRAMES_ESTATICA = 8  # quantas fotos extrair do clipe de 3s pra letra parada
 PREVIEW_LARGURA = 480
+
+DATA_DIR = ROOT / "treinamento" / "dados"
+BODY_LABELS_PATH = (
+    ROOT / "mobile" / "app" / "src" / "main" / "assets" / "gestos" / "geral" / "labels.txt"
+)
+# Mesma fonte que treinar_visuall.py usa (lê o labels.txt que o app carrega,
+# não uma cópia hardcoded) -- se um gesto for adicionado/removido lá, esta
+# ferramenta acompanha sozinha.
+BODY_LABELS = [
+    linha.strip().upper()
+    for linha in BODY_LABELS_PATH.read_text(encoding="utf-8").splitlines()
+    if linha.strip()
+]
 
 CATEGORIAS = {
     "Letra parada (estática)": ("estatica", sorted(STATIC_LABELS)),
@@ -34,10 +53,11 @@ CATEGORIAS = {
     "Gesto corporal": ("corpo", BODY_LABELS),
 }
 
+# Mesmos nomes de pasta que treinar_visuall.py espera (DATA_DIR / target_dir_for).
 PASTA_POR_CATEGORIA = {
-    "estatica": ROOT / "data" / "raw_images",
-    "dinamica": ROOT / "data" / "raw_videos",
-    "corpo": ROOT / "data" / "raw_videos_corpo",
+    "estatica": DATA_DIR / "raw_static_videos",
+    "dinamica": DATA_DIR / "raw_videos",
+    "corpo": DATA_DIR / "raw_body_videos",
 }
 
 IDLE, CONTAGEM, GRAVANDO, SALVANDO = "idle", "contagem", "gravando", "salvando"
@@ -133,15 +153,10 @@ class CapturarApp:
         if not self.var_rotulo.get():
             self.label_contador.config(text="")
             return
-        pasta, categoria_key = self._pasta_atual()
-        if categoria_key == "estatica":
-            total = len(list(pasta.glob("*.jpg"))) if pasta.exists() else 0
-            unidade = "fotos"
-        else:
-            total = len(list(pasta.glob("*.mp4"))) if pasta.exists() else 0
-            unidade = "clipes"
+        pasta, _ = self._pasta_atual()
+        total = len(list(pasta.glob("*.mp4"))) if pasta.exists() else 0
         self.label_contador.config(
-            text=f"{self.var_rotulo.get()}: {total} {unidade} já salvos"
+            text=f"{self.var_rotulo.get()}: {total} clipes já salvos"
         )
 
     # ── loop principal (preview + estados) ──────────────────────────────
@@ -204,15 +219,12 @@ class CapturarApp:
         self.label_status.config(text="Salvando...")
         self.root.update_idletasks()
 
-        pasta, categoria_key = self._pasta_atual()
+        pasta, _ = self._pasta_atual()
         pasta.mkdir(parents=True, exist_ok=True)
         agora = datetime.now().strftime("%Y%m%d_%H%M%S")
 
         try:
-            if categoria_key == "estatica":
-                self._salvar_fotos(pasta, agora)
-            else:
-                self._salvar_video(pasta, agora)
+            self._salvar_video(pasta, agora)
         except Exception as e:
             messagebox.showerror("Erro ao salvar", str(e))
 
@@ -222,16 +234,6 @@ class CapturarApp:
         self.botao_gravar.config(state="normal")
         self.combo_rotulo.config(state="readonly")
         self._atualizar_contador()
-
-    def _salvar_fotos(self, pasta, prefixo):
-        total = len(self.frames_gravados)
-        if total == 0:
-            return
-        passo = max(1, total // FRAMES_ESTATICA)
-        indices = list(range(0, total, passo))[:FRAMES_ESTATICA]
-        for i, idx in enumerate(indices):
-            caminho = pasta / f"{prefixo}_{i}.jpg"
-            cv2.imwrite(str(caminho), self.frames_gravados[idx])
 
     def _salvar_video(self, pasta, prefixo):
         if not self.frames_gravados:

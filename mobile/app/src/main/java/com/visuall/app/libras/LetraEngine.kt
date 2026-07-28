@@ -213,7 +213,7 @@ internal class LetraEngine(
                 entrada = dados,
                 modelos = modelosEstaticosIndividuais,
                 features = LibrasAnalyzer.FEATURES_ESTATICO,
-                confiancaMinima = LibrasAnalyzer.CONFIANCA_MINIMA,
+                confiancaMinima = LibrasAnalyzer.CONFIANCA_INDIVIDUAL,
                 margemMinima = LibrasAnalyzer.MARGEM_ESTATICA_MINIMA,
                 modo = "estatico_individual"
             )
@@ -249,7 +249,7 @@ internal class LetraEngine(
                 entrada = entrada,
                 modelos = modelosDinamicosIndividuais,
                 features = LibrasAnalyzer.FEATURES_DINAMICO,
-                confiancaMinima = LibrasAnalyzer.CONFIANCA_DINAMICA,
+                confiancaMinima = LibrasAnalyzer.CONFIANCA_INDIVIDUAL,
                 margemMinima = LibrasAnalyzer.MARGEM_DINAMICA_MINIMA,
                 modo = "dinamico_individual"
             )
