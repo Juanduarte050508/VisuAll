@@ -1,15 +1,3 @@
-<!--
-  README DO REPOSITÓRIO VisuAll
-  Cole no README.md do repo github.com/Juanduarte050508/VisuAll
-
-  ANTES DE COMMITAR, revise:
-  1. A seção "Project Status" reflete que a versão integrada ainda não subiu.
-     Quando subir o código unificado, apague essa seção ou marque tudo como ✅.
-  2. Ajuste os comandos de instalação/execução para os nomes reais dos seus
-     arquivos (ex: main.py, server.py — confira como se chamam no seu projeto).
-  3. Adicione um GIF/print de demo na seção indicada (faz MUITA diferença).
--->
-
 <div align="center">
 
 # 🤟 VisuAll
@@ -111,6 +99,31 @@ VisuAll combines **two recognition engines** in one unified system:
 
 ---
 
+## 🗂️ Repository Structure
+
+VisuAll ships **two Python backends implementing the same recognition
+pipeline**, plus **one native mobile port**. If you're new here, this is
+what lives where and why there's more than one backend folder:
+
+| Path | What it is |
+|---|---|
+| `linear/backend/app.py` | **Reference implementation.** A single Python file with the full pipeline (camera capture → MediaPipe Holistic → MLP/LSTM classification → WebSocket → frontend). Start here to understand the logic end-to-end. |
+| `linear/frontend/` | The web UI (`index.html`) that `linear/backend/app.py` serves over WebSocket. |
+| `linear/backend/data_extraction/` | Scripts that turn raw photos/videos into the landmark datasets used to train the alphabet models, using the MediaPipe Tasks API — the same detector the mobile app uses at inference time. |
+| `linear/backend/training/` | Scripts that train the static/dynamic MLP models and export them to both `models/*.pkl` (Python) and `mobile/app/src/main/assets/*.onnx` (Android), from the same dataset. |
+| `modular/` | **The same backend as `linear/backend/app.py`, split into 10 small modules** (`m01_visuall_config.py` … `m10_visuall_servidor.py`) instead of one file. Entry point is `app_backend_unificado.py`. Behaves identically and reuses `linear/frontend/` — easier to navigate if you're extending the backend. |
+| `models/` | Pre-trained model files ready for inference. See `models/README.md` for what each file is. |
+| `mobile/` | **Android port** (Kotlin) of the same recognition pipeline, running fully on-device (MediaPipe Tasks API + ONNX Runtime + TFLite — no backend/WebSocket needed). See `mobile/README.md` to build and run it, and [CHANGELOG.md](CHANGELOG.md) for why its calibration constants have the values they do. |
+| `mobile/tools/` | Windows scripts to set up an Android emulator matching the mobile app's requirements (webcam-backed front camera, compatible CPU architecture). See `mobile/tools/README.md`. |
+| `.github/workflows/` | CI: compiles and runs unit tests against `mobile/` on every push/PR. |
+
+**In short:** `linear/backend/app.py` and `modular/` are two shapes of
+the same desktop/Python system — pick whichever is easier to read for
+what you're doing. `mobile/` is a separate, independent port of that
+same logic to Android.
+
+---
+
 ## ⚙️ Getting Started
 
 > Requires **Python 3.10+** and a webcam.
@@ -128,11 +141,15 @@ python -m venv .venv
 # 3. Install dependencies
 pip install -r requirements.txt
 
-# 4. Run
-python main.py                # ← ajuste para o nome real do seu entrypoint
+# 4. Run the backend — either version works the same way:
+python linear/backend/app.py            # single-file reference version
+python modular/app_backend_unificado.py # same thing, split into modules
 ```
 
-Then open the frontend in your browser and start signing. ✋
+Then open `linear/frontend/index.html` in your browser and start signing. ✋
+
+Looking for the Android app instead? It doesn't need this backend at all —
+everything runs on-device. See [`mobile/README.md`](mobile/README.md).
 
 ---
 
