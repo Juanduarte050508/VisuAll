@@ -2,6 +2,7 @@ package com.visuall.app.libras
 
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
+import ai.onnxruntime.OrtSession
 import android.content.Context
 import java.nio.FloatBuffer
 
@@ -15,15 +16,29 @@ internal class LetraEngine(
 ) {
     private val ortEnv          = OrtEnvironment.getEnvironment()
     private val sessionEstatico = ortEnv.createSession(
-        context.assets.open("static_model.onnx").readBytes()
+        context.assets.open("letras_estaticas/geral/model.onnx").readBytes()
     )
     private val sessionDinamico = ortEnv.createSession(
-        context.assets.open("dynamic_model.onnx").readBytes()
+        context.assets.open("letras_dinamicas/geral/model.onnx").readBytes()
     )
-    private val labelsEstatico  = context.assets.open("static_labels.txt")
+    private val sessionDinamicoParcial: OrtSession? =
+        runCatching {
+            ortEnv.createSession(context.assets.open("letras_dinamicas/parcial/model.onnx").readBytes())
+        }.getOrNull()
+    private val labelsEstatico  = context.assets.open("letras_estaticas/geral/labels.txt")
         .bufferedReader().readLines().filter { it.isNotBlank() }
-    private val labelsDinamico  = context.assets.open("dynamic_labels.txt")
+    private val labelsDinamico  = context.assets.open("letras_dinamicas/geral/labels.txt")
         .bufferedReader().readLines().filter { it.isNotBlank() }
+    private val labelsDinamicoParcial = runCatching {
+        context.assets.open("letras_dinamicas/parcial/labels.txt")
+            .bufferedReader().readLines().filter { it.isNotBlank() }
+    }.getOrDefault(emptyList())
+    private val modelosEstaticosIndividuais = carregarModelosIndividuais(
+        context, labelsEstatico, "letras_estaticas"
+    )
+    private val modelosDinamicosIndividuais = carregarModelosIndividuais(
+        context, labelsDinamico, "letras_dinamicas"
+    )
     private val trainingStore = CalibrationTrainingStore(context, labelsEstatico, labelsDinamico)
 
     private val bufferLm          = ArrayDeque<FloatArray>()
@@ -44,6 +59,29 @@ internal class LetraEngine(
     // vez de contagem de frames deixa o gate consistente independente da
     // taxa de quadros real.
     private var movimentoSustentadoDesde = 0L
+
+    private data class ModeloIndividual(
+        val label: String,
+        val session: OrtSession
+    )
+
+    private fun carregarModelosIndividuais(
+        context: Context,
+        labels: List<String>,
+        basePath: String
+    ): List<ModeloIndividual> {
+        return labels.mapNotNull { label ->
+            val safe = label.uppercase().filter { it.isLetterOrDigit() || it == '_' || it == '-' }
+            runCatching {
+                ModeloIndividual(
+                    label = label,
+                    session = ortEnv.createSession(
+                        context.assets.open("$basePath/$safe/model.onnx").readBytes()
+                    )
+                )
+            }.getOrNull()
+        }
+    }
 
     fun resetMovimentoSustentado() {
         movimentoSustentadoDesde = 0L
@@ -170,6 +208,18 @@ internal class LetraEngine(
     }
 
     private fun classificarEstatico(dados: FloatArray): Prediction {
+        if (modelosEstaticosIndividuais.isNotEmpty()) {
+            val individual = classificarIndividual(
+                entrada = dados,
+                modelos = modelosEstaticosIndividuais,
+                features = LibrasAnalyzer.FEATURES_ESTATICO,
+                confiancaMinima = LibrasAnalyzer.CONFIANCA_MINIMA,
+                margemMinima = LibrasAnalyzer.MARGEM_ESTATICA_MINIMA,
+                modo = "estatico_individual"
+            )
+            if (individual.letra != "-") return individual
+        }
+
         val tensor = OnnxTensor.createTensor(
             ortEnv, FloatBuffer.wrap(dados), longArrayOf(1, LibrasAnalyzer.FEATURES_ESTATICO.toLong()))
         val out    = sessionEstatico.run(mapOf("landmarks_input" to tensor))
@@ -193,9 +243,50 @@ internal class LetraEngine(
         bufferLm.toList().takeLast(LibrasAnalyzer.JANELA_MLP).forEachIndexed { i, frame ->
             frame.copyInto(entrada, i * LibrasAnalyzer.FEATURES_ESTATICO)
         }
+
+        if (modelosDinamicosIndividuais.isNotEmpty()) {
+            val individual = classificarIndividual(
+                entrada = entrada,
+                modelos = modelosDinamicosIndividuais,
+                features = LibrasAnalyzer.FEATURES_DINAMICO,
+                confiancaMinima = LibrasAnalyzer.CONFIANCA_DINAMICA,
+                margemMinima = LibrasAnalyzer.MARGEM_DINAMICA_MINIMA,
+                modo = "dinamico_individual"
+            )
+            if (individual.letra != "-") return individual
+        }
+
+        // Se existe um modelo parcial treinado pela ferramenta local, ele é
+        // usado primeiro para as classes que já têm dados novos (ex.: H/J/K/Z).
+        // O modelo completo continua como fallback, preservando letras ainda
+        // sem re-treino parcial, como X.
+        sessionDinamicoParcial?.let { partialSession ->
+            val parcial = classificarDinamicoComModelo(
+                entrada = entrada,
+                session = partialSession,
+                labels = labelsDinamicoParcial,
+                modo = "dinamico_parcial"
+            )
+            if (parcial.letra != "-") return parcial
+        }
+
+        return classificarDinamicoComModelo(
+            entrada = entrada,
+            session = sessionDinamico,
+            labels = labelsDinamico,
+            modo = "dinamico"
+        )
+    }
+
+    private fun classificarDinamicoComModelo(
+        entrada: FloatArray,
+        session: OrtSession,
+        labels: List<String>,
+        modo: String
+    ): Prediction {
         val tensor = OnnxTensor.createTensor(
             ortEnv, FloatBuffer.wrap(entrada), longArrayOf(1, LibrasAnalyzer.FEATURES_DINAMICO.toLong()))
-        val out    = sessionDinamico.run(mapOf("landmarks_input" to tensor))
+        val out    = session.run(mapOf("landmarks_input" to tensor))
         @Suppress("UNCHECKED_CAST")
         val probs  = (out[1].value as Array<FloatArray>)[0]
         val idx    = probs.indices.maxByOrNull { probs[it] } ?: 0
@@ -204,9 +295,48 @@ internal class LetraEngine(
         val margem = conf - second
         val letra  = if (conf >= LibrasAnalyzer.CONFIANCA_DINAMICA &&
                          margem >= LibrasAnalyzer.MARGEM_DINAMICA_MINIMA &&
-                         idx < labelsDinamico.size) labelsDinamico[idx] else "-"
+                         idx < labels.size) labels[idx] else "-"
         tensor.close(); out.close()
-        return Prediction(letra, conf, "dinamico", margem)
+        return Prediction(letra, conf, modo, margem)
+    }
+
+    private fun classificarIndividual(
+        entrada: FloatArray,
+        modelos: List<ModeloIndividual>,
+        features: Int,
+        confiancaMinima: Float,
+        margemMinima: Float,
+        modo: String
+    ): Prediction {
+        var melhorLabel = "-"
+        var melhorConf = 0f
+        var segundoConf = 0f
+
+        modelos.forEach { modelo ->
+            val tensor = OnnxTensor.createTensor(
+                ortEnv, FloatBuffer.wrap(entrada), longArrayOf(1, features.toLong()))
+            val out = modelo.session.run(mapOf("landmarks_input" to tensor))
+            @Suppress("UNCHECKED_CAST")
+            val probs = (out[1].value as Array<FloatArray>)[0]
+            val positivo = when {
+                probs.size >= 2 -> probs[1]
+                probs.size == 1 -> probs[0]
+                else -> 0f
+            }
+            if (positivo > melhorConf) {
+                segundoConf = melhorConf
+                melhorConf = positivo
+                melhorLabel = modelo.label
+            } else if (positivo > segundoConf) {
+                segundoConf = positivo
+            }
+            tensor.close()
+            out.close()
+        }
+
+        val margem = melhorConf - segundoConf
+        val letra = if (melhorConf >= confiancaMinima && margem >= margemMinima) melhorLabel else "-"
+        return Prediction(letra, melhorConf, modo, margem)
     }
 
     // ── Calibração pessoal (API pública usada pela UI) ─────────────────────
@@ -288,8 +418,14 @@ internal class LetraEngine(
     }
 
     fun close() {
+        modelosEstaticosIndividuais.forEach { it.session.close() }
+        modelosDinamicosIndividuais.forEach { it.session.close() }
         sessionEstatico.close()
+        sessionDinamicoParcial?.close()
         sessionDinamico.close()
-        ortEnv.close()
+        // OrtEnvironment.getEnvironment() retorna um ambiente compartilhado.
+        // Fechar aqui quebra a proxima criacao do LetraEngine quando a camera
+        // e aberta de novo ou quando o CameraX recria o analyzer.
     }
 }
+

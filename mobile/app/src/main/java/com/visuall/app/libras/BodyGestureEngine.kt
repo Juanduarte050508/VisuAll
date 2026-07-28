@@ -81,14 +81,14 @@ internal class BodyGestureEngine(private val context: Context) {
             val loadedPose = createPoseLandmarker()
             val loadedDelegate = FlexDelegate()
             val loadedInterpreter = Interpreter(
-                loadAssetBuffer("body_model.tflite"),
+                loadAssetBuffer("gestos/geral/model.tflite"),
                 Interpreter.Options().addDelegate(loadedDelegate)
             )
             loadedInterpreter.resizeInput(
                 0, intArrayOf(1, LibrasAnalyzer.BODY_WINDOW, LibrasAnalyzer.BODY_FEATURES))
             loadedInterpreter.allocateTensors()
 
-            labelsCorpo = context.assets.open("body_labels.txt")
+            labelsCorpo = context.assets.open("gestos/geral/labels.txt")
                 .bufferedReader().readLines().filter { it.isNotBlank() }
             flexDelegate = loadedDelegate
             bodyInterpreter = loadedInterpreter
@@ -368,3 +368,4 @@ internal class BodyGestureEngine(private val context: Context) {
             .also { it.rewind() }
     }
 }
+

@@ -93,10 +93,10 @@ class LibrasAnalyzer(
         // MOVIMENTO_SUSTENTADO_MS acima. Dinâmicas são transitórias; exigir
         // tempo demais faz a janela passar do gesto antes da letra ser
         // adicionada.
-        const val ESTAB_MIN_DINAMICO_MS  = 130L
-        const val ESTAB_MIN_ESTATICO_MS  = 500L
-        const val COOLDOWN_DINAMICO      = 250L
-        const val COOLDOWN_ESTATICO      = 450L
+        const val ESTAB_MIN_DINAMICO_MS  = 260L
+        const val ESTAB_MIN_ESTATICO_MS  = 850L
+        const val COOLDOWN_DINAMICO      = 700L
+        const val COOLDOWN_ESTATICO      = 1_100L
         const val NO_HAND_TOLERANCE      = 3
         const val FEATURES_ESTATICO      = 42
         const val FEATURES_DINAMICO      = 420
@@ -387,8 +387,9 @@ class LibrasAnalyzer(
                 ultimaPredicao = ""
             }
 
-            val estabMinMs = if (modo == "dinamico") ESTAB_MIN_DINAMICO_MS else ESTAB_MIN_ESTATICO_MS
-            val cooldown   = if (modo == "dinamico") COOLDOWN_DINAMICO    else COOLDOWN_ESTATICO
+            val dinamico = modo.startsWith("dinamico")
+            val estabMinMs = if (dinamico) ESTAB_MIN_DINAMICO_MS else ESTAB_MIN_ESTATICO_MS
+            val cooldown   = if (dinamico) COOLDOWN_DINAMICO    else COOLDOWN_ESTATICO
             val estabilidadeOk = estabilidadeDesde != 0L && (agora - estabilidadeDesde) >= estabMinMs
 
             if (estabilidadeOk

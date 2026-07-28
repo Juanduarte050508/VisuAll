@@ -10,8 +10,8 @@ Entradas aceitas:
 Saidas:
   - VisuAll/models/static_model.pkl
   - VisuAll/models/static_classes.pkl
-  - VisuAll/mobile/app/src/main/assets/static_model.onnx
-  - VisuAll/mobile/app/src/main/assets/static_labels.txt
+  - VisuAll/mobile/app/src/main/assets/letras_estaticas/geral/model.onnx
+  - VisuAll/mobile/app/src/main/assets/letras_estaticas/geral/labels.txt
 """
 from sklearn.metrics import classification_report
 from sklearn.model_selection import train_test_split
@@ -92,10 +92,13 @@ print(
 
 save_pickle(MODELS_DIR / "static_model.pkl", mlp)
 save_pickle(MODELS_DIR / "static_classes.pkl", STATIC_LABELS)
-save_labels(MOBILE_ASSETS_DIR / "static_labels.txt", STATIC_LABELS)
-export_onnx_model(mlp, MOBILE_ASSETS_DIR / "static_model.onnx", FEATURES)
+static_assets = MOBILE_ASSETS_DIR / "letras_estaticas" / "geral"
+static_assets.mkdir(parents=True, exist_ok=True)
+save_labels(static_assets / "labels.txt", STATIC_LABELS)
+export_onnx_model(mlp, static_assets / "model.onnx", FEATURES)
 
 print(f"Modelo Python salvo em: {MODELS_DIR / 'static_model.pkl'}")
 print(f"Classes Python salvas em: {MODELS_DIR / 'static_classes.pkl'}")
-print(f"Modelo Android salvo em: {MOBILE_ASSETS_DIR / 'static_model.onnx'}")
-print(f"Labels Android salvos em: {MOBILE_ASSETS_DIR / 'static_labels.txt'}")
+print(f"Modelo Android salvo em: {static_assets / 'model.onnx'}")
+print(f"Labels Android salvos em: {static_assets / 'labels.txt'}")
+

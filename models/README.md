@@ -17,9 +17,16 @@ Saidas Android geradas pelos treinos:
 
 | Arquivo | Descricao |
 |---|---|
-| `mobile/app/src/main/assets/static_model.onnx` | Modelo estatico com entrada `landmarks_input`, shape `[1, 42]` |
-| `mobile/app/src/main/assets/static_labels.txt` | Labels estaticos na mesma ordem da saida do ONNX |
-| `mobile/app/src/main/assets/dynamic_model.onnx` | Modelo dinamico com entrada `landmarks_input`, shape `[1, 420]` |
-| `mobile/app/src/main/assets/dynamic_labels.txt` | Labels dinamicos na mesma ordem da saida do ONNX |
+| `mobile/app/src/main/assets/letras_estaticas/geral/model.onnx` | Modelo estatico com entrada `landmarks_input`, shape `[1, 42]` |
+| `mobile/app/src/main/assets/letras_estaticas/geral/labels.txt` | Labels estaticos na mesma ordem da saida do ONNX |
+| `mobile/app/src/main/assets/letras_dinamicas/geral/model.onnx` | Modelo dinamico com entrada `landmarks_input`, shape `[1, 420]` |
+| `mobile/app/src/main/assets/letras_dinamicas/geral/labels.txt` | Labels dinamicos na mesma ordem da saida do ONNX |
+
+Modelos parciais e individuais do Android ficam em:
+
+- `mobile/app/src/main/assets/letras_dinamicas/parcial/`
+- `mobile/app/src/main/assets/letras_dinamicas/<LETRA>/`
+- `mobile/app/src/main/assets/letras_estaticas/<LETRA>/`
 
 > **Nota:** modelos legados ou versões antigas devem ir para uma subpasta `legacy/` (presente no `.gitignore`).
+

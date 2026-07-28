@@ -10,8 +10,8 @@ Entradas aceitas:
 Saidas:
   - VisuAll/models/dynamic_model.pkl
   - VisuAll/models/dynamic_classes.pkl
-  - VisuAll/mobile/app/src/main/assets/dynamic_model.onnx
-  - VisuAll/mobile/app/src/main/assets/dynamic_labels.txt
+  - VisuAll/mobile/app/src/main/assets/letras_dinamicas/geral/model.onnx
+  - VisuAll/mobile/app/src/main/assets/letras_dinamicas/geral/labels.txt
 """
 from sklearn.metrics import classification_report
 from sklearn.model_selection import train_test_split
@@ -92,10 +92,13 @@ print(
 
 save_pickle(MODELS_DIR / "dynamic_model.pkl", mlp)
 save_pickle(MODELS_DIR / "dynamic_classes.pkl", DYNAMIC_LABELS)
-save_labels(MOBILE_ASSETS_DIR / "dynamic_labels.txt", DYNAMIC_LABELS)
-export_onnx_model(mlp, MOBILE_ASSETS_DIR / "dynamic_model.onnx", FEATURES)
+dynamic_assets = MOBILE_ASSETS_DIR / "letras_dinamicas" / "geral"
+dynamic_assets.mkdir(parents=True, exist_ok=True)
+save_labels(dynamic_assets / "labels.txt", DYNAMIC_LABELS)
+export_onnx_model(mlp, dynamic_assets / "model.onnx", FEATURES)
 
 print(f"Modelo Python salvo em: {MODELS_DIR / 'dynamic_model.pkl'}")
 print(f"Classes Python salvas em: {MODELS_DIR / 'dynamic_classes.pkl'}")
-print(f"Modelo Android salvo em: {MOBILE_ASSETS_DIR / 'dynamic_model.onnx'}")
-print(f"Labels Android salvos em: {MOBILE_ASSETS_DIR / 'dynamic_labels.txt'}")
+print(f"Modelo Android salvo em: {dynamic_assets / 'model.onnx'}")
+print(f"Labels Android salvos em: {dynamic_assets / 'labels.txt'}")
+
