@@ -58,6 +58,13 @@ import kotlin.math.roundToInt
 
 class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
 
+    private companion object {
+        // Compilado uma vez: normalizarBusca() roda pra cada palavra sugerida
+        // (~45) toda vez que a frase muda, então recompilar o regex ali
+        // dentro seria refazer o mesmo trabalho repetidamente por frame.
+        val DIACRITICS_REGEX = "\\p{Mn}+".toRegex()
+    }
+
     private var _binding: FragmentLibrasBinding? = null
     private val binding get() = _binding!!
 
@@ -911,7 +918,7 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
 
     private fun normalizarBusca(texto: String): String {
         return Normalizer.normalize(texto.trim().lowercase(Locale("pt", "BR")), Normalizer.Form.NFD)
-            .replace("\\p{Mn}+".toRegex(), "")
+            .replace(DIACRITICS_REGEX, "")
     }
 
     private fun hideSuggestions() {
