@@ -1,8 +1,5 @@
 package com.visuall.app.libras
 
-import ai.onnxruntime.OnnxTensor
-import ai.onnxruntime.OrtEnvironment
-import ai.onnxruntime.OrtSession
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Matrix
@@ -13,22 +10,18 @@ import androidx.camera.core.ImageProxy
 import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.vision.core.RunningMode
-import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarker
-import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarker.FaceLandmarkerOptions
-import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarkerResult
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker.HandLandmarkerOptions
-import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarker
-import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarker.PoseLandmarkerOptions
-import org.tensorflow.lite.Interpreter
-import org.tensorflow.lite.flex.FlexDelegate
-import java.nio.ByteBuffer
-import java.nio.FloatBuffer
-import java.nio.ByteOrder
-import java.util.ArrayDeque
-import kotlin.math.abs
-import kotlin.math.sqrt
+import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarkerResult
+import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarkerResult
 
+// Orquestrador do reconhecimento Libras: cada frame da câmera passa por
+// aqui, mas a inteligência de cada modo vive num módulo dedicado —
+// LetraEngine (alfabeto estático/dinâmico + calibração), BodyGestureEngine
+// (sinais de corpo) e FaceMarkerEngine (marcador de sobrancelha/pergunta).
+// Esta classe cuida só do que é DE FATO compartilhado entre os modos: captura
+// de câmera, detecção de mão (handLandmarker), e o estado da frase/gesto de
+// limpar, que é idêntico nos dois modos.
 class LibrasAnalyzer(
     private val context: Context,
     private val onLetra: (letra: String, confianca: Float, modo: String) -> Unit,
@@ -152,28 +145,11 @@ class LibrasAnalyzer(
         CORPO
     }
 
-    private enum class BodyState {
-        OCIOSO,
-        CAPTURANDO
-    }
-
-    private data class Prediction(
-        val letra: String,
-        val confianca: Float,
-        val modo: String,
-        val margem: Float = 1f
-    )
-
     private val handLandmarker: HandLandmarker
-    private var poseLandmarker: PoseLandmarker? = null
-    private var faceLandmarker: FaceLandmarker? = null
-    private var faceModelIndisponivel = false
-    private var flexDelegate: FlexDelegate? = null
-    private var bodyInterpreter: Interpreter? = null
-    private var labelsCorpo: List<String> = emptyList()
-    private val bufferSobrancelha = ArrayDeque<Float>()
-    private var interrogativoAtivo = false
-    private var faceFrameCounter = 0
+    private val letraEngine = LetraEngine(context, onFeedback)
+    private val bodyEngine = BodyGestureEngine(context)
+    private val faceEngine = FaceMarkerEngine(context)
+
     @Volatile private var modoAtual = Modo.ALFABETO
     // Espelha a imagem na horizontal quando estamos na câmera frontal. O
     // dataset foi gravado com a webcam espelhada (cv2.flip no Python), então
@@ -204,48 +180,15 @@ class LibrasAnalyzer(
         handLandmarker = HandLandmarker.createFromOptions(context, options)
     }
 
-    private val ortEnv          = OrtEnvironment.getEnvironment()
-    private val sessionEstatico = ortEnv.createSession(
-        context.assets.open("static_model.onnx").readBytes()
-    )
-    private val sessionDinamico = ortEnv.createSession(
-        context.assets.open("dynamic_model.onnx").readBytes()
-    )
-    private val labelsEstatico  = context.assets.open("static_labels.txt")
-        .bufferedReader().readLines().filter { it.isNotBlank() }
-    private val labelsDinamico  = context.assets.open("dynamic_labels.txt")
-        .bufferedReader().readLines().filter { it.isNotBlank() }
-    private val trainingStore = CalibrationTrainingStore(context, labelsEstatico, labelsDinamico)
-
-    private val bufferLm              = ArrayDeque<FloatArray>()
-    private val bodyMovementBuffer    = ArrayDeque<FloatArray>()
-    private val bodyGestureBuffer     = ArrayList<FloatArray>()
-    private val calibrationLock       = Any()
-    private val calibrationBuffer     = ArrayList<FloatArray>()
-    @Volatile private var calibrationTarget: String? = null
     private var ultimaPredicao        = ""
     private var contadorEstabilidade  = 0
     private var ultimaLetraAdicionada = ""
-    // Frames seguidos com movimento acima de LIMIAR_MOVIMENTO. Só confiamos
-    // no modelo dinâmico depois de sustentado — ver comentário do
-    // LIMIAR_MOVIMENTO.
-    private var movimentoSustentadoCount = 0
     private var ultimoTempoAdicao     = 0L
     private var tempoInicioEsticado   = 0L
     private var ultimoTempoLimpar     = 0L
     private var frase                 = ""
     private var framesSemMao          = 0
     private var letraRepetidaPendente = ""
-    private var bodyState             = BodyState.OCIOSO
-    private var bodyStartCount        = 0
-    private var bodyEndCount          = 0
-    private var ultimoTempoCorpo      = 0L
-    private var ultimaClasseCorpo     = ""
-    private var bodyNoHandSince       = 0L
-    // Sinais de corpo reconhecidos, em sequência (rótulos: PESSOA, SURDO...).
-    // A frase é montada traduzindo ESTA lista (com artigo/gênero/verbo), igual
-    // ao traduzir_frase do Python — não dá pra fazer só concatenando palavras.
-    private val bodyTokens            = ArrayList<String>()
     // Timestamp monotônico exigido pelo modo VIDEO do MediaPipe. Precisa ser
     // estritamente crescente a cada frame para o rastreamento funcionar.
     private var videoTimestamp        = 0L
@@ -262,9 +205,9 @@ class LibrasAnalyzer(
     private fun resetEstadoAlfabeto() {
         ultimaPredicao = ""
         contadorEstabilidade = 0
-        movimentoSustentadoCount = 0
         letraRepetidaPendente = ""
         ultimaLetraAdicionada = ""
+        letraEngine.resetMovimentoSustentado()
     }
 
     private fun nextVideoTimestamp(): Long {
@@ -300,22 +243,12 @@ class LibrasAnalyzer(
         val result = handLandmarker.detectForVideo(mpImage, timestamp)
 
         // Rosto roda nos DOIS modos, igual ao Holistic do Python ("Em AMBOS
-        // os modos o ROSTO entra como marcador não-manual"), mas só a cada
-        // FACE_DETECT_STRIDE frames: é um 3º modelo completo, e a sobrancelha
-        // não muda de estado tão rápido quanto uma letra, então detectar todo
-        // frame só gastava latência sem ganho perceptível.
-        faceFrameCounter++
-        if (faceFrameCounter % FACE_DETECT_STRIDE == 0) {
-            val faceResult = ensureFaceModelLoaded()?.detectForVideo(mpImage, timestamp)
-            val sobrancelhaAtiva = lerMarcador(faceResult)
-            if (sobrancelhaAtiva != interrogativoAtivo) {
-                interrogativoAtivo = sobrancelhaAtiva
-                onInterrogativo(sobrancelhaAtiva)
-            }
-        }
+        // os modos o ROSTO entra como marcador não-manual") — ver
+        // FaceMarkerEngine para o throttle de frames e o porte do ler_marcador.
+        faceEngine.step(mpImage, timestamp, onInterrogativo)
 
         if (modoAtual == Modo.CORPO) {
-            val poseDetector = ensureBodyModelsLoaded()
+            val poseDetector = bodyEngine.ensureLoaded()
             if (poseDetector == null) {
                 onLetra("-", 0f, "corpo")
                 onFeedback("MODELO DE CORPO INDISPONIVEL", FEEDBACK_ALERTA)
@@ -332,7 +265,7 @@ class LibrasAnalyzer(
             if (framesSemMao >= NO_HAND_TOLERANCE) {
                 resetEstadoAlfabeto()
                 tempoInicioEsticado = 0L
-                bufferLm.clear()
+                letraEngine.limparBuffer()
                 // Libera a mesma letra para ser digitada de novo: tirar a mão
                 // do quadro e refazer o sinal é a forma natural de repetir.
                 onRepeticaoPendente(null)
@@ -347,7 +280,7 @@ class LibrasAnalyzer(
         val lms    = result.landmarks()[0]
         // x corrigido para 4:3 (features + geometria); o desenho usa o cru.
         val pontos = lms.map { Pair(it.x() * aspectX, it.y()) }
-        val dedicosEsticados = detectarDedosEsticados(pontos)
+        val dedicosEsticados = LibrasMath.detectarDedosEsticados(pontos)
 
         if (dedicosEsticados) {
             val agora = System.currentTimeMillis()
@@ -367,17 +300,10 @@ class LibrasAnalyzer(
             tempoInicioEsticado = 0L
             onGestoLimpar(0f)
 
-            val dados    = normalizeLandmarks(pontos)
-            captureCalibrationFrame(dados)
-            bufferLm.addLast(dados)
-            while (bufferLm.size > JANELA_MLP + 5) bufferLm.removeFirst()
-
-            val movimento = calcularMovimento()
-            val predicao = escolherClassificacao(dados, movimento)
+            val predicao = letraEngine.process(pontos)
             val letra = predicao.letra
             val confianca = predicao.confianca
             val modo = predicao.modo
-            emitirFeedbackAlfabeto(predicao, movimento)
 
             onLetra(letra, confianca, modo)
 
@@ -458,17 +384,14 @@ class LibrasAnalyzer(
 
     // Converte as mãos detectadas em arrays crus [x0,y0,x1,y1,...] normalizados
     // no espaço do preview, para o overlay desenhar.
-    private fun handsToArrays(
-        result: com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarkerResult
-    ): List<FloatArray> = result.landmarks().map { hand ->
-        FloatArray(hand.size * 2).also { arr ->
-            hand.forEachIndexed { i, lm -> arr[i * 2] = lm.x(); arr[i * 2 + 1] = lm.y() }
+    private fun handsToArrays(result: HandLandmarkerResult): List<FloatArray> =
+        result.landmarks().map { hand ->
+            FloatArray(hand.size * 2).also { arr ->
+                hand.forEachIndexed { i, lm -> arr[i * 2] = lm.x(); arr[i * 2 + 1] = lm.y() }
+            }
         }
-    }
 
-    private fun poseToArray(
-        poseResult: com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarkerResult
-    ): FloatArray? {
+    private fun poseToArray(poseResult: PoseLandmarkerResult): FloatArray? {
         val poses = poseResult.landmarks()
         if (poses.isEmpty()) return null
         val p = poses[0]
@@ -476,304 +399,30 @@ class LibrasAnalyzer(
             p.forEachIndexed { i, lm -> arr[i * 2] = lm.x(); arr[i * 2 + 1] = lm.y() }
         }
     }
-    private fun ensureBodyModelsLoaded(): PoseLandmarker? {
-        poseLandmarker?.let { return it }
-
-        return try {
-            val poseBaseOptions = BaseOptions.builder()
-                .setModelAssetPath("pose_landmarker_lite.task")
-                .build()
-            val poseOptions = PoseLandmarkerOptions.builder()
-                .setBaseOptions(poseBaseOptions)
-                .setRunningMode(RunningMode.VIDEO)
-                .setMinPoseDetectionConfidence(0.35f)
-                .setMinPosePresenceConfidence(0.35f)
-                .setMinTrackingConfidence(0.35f)
-                .build()
-            val loadedPose = PoseLandmarker.createFromOptions(context, poseOptions)
-            val loadedDelegate = FlexDelegate()
-            val loadedInterpreter = Interpreter(
-                loadAssetBuffer("body_model.tflite"),
-                Interpreter.Options().addDelegate(loadedDelegate)
-            )
-            loadedInterpreter.resizeInput(0, intArrayOf(1, BODY_WINDOW, BODY_FEATURES))
-            loadedInterpreter.allocateTensors()
-
-            labelsCorpo = context.assets.open("body_labels.txt")
-                .bufferedReader().readLines().filter { it.isNotBlank() }
-            flexDelegate = loadedDelegate
-            bodyInterpreter = loadedInterpreter
-            poseLandmarker = loadedPose
-            loadedPose
-        } catch (error: Throwable) {
-            poseLandmarker = null
-            bodyInterpreter?.close()
-            bodyInterpreter = null
-            flexDelegate?.close()
-            flexDelegate = null
-            labelsCorpo = emptyList()
-            null
-        }
-    }
-
-    // Carrega o FaceLandmarker sob demanda, como o de corpo. Roda nos DOIS
-    // modos (igual ao Holistic do Python, que sempre lê o rosto), mas se a
-    // inicialização falhar (aparelho fraco/sem o asset) o app segue sem o
-    // marcador de pergunta em vez de quebrar — mesma filosofia defensiva do
-    // ensureBodyModelsLoaded.
-    private fun ensureFaceModelLoaded(): FaceLandmarker? {
-        faceLandmarker?.let { return it }
-        if (faceModelIndisponivel) return null
-
-        return try {
-            val baseOptions = BaseOptions.builder()
-                .setModelAssetPath("face_landmarker.task")
-                .build()
-            val options = FaceLandmarkerOptions.builder()
-                .setBaseOptions(baseOptions)
-                .setRunningMode(RunningMode.VIDEO)
-                .setNumFaces(1)
-                .setMinFaceDetectionConfidence(0.5f)
-                .setMinFacePresenceConfidence(0.5f)
-                .setMinTrackingConfidence(0.5f)
-                .build()
-            FaceLandmarker.createFromOptions(context, options).also { faceLandmarker = it }
-        } catch (error: Throwable) {
-            faceLandmarker = null
-            faceModelIndisponivel = true
-            null
-        }
-    }
-
-    // Porta fiel de ler_marcador (app.py): sobrancelha levantada em relação à
-    // distância entre os cantos externos dos olhos (escala invariante à
-    // distância da câmera), suavizada numa janela de JANELA_SOBR frames.
-    private fun lerMarcador(faceResult: FaceLandmarkerResult?): Boolean {
-        val rosto = faceResult?.faceLandmarks()?.firstOrNull() ?: return false
-        val maxIdx = maxOf(IDX_BROW_L, IDX_BROW_R, IDX_EYE_TOP_L, IDX_EYE_TOP_R,
-            IDX_EYE_OUT_L, IDX_EYE_OUT_R)
-        if (rosto.size <= maxIdx) return false
-
-        val dx = rosto[IDX_EYE_OUT_L].x() - rosto[IDX_EYE_OUT_R].x()
-        val dy = rosto[IDX_EYE_OUT_L].y() - rosto[IDX_EYE_OUT_R].y()
-        val escala = sqrt(dx * dx + dy * dy)
-        if (escala < 1e-6f) return false
-
-        val gl = rosto[IDX_EYE_TOP_L].y() - rosto[IDX_BROW_L].y()
-        val gr = rosto[IDX_EYE_TOP_R].y() - rosto[IDX_BROW_R].y()
-        bufferSobrancelha.addLast(((gl + gr) / 2f) / escala)
-        while (bufferSobrancelha.size > JANELA_SOBR) bufferSobrancelha.removeFirst()
-
-        val suavizado = bufferSobrancelha.average().toFloat()
-        return suavizado >= LIMIAR_SOBRANCELHA
-    }
-
-    private fun normalizeLandmarks(pontos: List<Pair<Float, Float>>): FloatArray {
-        val baseX = pontos[0].first
-        val baseY = pontos[0].second
-        val norm  = FloatArray(pontos.size * 2)
-        for (i in pontos.indices) {
-            norm[i * 2 + 0] = pontos[i].first  - baseX
-            norm[i * 2 + 1] = pontos[i].second - baseY
-        }
-        val maxV = norm.map { abs(it) }.maxOrNull()?.takeIf { it > 0f } ?: 1f
-        return FloatArray(norm.size) { norm[it] / maxV }
-    }
-
-    private fun mirrorLandmarks(dados: FloatArray): FloatArray {
-        val mirrored = dados.copyOf()
-        for (i in mirrored.indices step 2) {
-            mirrored[i] = -mirrored[i]
-        }
-        return mirrored
-    }
-
-    private fun captureCalibrationFrame(dados: FloatArray) {
-        if (calibrationTarget == null) return
-        synchronized(calibrationLock) {
-            if (calibrationTarget == null) return
-            if (calibrationBuffer.size >= CALIBRATION_MAX_FRAMES) {
-                calibrationBuffer.removeAt(0)
-            }
-            calibrationBuffer.add(dados.copyOf())
-            val letra = calibrationTarget.orEmpty()
-            val total = calibrationBuffer.size
-            onFeedback("GRAVANDO $letra  $total/$CALIBRATION_TARGET_FRAMES", FEEDBACK_BOM)
-        }
-    }
-
-    private fun emitirFeedbackAlfabeto(prediction: Prediction, movimento: Float) {
-        if (calibrationTarget != null) return
-
-        val mensagem = when {
-            prediction.letra != "-" && prediction.confianca >= 0.92f -> "SINAL ESTAVEL"
-            prediction.letra != "-" && prediction.confianca >= 0.82f -> "SEGURE MAIS FIRME"
-            movimento > LIMIAR_MOVIMENTO -> "MOVIMENTO ALTO"
-            prediction.confianca >= 0.68f -> "QUASE: AJUSTE ANGULO"
-            else -> "APROXIME A MAO"
-        }
-        val nivel = when {
-            prediction.letra != "-" && prediction.confianca >= 0.90f -> FEEDBACK_BOM
-            prediction.confianca >= 0.72f -> FEEDBACK_NEUTRO
-            else -> FEEDBACK_ALERTA
-        }
-        onFeedback(mensagem, nivel)
-    }
-
-    private fun aplicarCalibracaoPessoal(dados: FloatArray, base: Prediction): Prediction {
-        // Só usamos a calibração pessoal quando o modelo não reconheceu nada,
-        // para nunca sobrescrever uma decisão confiante do modelo por um
-        // vizinho-mais-próximo que pode estar errado.
-        if (base.letra != "-") return base
-        val calibrado = melhorCalibracao(dados)
-        return if (calibrado.letra != "-") calibrado else base
-    }
-
-    private fun melhorCalibracao(dados: FloatArray): Prediction {
-        val match = synchronized(calibrationLock) {
-            trainingStore.bestStaticMatch(
-                candidates = listOf(dados, mirrorLandmarks(dados)),
-                maxDistance = CALIBRATION_MATCH_LIMIT
-            )
-        } ?: return Prediction("-", 0f, "calibrado")
-
-        val score = (1f - match.distance / CALIBRATION_MATCH_LIMIT).coerceIn(0f, 1f)
-        val confianca = (0.86f + score * 0.13f).coerceAtMost(0.99f)
-        return Prediction(match.letter, confianca, "calibrado")
-    }
-
-    private fun averageFrames(frames: List<FloatArray>): FloatArray {
-        val result = FloatArray(FEATURES_ESTATICO)
-        if (frames.isEmpty()) return result
-        frames.forEach { frame ->
-            for (i in result.indices) {
-                result[i] += frame[i]
-            }
-        }
-        for (i in result.indices) {
-            result[i] = result[i] / frames.size.toFloat()
-        }
-        return result
-    }
-
-    private fun detectarDedosEsticados(lms: List<Pair<Float, Float>>): Boolean {
-        val M = 0.06f
-        return lms[8].second  < lms[5].second  - M &&
-               lms[12].second < lms[9].second  - M &&
-               lms[16].second < lms[13].second - M &&
-               lms[20].second < lms[17].second - M &&
-               abs(lms[4].first - lms[0].first) > 0.12f
-    }
-
-    private fun calcularMovimento(): Float {
-        if (bufferLm.size < 5) return 0f
-        val recent = bufferLm.toList().takeLast(5)
-        return std(recent.map { it[2] }) + std(recent.map { it[3] }) +
-               std(recent.map { it[16] }) + std(recent.map { it[17] })
-    }
-
-    private fun std(values: List<Float>): Float {
-        val mean = values.average().toFloat()
-        return sqrt(values.map { (it - mean) * (it - mean) }.average().toFloat())
-    }
 
     private fun podeRepetirAutomaticamente(letra: String): Boolean {
         if (letra !in LETRAS_REPETICAO_AUTO) return false
         return frase.length < 2 || frase[frase.length - 2].toString() != letra
     }
 
-    private fun escolherClassificacao(dados: FloatArray, movimento: Float): Prediction {
-        // Histerese: LIMIAR_MOVIMENTO sozinho não distingue "tremida de 1
-        // frame" de "traço real de H/J/K/X/Z" — os dois cruzam o mesmo valor
-        // de magnitude. A diferença é a DURAÇÃO: um gesto de verdade sustenta
-        // o movimento por vários frames seguidos; ruído da câmera não.
-        movimentoSustentadoCount = if (movimento > LIMIAR_MOVIMENTO) {
-            movimentoSustentadoCount + 1
-        } else {
-            0
-        }
-        val movimentoConfiavel = movimentoSustentadoCount >= MOVIMENTO_SUSTENTADO_FRAMES
-
-        if (movimentoConfiavel && bufferLm.size >= JANELA_MLP) {
-            return classificarDinamico()
-        }
-        // Calibração pessoal entra apenas como reforço quando o modelo não
-        // reconheceu nada (ver aplicarCalibracaoPessoal).
-        return aplicarCalibracaoPessoal(dados, classificarEstatico(dados))
-    }
-
-    private fun classificarEstatico(dados: FloatArray): Prediction {
-        val tensor = OnnxTensor.createTensor(
-            ortEnv, FloatBuffer.wrap(dados), longArrayOf(1, FEATURES_ESTATICO.toLong()))
-        val out    = sessionEstatico.run(mapOf("landmarks_input" to tensor))
-        @Suppress("UNCHECKED_CAST")
-        val probs  = (out[1].value as Array<FloatArray>)[0]
-        val idx    = probs.indices.maxByOrNull { probs[it] } ?: 0
-        val conf   = probs[idx]
-        // Margem contra a segunda melhor opção: se o modelo está dividido
-        // (ex.: C vs mão aberta), rejeitamos em vez de chutar.
-        val second = probs.indices.filter { it != idx }.maxOfOrNull { probs[it] } ?: 0f
-        val margem = conf - second
-        val label  = labelsEstatico.getOrNull(idx)
-        val letra  = if (label != null && conf >= CONFIANCA_MINIMA &&
-                         margem >= MARGEM_ESTATICA_MINIMA) label else "-"
-        tensor.close(); out.close()
-        return Prediction(letra, conf, "estatico", margem)
-    }
-
-    private fun classificarDinamico(): Prediction {
-        val entrada = FloatArray(FEATURES_DINAMICO)
-        bufferLm.toList().takeLast(JANELA_MLP).forEachIndexed { i, frame ->
-            frame.copyInto(entrada, i * FEATURES_ESTATICO)
-        }
-        val tensor = OnnxTensor.createTensor(
-            ortEnv, FloatBuffer.wrap(entrada), longArrayOf(1, FEATURES_DINAMICO.toLong()))
-        val out    = sessionDinamico.run(mapOf("landmarks_input" to tensor))
-        @Suppress("UNCHECKED_CAST")
-        val probs  = (out[1].value as Array<FloatArray>)[0]
-        val idx    = probs.indices.maxByOrNull { probs[it] } ?: 0
-        val conf   = probs[idx]
-        val second = probs.indices.filter { it != idx }.maxOfOrNull { probs[it] } ?: 0f
-        val margem = conf - second
-        val letra  = if (conf >= CONFIANCA_DINAMICA && margem >= MARGEM_DINAMICA_MINIMA &&
-                         idx < labelsDinamico.size) labelsDinamico[idx] else "-"
-        tensor.close(); out.close()
-        return Prediction(letra, conf, "dinamico", margem)
-    }
-
-    private fun analisarCorpo(
-        handResult: com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarkerResult,
-        poseResult: com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarkerResult
-    ) {
+    private fun analisarCorpo(handResult: HandLandmarkerResult, poseResult: PoseLandmarkerResult) {
         onLandmarks(handsToArrays(handResult), poseToArray(poseResult), frameAspect)
-        val bodyFrame = extractBodyFrame(handResult, poseResult)
+        val bodyFrame = bodyEngine.extractFrame(handResult, poseResult, aspectX)
+        val agora = System.currentTimeMillis()
+
         if (!bodyFrame.hasPose || !bodyFrame.hasHand) {
-            resetBodyCapture()
-            bodyNoHandSince = if (bodyNoHandSince == 0L) System.currentTimeMillis() else bodyNoHandSince
-            if (System.currentTimeMillis() - bodyNoHandSince > 1_500L) {
-                ultimaClasseCorpo = ""
-            }
+            bodyEngine.onCorpoAusente(agora)
             onLetra("-", 0f, "corpo")
             onFeedback("ENQUADRE CORPO E MAO", FEEDBACK_ALERTA)
             onNoHand()
             return
         }
 
-        // NÃO re-zeramos as mãos ausentes: o Python normaliza o frame inteiro
-        // (incluindo os zeros das mãos que faltam), então o modelo foi treinado
-        // com esses pontos deslocados pela normalização, não com zeros.
-        val normalized = normalizeBodyFrame(bodyFrame.points)
-        bodyMovementBuffer.addLast(normalized)
-        while (bodyMovementBuffer.size > BODY_MOV_WINDOW) bodyMovementBuffer.removeFirst()
-
-        val movimento = bodyMotion()
-        val agora = System.currentTimeMillis()
-
         // Gesto de limpar: mão toda aberta e parada por TEMPO_PRA_LIMPAR limpa
         // a frase — o mesmo gesto do modo alfabeto (a barra vermelha mostra o
         // progresso). Responde à dúvida "manter a mão aberta reseta as palavras".
         val maoAberta = handResult.landmarks().firstOrNull()?.let { hand ->
-            detectarDedosEsticados(hand.map { Pair(it.x() * aspectX, it.y()) })
+            LibrasMath.detectarDedosEsticados(hand.map { Pair(it.x() * aspectX, it.y()) })
         } ?: false
         if (maoAberta) {
             if (tempoInicioEsticado == 0L) tempoInicioEsticado = agora
@@ -783,11 +432,10 @@ class LibrasAnalyzer(
             if ((agora - tempoInicioEsticado) >= TEMPO_PRA_LIMPAR &&
                 (agora - ultimoTempoLimpar) > 2_000L) {
                 frase = ""; tempoInicioEsticado = 0L; ultimoTempoLimpar = agora
-                ultimaClasseCorpo = ""
-                bodyTokens.clear()
+                bodyEngine.limparTokens()
                 onFraseUpdate("")
             }
-            resetBodyCapture()
+            bodyEngine.resetCapture()
             onLetra("-", 0f, "corpo")
             return
         } else {
@@ -795,284 +443,19 @@ class LibrasAnalyzer(
             onGestoLimpar(0f)
         }
 
-        bodyNoHandSince = 0L
-
-        when (bodyState) {
-            BodyState.OCIOSO -> {
-                // Igual ao Python: basta ter mão no quadro e movimento acima do
-                // limiar de início. As "trancas" extras de trajeto/amplitude da
-                // mão foram removidas porque bloqueavam gestos de menor amplitude.
-                val gestoComecou = bodyFrame.hasHand &&
-                    bodyMovementBuffer.size >= BODY_MOV_WINDOW &&
-                    movimento > BODY_START_MOTION
-
-                if (gestoComecou) {
-                    bodyStartCount++
-                    if (bodyStartCount >= BODY_START_FRAMES) {
-                        bodyState = BodyState.CAPTURANDO
-                        bodyGestureBuffer.clear()
-                        bodyGestureBuffer.addAll(bodyMovementBuffer)
-                        bodyEndCount = 0
-                        onFeedback("CAPTURANDO GESTO", FEEDBACK_NEUTRO)
-                    }
-                } else {
-                    bodyStartCount = 0
-                    onFeedback("PRONTO - FAÇA O SINAL", FEEDBACK_BOM)
-                }
-            }
-            BodyState.CAPTURANDO -> {
-                bodyGestureBuffer.add(normalized)
-                bodyEndCount = if (movimento < BODY_END_MOTION) bodyEndCount + 1 else 0
-
-                if (bodyEndCount >= BODY_END_FRAMES || bodyGestureBuffer.size >= BODY_MAX_FRAMES) {
-                    val prediction = classifyBodyGesture(bodyGestureBuffer)
-                    bodyState = BodyState.OCIOSO
-                    bodyStartCount = 0
-                    bodyEndCount = 0
-                    bodyGestureBuffer.clear()
-
-                    if (prediction != null && isReliableBodyPrediction(prediction)) {
-                        onLetra(prediction.letra, prediction.confianca, "corpo")
-                        onFeedback("CORPO: ${traduzirCorpo(prediction.letra).uppercase()}", FEEDBACK_BOM)
-                        if (prediction.letra != "NEUTRO" &&
-                            prediction.letra != ultimaClasseCorpo &&
-                            agora - ultimoTempoCorpo > BODY_COOLDOWN) {
-                            // Guarda o rótulo e re-traduz a frase inteira, para a
-                            // concordância (artigo/gênero/verbo) sair certa.
-                            bodyTokens.add(prediction.letra.uppercase())
-                            frase = traduzirFrase(bodyTokens)
-                            ultimoTempoCorpo = agora
-                            ultimaClasseCorpo = prediction.letra
-                            onFraseUpdate(frase)
-                        }
-                    } else {
-                        onLetra("-", 0f, "corpo")
-                        onFeedback("REPITA MAIS DEVAGAR", FEEDBACK_ALERTA)
-                    }
-                }
-            }
+        val novaFrase = bodyEngine.processarFrame(bodyFrame, agora, onLetra, onFeedback)
+        if (novaFrase != null) {
+            frase = novaFrase
+            onFraseUpdate(frase)
         }
-
-        if (bodyState == BodyState.OCIOSO) {
-            onLetra("-", 0f, "corpo")
-        }
-    }
-
-    private data class BodyFrame(
-        val points: FloatArray,
-        val hasHand: Boolean,
-        val hasPose: Boolean,
-        val hasLeftHand: Boolean,
-        val hasRightHand: Boolean
-    )
-
-    private fun extractBodyFrame(
-        handResult: com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarkerResult,
-        poseResult: com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarkerResult
-    ): BodyFrame {
-        val frame = FloatArray(BODY_FEATURES)
-        val poses = poseResult.landmarks()
-        val hasPose = poses.isNotEmpty()
-        if (poses.isNotEmpty()) {
-            poses[0].take(BODY_POSE_POINTS).forEachIndexed { index, lm ->
-                writeBodyPoint(frame, index, lm.x() * aspectX, lm.y(), lm.z())
-            }
-        }
-
-        var hasHand = false
-        var hasLeftHand = false
-        var hasRightHand = false
-        handResult.landmarks().forEachIndexed { handIndex, landmarks ->
-            val handedness = handResult.handedness().getOrNull(handIndex)
-                ?.firstOrNull()?.categoryName().orEmpty()
-            val offset = if (handedness.equals("Left", ignoreCase = true)) {
-                BODY_POSE_POINTS
-            } else if (handedness.equals("Right", ignoreCase = true)) {
-                BODY_POSE_POINTS + BODY_HAND_POINTS
-            } else {
-                val avgX = landmarks.map { it.x() }.average()
-                if (avgX < 0.5) BODY_POSE_POINTS else BODY_POSE_POINTS + BODY_HAND_POINTS
-            }
-            landmarks.take(BODY_HAND_POINTS).forEachIndexed { index, lm ->
-                writeBodyPoint(frame, offset + index, lm.x() * aspectX, lm.y(), lm.z())
-            }
-            hasHand = true
-            if (offset == BODY_POSE_POINTS) {
-                hasLeftHand = true
-            } else {
-                hasRightHand = true
-            }
-        }
-
-        return BodyFrame(frame, hasHand, hasPose, hasLeftHand, hasRightHand)
-    }
-
-    private fun writeBodyPoint(frame: FloatArray, pointIndex: Int, x: Float, y: Float, z: Float) {
-        val base = pointIndex * 3
-        frame[base] = x
-        frame[base + 1] = y
-        frame[base + 2] = z
-    }
-
-    private fun normalizeBodyFrame(frame: FloatArray): FloatArray {
-        val normalized = frame.copyOf()
-        val leftShoulder = BODY_POINT_LEFT_SHOULDER * 3
-        val rightShoulder = BODY_POINT_RIGHT_SHOULDER * 3
-        val centerX = (frame[leftShoulder] + frame[rightShoulder]) / 2f
-        val centerY = (frame[leftShoulder + 1] + frame[rightShoulder + 1]) / 2f
-        // A escala é a distância entre os ombros em 3D — o Python faz
-        // np.linalg.norm(frame[11] - frame[12]) sobre vetores (x,y,z), então o
-        // dz ENTRA na conta. Usar só dx/dy deixava todas as features do corpo
-        // numa escala diferente da do treino.
-        val dx = frame[leftShoulder] - frame[rightShoulder]
-        val dy = frame[leftShoulder + 1] - frame[rightShoulder + 1]
-        val dz = frame[leftShoulder + 2] - frame[rightShoulder + 2]
-        val scale = sqrt(dx * dx + dy * dy + dz * dz).takeIf { it > 0.0001f } ?: 1f
-        for (point in 0 until BODY_TOTAL_POINTS) {
-            val base = point * 3
-            normalized[base] = (normalized[base] - centerX) / scale
-            normalized[base + 1] = (normalized[base + 1] - centerY) / scale
-        }
-        return normalized
-    }
-
-    private fun bodyMotion(): Float {
-        if (bodyMovementBuffer.size < 3) return 0f
-        var total = 0f
-        var count = 0
-        for (point in BODY_POSE_POINTS until BODY_TOTAL_POINTS) {
-            for (coord in 0..1) {
-                val values = bodyMovementBuffer.map { it[point * 3 + coord] }
-                total += std(values)
-                count++
-            }
-        }
-        return if (count == 0) 0f else total / count
-    }
-
-    private fun classifyBodyGesture(frames: List<FloatArray>): Prediction? {
-        val interpreter = bodyInterpreter ?: return null
-        val labels = labelsCorpo
-        if (frames.size < BODY_MIN_FRAMES || labels.isEmpty()) return null
-
-        val sampled = resampleBodyFrames(frames, BODY_WINDOW)
-        val input = Array(1) { Array(BODY_WINDOW) { FloatArray(BODY_FEATURES) } }
-        sampled.forEachIndexed { index, frame ->
-            frame.copyInto(input[0][index])
-        }
-        val output = Array(1) { FloatArray(labels.size) }
-        interpreter.run(input, output)
-        val probs = output[0]
-        val idx = probs.indices.maxByOrNull { probs[it] } ?: return null
-        val second = probs.indices
-            .filter { it != idx }
-            .maxOfOrNull { probs[it] } ?: 0f
-        return Prediction(labels[idx], probs[idx], "corpo", probs[idx] - second)
-    }
-
-    private fun isReliableBodyPrediction(prediction: Prediction): Boolean {
-        // Python aceita a palavra apenas com confiança >= 0.85 (e != NEUTRO,
-        // tratado em analisarCorpo). Sem exigência de margem.
-        return prediction.letra != "-" && prediction.confianca >= BODY_CONFIDENCE
-    }
-
-    private fun resetBodyCapture() {
-        bodyState = BodyState.OCIOSO
-        bodyStartCount = 0
-        bodyEndCount = 0
-        bodyMovementBuffer.clear()
-        bodyGestureBuffer.clear()
-    }
-
-    private fun resampleBodyFrames(frames: List<FloatArray>, count: Int): List<FloatArray> {
-        if (frames.size == count) return frames
-        return List(count) { index ->
-            val sourceIndex = ((frames.size - 1) * index.toFloat() / (count - 1)).toInt()
-            frames[sourceIndex]
-        }
-    }
-
-    private fun traduzirCorpo(label: String): String {
-        return when (label.uppercase()) {
-            "AJUDAR" -> "ajuda"
-            "COMPUTADOR" -> "computador"
-            "CONVERSAR" -> "conversa"
-            "PESSOA" -> "pessoa"
-            "SURDO" -> "surdo"
-            else -> label.lowercase()
-        }
-    }
-
-    // ── Tradução de frase (concordância) — portado do traduzir_frase do Python ─
-    private data class VocabEntry(
-        val tipo: String,          // "subst" | "adj" | "verbo"
-        val genero: String? = null,
-        val palavra: String? = null,
-        val artigo: String? = null,
-        val masc: String? = null,
-        val fem: String? = null,
-        val conj: String? = null,
-        val inf: String? = null
-    )
-
-    private val vocabulario = mapOf(
-        "PESSOA"     to VocabEntry(tipo = "subst", genero = "f", palavra = "pessoa", artigo = "a"),
-        "SURDO"      to VocabEntry(tipo = "adj", masc = "surdo", fem = "surda"),
-        "CONVERSAR"  to VocabEntry(tipo = "verbo", conj = "conversa", inf = "conversar"),
-        "COMPUTADOR" to VocabEntry(tipo = "subst", genero = "m", palavra = "computador", artigo = "o"),
-        "AJUDAR"     to VocabEntry(tipo = "verbo", conj = "ajuda", inf = "ajudar")
-    )
-
-    private fun traduzirFrase(palavras: List<String>): String {
-        val partes = ArrayList<String>()
-        var ultGen: String? = null
-        var ultTipo: String? = null
-        palavras.forEachIndexed { i, raw ->
-            val p = raw.uppercase()
-            if (p == "NEUTRO") return@forEachIndexed
-            val v = vocabulario[p]
-            if (v == null) {
-                partes.add(p.lowercase().replaceFirstChar { it.uppercase() })
-                ultGen = "m"; ultTipo = "subst"
-                return@forEachIndexed
-            }
-            when (v.tipo) {
-                "subst" -> {
-                    val art = if (i == 0) {
-                        v.artigo.orEmpty().replaceFirstChar { it.uppercase() }
-                    } else {
-                        v.artigo.orEmpty()
-                    }
-                    partes.add("$art ${v.palavra}")
-                    ultGen = v.genero; ultTipo = "subst"
-                }
-                "adj" -> {
-                    partes.add(if (ultGen == "f") v.fem.orEmpty() else v.masc.orEmpty())
-                    ultTipo = "adj"
-                }
-                "verbo" -> {
-                    partes.add(if (ultTipo == "verbo") "a ${v.inf}" else v.conj.orEmpty())
-                    ultTipo = "verbo"
-                }
-            }
-        }
-        if (partes.isEmpty()) return ""
-        return partes.joinToString(" ").replaceFirstChar { it.uppercase() }
     }
 
     fun setModo(novoModo: Modo) {
         modoAtual = novoModo
-        bodyState = BodyState.OCIOSO
-        bodyStartCount = 0
-        bodyEndCount = 0
-        bodyMovementBuffer.clear()
-        bodyGestureBuffer.clear()
-        ultimaClasseCorpo = ""
-        bodyNoHandSince = 0L
+        bodyEngine.resetTudo()
         resetEstadoAlfabeto()
         // Troca de modo começa uma frase nova (letras e sinais de corpo não se
         // misturam na mesma frase).
-        bodyTokens.clear()
         frase = ""
         onFraseUpdate("")
         onRepeticaoPendente(null)
@@ -1084,86 +467,16 @@ class LibrasAnalyzer(
         }
     }
 
-    fun startCalibration(letra: String) {
-        synchronized(calibrationLock) {
-            calibrationTarget = letra.uppercase()
-            calibrationBuffer.clear()
-        }
-        onFeedback("CALIBRANDO ${letra.uppercase()}: SEGURE A MAO", FEEDBACK_NEUTRO)
-    }
-
-    fun finishCalibration(): Boolean {
-        synchronized(calibrationLock) {
-            val letra = calibrationTarget ?: return false
-            if (calibrationBuffer.size < CALIBRATION_MIN_FRAMES) {
-                onFeedback("POUCAS AMOSTRAS PARA $letra", FEEDBACK_ALERTA)
-                return false
-            }
-
-            val frames = calibrationBuffer.map { it.copyOf() }
-            if (letra in labelsDinamico) {
-                val sequencias = trainingStore.saveDynamicSamples(letra, frames)
-                if (sequencias == 0) {
-                    onFeedback("MOVIMENTE MAIS PARA $letra", FEEDBACK_ALERTA)
-                    return false
-                }
-                trainingStore.incrementSampleCount(letra, sequencias)
-            } else {
-                val referencia = averageFrames(frames)
-                trainingStore.saveStaticCalibration(letra, referencia)
-                trainingStore.saveStaticSamples(letra, frames)
-                trainingStore.incrementSampleCount(letra, frames.size)
-            }
-
-            calibrationTarget = null
-            calibrationBuffer.clear()
-            onFeedback("$letra SALVA PARA TREINO", FEEDBACK_BOM)
-            return true
-        }
-    }
-
-    fun cancelCalibration() {
-        synchronized(calibrationLock) {
-            calibrationTarget = null
-            calibrationBuffer.clear()
-        }
-    }
-
-    fun getCalibrationCount(): Int {
-        synchronized(calibrationLock) {
-            return trainingStore.calibrationCount()
-        }
-    }
-
-    fun getCalibrationFrameCount(): Int {
-        synchronized(calibrationLock) {
-            return calibrationBuffer.size
-        }
-    }
-
-    fun getTrainingSampleCount(letra: String? = null): Int {
-        if (letra != null) {
-            return trainingStore.sampleCount(letra)
-        }
-        return trainingStore.totalSampleCount()
-    }
-
-    fun getTrainingDatasetPath(): String {
-        return trainingStore.staticDatasetPath()
-    }
-
-    fun getDynamicTrainingDatasetPath(): String {
-        return trainingStore.dynamicDatasetPath()
-    }
-
-    fun clearTrainingData() {
-        synchronized(calibrationLock) {
-            calibrationTarget = null
-            calibrationBuffer.clear()
-            trainingStore.clear()
-        }
-        onFeedback("TREINO ZERADO", FEEDBACK_NEUTRO)
-    }
+    // ── Calibração pessoal (delegada ao LetraEngine) ───────────────────────
+    fun startCalibration(letra: String) = letraEngine.startCalibration(letra)
+    fun finishCalibration(): Boolean = letraEngine.finishCalibration()
+    fun cancelCalibration() = letraEngine.cancelCalibration()
+    fun getCalibrationCount(): Int = letraEngine.getCalibrationCount()
+    fun getCalibrationFrameCount(): Int = letraEngine.getCalibrationFrameCount()
+    fun getTrainingSampleCount(letra: String? = null): Int = letraEngine.getTrainingSampleCount(letra)
+    fun getTrainingDatasetPath(): String = letraEngine.getTrainingDatasetPath()
+    fun getDynamicTrainingDatasetPath(): String = letraEngine.getDynamicTrainingDatasetPath()
+    fun clearTrainingData() = letraEngine.clearTrainingData()
 
     fun aplicarSugestao(palavra: String) {
         val sugestao = palavra.trim()
@@ -1197,12 +510,9 @@ class LibrasAnalyzer(
     fun apagarUltima() {
         if (modoAtual == Modo.CORPO) {
             // No corpo apagamos o último SINAL (token) e re-traduzimos.
-            if (bodyTokens.isNotEmpty()) {
-                bodyTokens.removeAt(bodyTokens.size - 1)
-                frase = traduzirFrase(bodyTokens)
-                ultimaClasseCorpo = ""
-                onFraseUpdate(frase)
-            }
+            val novaFrase = bodyEngine.apagarUltimoToken() ?: return
+            frase = novaFrase
+            onFraseUpdate(frase)
             return
         }
         if (frase.isNotEmpty()) {
@@ -1213,29 +523,15 @@ class LibrasAnalyzer(
     }
     fun limparFrase() {
         frase = ""; letraRepetidaPendente = ""; ultimaLetraAdicionada = ""
-        bodyTokens.clear(); ultimaClasseCorpo = ""
+        bodyEngine.limparTokens()
         onRepeticaoPendente(null); onFraseUpdate(frase)
     }
     fun getFrase(): String = frase
 
     fun close() {
         handLandmarker.close()
-        poseLandmarker?.close()
-        bodyInterpreter?.close()
-        flexDelegate?.close()
-        sessionEstatico.close()
-        sessionDinamico.close()
-        ortEnv.close()
+        letraEngine.close()
+        bodyEngine.close()
+        faceEngine.close()
     }
-
-    private fun loadAssetBuffer(assetName: String): ByteBuffer {
-        val bytes = context.assets.open(assetName).use { it.readBytes() }
-        return ByteBuffer.allocateDirect(bytes.size)
-            .order(ByteOrder.nativeOrder())
-            .put(bytes)
-            .also { it.rewind() }
-    }
-
 }
-
-
