@@ -8,11 +8,17 @@ Este app usa dois tipos de reconhecimento:
 Os modelos ativos ficam em:
 
 ```text
-app/src/main/assets/static_model.onnx
-app/src/main/assets/static_labels.txt
-app/src/main/assets/dynamic_model.onnx
-app/src/main/assets/dynamic_labels.txt
+app/src/main/assets/letras_estaticas/geral/model.onnx
+app/src/main/assets/letras_estaticas/geral/labels.txt
+app/src/main/assets/letras_dinamicas/geral/model.onnx
+app/src/main/assets/letras_dinamicas/geral/labels.txt
 ```
+
+(além do modelo "geral" acima, `LetraEngine.kt` também pode carregar modelos
+individuais por letra em `letras_estaticas/<LETRA>/` e
+`letras_dinamicas/<LETRA>/`, e um modelo parcial em
+`letras_dinamicas/parcial/` — usados antes do geral quando existem, ver
+`treinamento/COMO_USAR.md`.)
 
 ## 1. Coletar amostras no celular
 

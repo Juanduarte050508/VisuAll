@@ -68,7 +68,7 @@ def main():
             ok2 = rodar_etapa("2/2 — Treinando modelo de LETRAS PARADAS",
                                TREINO_DIR / "train_static_model.py")
             if ok2:
-                atualizados.append("static_model.onnx / static_labels.txt")
+                atualizados.append("letras_estaticas/geral/model.onnx / labels.txt")
     else:
         print("\n(pulando letras paradas — nenhuma foto em data/raw_images/)")
 
@@ -79,7 +79,7 @@ def main():
             ok2 = rodar_etapa("2/2 — Treinando modelo de LETRAS COM MOVIMENTO",
                                TREINO_DIR / "train_dynamic_model.py")
             if ok2:
-                atualizados.append("dynamic_model.onnx / dynamic_labels.txt")
+                atualizados.append("letras_dinamicas/geral/model.onnx / labels.txt")
     else:
         print("\n(pulando letras com movimento — nenhum vídeo em data/raw_videos/)")
 
@@ -90,7 +90,7 @@ def main():
             ok2 = rodar_etapa("2/2 — Treinando modelo de GESTOS CORPORAIS",
                                TREINO_DIR / "train_body_model.py")
             if ok2:
-                atualizados.append("body_model.tflite / body_labels.txt")
+                atualizados.append("gestos/geral/model.tflite / labels.txt")
     else:
         print("\n(pulando gestos corporais — nenhum vídeo em data/raw_videos_corpo/)")
 

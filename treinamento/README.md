@@ -11,7 +11,16 @@ gerar modelos novos a partir delas.
 
 Só precisa de duas coisas: **duplo-clique** e **clicar em GRAVAR**.
 
-## O que cada arquivo faz
+> **Nota:** essa pasta também tem `abrir_treinamento.bat` / `interface_treinamento.py`
+> / `treinar_visuall.py` / `COMO_USAR.md` — uma segunda ferramenta que o
+> Rafael construiu em paralelo, com uma abordagem diferente (você organiza
+> fotos/vídeos numa pasta à parte e importa, em vez de gravar direto pela
+> câmera; e treina modelos individuais por letra/gesto além do geral). As
+> duas ferramentas fazem parte do mesmo objetivo mas ainda não foram
+> unificadas — ver conversa/CHANGELOG para o time decidir qual seguir ou
+> como combinar as duas.
+
+## O que cada arquivo faz (esta ferramenta)
 
 | Arquivo | Pra que serve |
 |---|---|
@@ -70,9 +79,9 @@ quiser antes disso), dê duplo-clique em `Treinar.bat`. Ele:
 1. Extrai os pontos da mão/corpo (landmarks) de cada foto/vídeo gravado.
 2. Treina os modelos com o que encontrar (pula sozinho qualquer categoria
    sem amostras — não precisa ter gravado as três).
-3. Salva os modelos novos direto em
-   `mobile\app\src\main\assets\` (`static_model.onnx`, `dynamic_model.onnx`,
-   `body_model.tflite` e os `.txt` de rótulos correspondentes).
+3. Salva os modelos novos direto em `mobile\app\src\main\assets\`:
+   `letras_estaticas\geral\model.onnx`, `letras_dinamicas\geral\model.onnx`,
+   `gestos\geral\model.tflite` (e os `labels.txt` correspondentes).
 
 No fim, é só recompilar o app Android (`assembleDebug` ou rodar pelo Android
 Studio) pra usar os modelos novos. Pode rodar `Treinar.bat` de novo sempre

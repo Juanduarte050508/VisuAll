@@ -13,8 +13,8 @@ Entrada:
 Saídas:
   - VisuAll/models/body_model.keras
   - VisuAll/models/body_classes.pkl
-  - VisuAll/mobile/app/src/main/assets/body_model.tflite
-  - VisuAll/mobile/app/src/main/assets/body_labels.txt
+  - VisuAll/mobile/app/src/main/assets/gestos/geral/model.tflite
+  - VisuAll/mobile/app/src/main/assets/gestos/geral/labels.txt
 
 Arquitetura (nova, projetada pra este projeto — não é port de nada
 existente, já que o modelo original nunca teve o treino publicado aqui):
@@ -156,15 +156,21 @@ def main():
         )
     )
 
+    # gestos/geral/ -- convencao introduzida em paralelo por outro commit
+    # (BodyGestureEngine.kt agora le daqui, nao mais de body_model.tflite
+    # solto na raiz de assets/).
+    body_assets = MOBILE_ASSETS_DIR / "gestos" / "geral"
+    body_assets.mkdir(parents=True, exist_ok=True)
+
     modelo.save(MODELS_DIR / "body_model.keras")
     save_pickle(MODELS_DIR / "body_classes.pkl", BODY_LABELS)
-    save_labels(MOBILE_ASSETS_DIR / "body_labels.txt", BODY_LABELS)
-    exportar_tflite(modelo, MOBILE_ASSETS_DIR / "body_model.tflite")
+    save_labels(body_assets / "labels.txt", BODY_LABELS)
+    exportar_tflite(modelo, body_assets / "model.tflite")
 
     print(f"\nModelo Python salvo em: {MODELS_DIR / 'body_model.keras'}")
     print(f"Classes Python salvas em: {MODELS_DIR / 'body_classes.pkl'}")
-    print(f"Modelo Android salvo em: {MOBILE_ASSETS_DIR / 'body_model.tflite'}")
-    print(f"Labels Android salvos em: {MOBILE_ASSETS_DIR / 'body_labels.txt'}")
+    print(f"Modelo Android salvo em: {body_assets / 'model.tflite'}")
+    print(f"Labels Android salvos em: {body_assets / 'labels.txt'}")
 
 
 if __name__ == "__main__":
