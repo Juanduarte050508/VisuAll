@@ -302,9 +302,20 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         }
     }
 
+    // Fallback só usado quando a preview ainda não tem Display anexado
+    // (_binding?.previewView?.display == null). Context.getDisplay() (API 30+)
+    // substitui o WindowManager.getDefaultDisplay() deprecated; abaixo de 30
+    // não tem substituto, então o uso do antigo fica isolado e suprimido aqui.
+    @Suppress("DEPRECATION")
+    private fun fallbackDisplay(): android.view.Display? {
+        val act = activity ?: return null
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) act.display
+        else act.windowManager.defaultDisplay
+    }
+
     private fun currentTargetRotation(): Int {
         return _binding?.previewView?.display?.rotation
-            ?: activity?.windowManager?.defaultDisplay?.rotation
+            ?: fallbackDisplay()?.rotation
             ?: Surface.ROTATION_0
     }
 
@@ -440,7 +451,7 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         if (isPhysicalLandscape) return true
 
         val displayRotation = _binding?.previewView?.display?.rotation
-            ?: activity?.windowManager?.defaultDisplay?.rotation
+            ?: fallbackDisplay()?.rotation
         if (displayRotation == Surface.ROTATION_90 || displayRotation == Surface.ROTATION_270) {
             return true
         }
