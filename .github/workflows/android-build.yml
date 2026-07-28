@@ -42,5 +42,8 @@ jobs:
       - name: Compile debug Kotlin
         run: ./gradlew compileDebugKotlin --console=plain
 
+      - name: Run unit tests
+        run: ./gradlew testDebugUnitTest --console=plain
+
       - name: Assemble debug APK
         run: ./gradlew assembleDebug --console=plain

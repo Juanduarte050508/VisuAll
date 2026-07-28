@@ -51,7 +51,7 @@ android {
 
     sourceSets {
         androidTest.java.srcDirs = []
-        test.java.srcDirs = []
+        test.java.srcDirs = ['src/test/java']
     }
 }
 
@@ -78,6 +78,8 @@ dependencies {
     implementation 'org.tensorflow:tensorflow-lite:2.16.1'
     implementation 'org.tensorflow:tensorflow-lite-select-tf-ops:2.16.1'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+
+    testImplementation 'junit:junit:4.13.2'
 }
 
 
