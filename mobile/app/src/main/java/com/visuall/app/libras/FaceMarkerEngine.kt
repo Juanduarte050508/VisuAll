@@ -1,8 +1,10 @@
 package com.visuall.app.libras
 
 import android.content.Context
+import android.util.Log
 import com.google.mediapipe.framework.image.MPImage
 import com.google.mediapipe.tasks.core.BaseOptions
+import com.google.mediapipe.tasks.core.Delegate
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarker
 import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarker.FaceLandmarkerOptions
@@ -36,27 +38,38 @@ internal class FaceMarkerEngine(private val context: Context) {
         }
     }
 
+    private fun faceOptions(delegate: Delegate) = FaceLandmarkerOptions.builder()
+        .setBaseOptions(BaseOptions.builder()
+            .setModelAssetPath("face_landmarker.task")
+            .setDelegate(delegate)
+            .build())
+        .setRunningMode(RunningMode.VIDEO)
+        .setNumFaces(1)
+        .setMinFaceDetectionConfidence(0.5f)
+        .setMinFacePresenceConfidence(0.5f)
+        .setMinTrackingConfidence(0.5f)
+        .build()
+
     private fun ensureLoaded(): FaceLandmarker? {
         faceLandmarker?.let { return it }
         if (faceModelIndisponivel) return null
 
+        // GPU primeiro (mais rápido pro 3º modelo rodando por frame); se o
+        // aparelho não aceitar, cai pra CPU antes de desistir de vez — mesma
+        // ideia do HandLandmarker no LibrasAnalyzer.
         return try {
-            val baseOptions = BaseOptions.builder()
-                .setModelAssetPath("face_landmarker.task")
-                .build()
-            val options = FaceLandmarkerOptions.builder()
-                .setBaseOptions(baseOptions)
-                .setRunningMode(RunningMode.VIDEO)
-                .setNumFaces(1)
-                .setMinFaceDetectionConfidence(0.5f)
-                .setMinFacePresenceConfidence(0.5f)
-                .setMinTrackingConfidence(0.5f)
-                .build()
-            FaceLandmarker.createFromOptions(context, options).also { faceLandmarker = it }
+            FaceLandmarker.createFromOptions(context, faceOptions(Delegate.GPU))
+                .also { faceLandmarker = it }
         } catch (error: Throwable) {
-            faceLandmarker = null
-            faceModelIndisponivel = true
-            null
+            try {
+                Log.w("FaceMarkerEngine", "GPU indisponivel pro FaceLandmarker, usando CPU", error)
+                FaceLandmarker.createFromOptions(context, faceOptions(Delegate.CPU))
+                    .also { faceLandmarker = it }
+            } catch (error2: Throwable) {
+                faceLandmarker = null
+                faceModelIndisponivel = true
+                null
+            }
         }
     }
 

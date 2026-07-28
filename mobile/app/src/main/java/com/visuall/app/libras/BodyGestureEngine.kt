@@ -1,7 +1,9 @@
 package com.visuall.app.libras
 
 import android.content.Context
+import android.util.Log
 import com.google.mediapipe.tasks.core.BaseOptions
+import com.google.mediapipe.tasks.core.Delegate
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarkerResult
 import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarker
@@ -49,21 +51,34 @@ internal class BodyGestureEngine(private val context: Context) {
     // só concatenando palavras.
     private val bodyTokens = ArrayList<String>()
 
+    private fun poseOptions(delegate: Delegate) = PoseLandmarkerOptions.builder()
+        .setBaseOptions(BaseOptions.builder()
+            .setModelAssetPath("pose_landmarker_lite.task")
+            .setDelegate(delegate)
+            .build())
+        .setRunningMode(RunningMode.VIDEO)
+        .setMinPoseDetectionConfidence(0.35f)
+        .setMinPosePresenceConfidence(0.35f)
+        .setMinTrackingConfidence(0.35f)
+        .build()
+
+    // GPU primeiro (mesma ideia do HandLandmarker em LibrasAnalyzer); se o
+    // aparelho não aceitar, cai pra CPU antes de propagar o erro pro catch
+    // de fora, que já desativa o modo corpo de forma graciosa.
+    private fun createPoseLandmarker(): PoseLandmarker {
+        return try {
+            PoseLandmarker.createFromOptions(context, poseOptions(Delegate.GPU))
+        } catch (e: Throwable) {
+            Log.w("BodyGestureEngine", "GPU indisponivel pro PoseLandmarker, usando CPU", e)
+            PoseLandmarker.createFromOptions(context, poseOptions(Delegate.CPU))
+        }
+    }
+
     fun ensureLoaded(): PoseLandmarker? {
         poseLandmarker?.let { return it }
 
         return try {
-            val poseBaseOptions = BaseOptions.builder()
-                .setModelAssetPath("pose_landmarker_lite.task")
-                .build()
-            val poseOptions = PoseLandmarkerOptions.builder()
-                .setBaseOptions(poseBaseOptions)
-                .setRunningMode(RunningMode.VIDEO)
-                .setMinPoseDetectionConfidence(0.35f)
-                .setMinPosePresenceConfidence(0.35f)
-                .setMinTrackingConfidence(0.35f)
-                .build()
-            val loadedPose = PoseLandmarker.createFromOptions(context, poseOptions)
+            val loadedPose = createPoseLandmarker()
             val loadedDelegate = FlexDelegate()
             val loadedInterpreter = Interpreter(
                 loadAssetBuffer("body_model.tflite"),

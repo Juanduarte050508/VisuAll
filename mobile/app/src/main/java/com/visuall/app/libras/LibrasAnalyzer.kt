@@ -9,6 +9,7 @@ import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.tasks.core.BaseOptions
+import com.google.mediapipe.tasks.core.Delegate
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker.HandLandmarkerOptions
@@ -203,27 +204,39 @@ class LibrasAnalyzer(
     // bater com o treino. Câmera traseira não é espelhada por natureza.
     @Volatile private var espelharImagem = true
 
-    init {
-        val baseOptions = BaseOptions.builder()
+    private fun handOptions(delegate: Delegate) = HandLandmarkerOptions.builder()
+        .setBaseOptions(BaseOptions.builder()
             .setModelAssetPath("hand_landmarker.task")
-            .build()
+            .setDelegate(delegate)
+            .build())
+        .setNumHands(2)
+        // Reduzido de 0.5 → 0.4: facilita a detecção inicial da mão,
+        // principalmente em ângulos ou iluminação menos ideais.
+        .setMinHandDetectionConfidence(0.4f)
+        .setMinHandPresenceConfidence(0.4f)
+        .setMinTrackingConfidence(0.4f)
+        // VIDEO em vez de IMAGE: mantém rastreamento temporal entre frames.
+        // Isso reduz o "tremor" dos landmarks (jitter) e a latência, porque
+        // o detector reaproveita a região da mão do frame anterior em vez de
+        // refazer a detecção completa toda vez — igual ao Holistic do Python.
+        .setRunningMode(RunningMode.VIDEO)
+        .build()
 
-        val options = HandLandmarkerOptions.builder()
-            .setBaseOptions(baseOptions)
-            .setNumHands(2)
-            // Reduzido de 0.5 → 0.4: facilita a detecção inicial da mão,
-            // principalmente em ângulos ou iluminação menos ideais.
-            .setMinHandDetectionConfidence(0.4f)
-            .setMinHandPresenceConfidence(0.4f)
-            .setMinTrackingConfidence(0.4f)
-            // VIDEO em vez de IMAGE: mantém rastreamento temporal entre frames.
-            // Isso reduz o "tremor" dos landmarks (jitter) e a latência, porque
-            // o detector reaproveita a região da mão do frame anterior em vez de
-            // refazer a detecção completa toda vez — igual ao Holistic do Python.
-            .setRunningMode(RunningMode.VIDEO)
-            .build()
-
-        handLandmarker = HandLandmarker.createFromOptions(context, options)
+    init {
+        // GPU costuma ser bem mais rápido que CPU pra esses modelos de
+        // landmark, mas nem todo aparelho/driver aceita o delegate (falha na
+        // hora de montar o grafo, não durante a inferência — é assim que o
+        // MediaPipe documenta essa falha, então pegar aqui no createFromOptions
+        // é suficiente). Tenta GPU primeiro, cai pra CPU se der erro. HandLandmarker
+        // é obrigatório (sem ele não tem reconhecimento nenhum), então mesmo
+        // a tentativa em CPU pode falhar — mesmo comportamento de antes desta
+        // mudança nesse caso extremo.
+        handLandmarker = try {
+            HandLandmarker.createFromOptions(context, handOptions(Delegate.GPU))
+        } catch (e: Throwable) {
+            android.util.Log.w("LibrasAnalyzer", "GPU indisponivel pro HandLandmarker, usando CPU", e)
+            HandLandmarker.createFromOptions(context, handOptions(Delegate.CPU))
+        }
     }
 
     private var ultimaPredicao        = ""

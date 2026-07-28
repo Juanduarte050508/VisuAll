@@ -13,6 +13,19 @@ Formato: **Constante(s)** — valor atual — decisão e por quê — status.
 
 ## Não lançado
 
+- **Delegate GPU com fallback pra CPU** (`HandLandmarker`,
+  `PoseLandmarker`, `FaceLandmarker`) — os três detectores MediaPipe
+  tentam `Delegate.GPU` primeiro (bem mais rápido que CPU nesses
+  modelos, quando o driver do aparelho suporta) e caem pra `Delegate.CPU`
+  automaticamente se a criação do grafo falhar — mesma filosofia
+  defensiva que Pose/Face já tinham pra inicialização em geral. Testado
+  no emulador Pixel_4 do time (`mobile/tools/abrir-emulador-px4.bat`):
+  a GPU dele rejeita o grafo (`GL_INVALID_ENUM`) e o fallback pra CPU
+  funciona sem crash — então aqui nunca há ganho de velocidade, só a
+  confirmação de que o fallback funciona. Pendente: validar em celular
+  real se a GPU é aceita (ganho de velocidade esperado) e se o fallback
+  também funciona lá caso não seja.
+
 - **`MOVIMENTO_SUSTENTADO_MS=130`, `ESTAB_MIN_DINAMICO_MS=130`,
   `ESTAB_MIN_ESTATICO_MS=500`** — as três antigas gates em CONTAGEM DE
   FRAMES (`MOVIMENTO_SUSTENTADO_FRAMES=3`, `ESTAB_MIN_DINAMICO=3`,
