@@ -160,9 +160,41 @@ class LibrasAnalyzer(
     }
 
     private val handLandmarker: HandLandmarker
-    private val letraEngine = LetraEngine(context, onFeedback)
+    // onLetra/onFeedback passam por notificarLetra/notificarFeedback (abaixo)
+    // em vez de serem chamados direto — os dois seriam disparados a CADA
+    // frame analisado (mão parada no mesmo sinal, corpo ocioso esperando
+    // gesto, etc.), e cada chamada posta uma Runnable pra thread de UI que
+    // reescreve texto/cor. Numa taxa de análise mais alta isso inunda a
+    // thread principal com trabalho redundante — a causa mais provável de
+    // travamento ao subir os fps, já que nada na tela de fato mudou entre
+    // um frame e outro na maioria das vezes.
+    private val letraEngine = LetraEngine(context, ::notificarFeedback)
     private val bodyEngine = BodyGestureEngine(context)
     private val faceEngine = FaceMarkerEngine(context)
+
+    private var ultimaLetraNotificada = ""
+    private var ultimaPorcentagemNotificada = -1
+    private var ultimaFeedbackMensagem: String? = null
+    private var ultimaFeedbackNivel = -1
+
+    // Só repassa pro callback do Fragment quando o valor EXIBIDO muda de
+    // verdade. Compara por porcentagem arredondada (o que a UI mostra), não
+    // pela confiança crua — o float varia um pouco a cada frame só por
+    // jitter do landmark, então comparar o float não deduplicaria quase nada.
+    private fun notificarLetra(letra: String, confianca: Float, modo: String) {
+        val porcentagem = if (letra != "-") (confianca * 100).toInt().coerceIn(0, 100) else -1
+        if (letra == ultimaLetraNotificada && porcentagem == ultimaPorcentagemNotificada) return
+        ultimaLetraNotificada = letra
+        ultimaPorcentagemNotificada = porcentagem
+        onLetra(letra, confianca, modo)
+    }
+
+    private fun notificarFeedback(mensagem: String, nivel: Int) {
+        if (mensagem == ultimaFeedbackMensagem && nivel == ultimaFeedbackNivel) return
+        ultimaFeedbackMensagem = mensagem
+        ultimaFeedbackNivel = nivel
+        onFeedback(mensagem, nivel)
+    }
 
     @Volatile private var modoAtual = Modo.ALFABETO
     // Espelha a imagem na horizontal quando estamos na câmera frontal. O
@@ -225,6 +257,14 @@ class LibrasAnalyzer(
         letraRepetidaPendente = ""
         ultimaLetraAdicionada = ""
         letraEngine.resetMovimentoSustentado()
+        // Sem isso, tirar a mão do quadro e voltar a fazer O MESMO sinal (ex.:
+        // "A" a 87%) seria filtrado pelo dedup de notificarLetra por parecer
+        // idêntico ao último valor notificado antes da mão sumir — mesmo o
+        // chip tendo sido escondido nesse meio-tempo (onNoHand). Resetar o
+        // cache aqui garante que a primeira detecção após a mão voltar sempre
+        // notifica de novo.
+        ultimaLetraNotificada = ""
+        ultimaPorcentagemNotificada = -1
     }
 
     private fun nextVideoTimestamp(): Long {
@@ -267,8 +307,8 @@ class LibrasAnalyzer(
         if (modoAtual == Modo.CORPO) {
             val poseDetector = bodyEngine.ensureLoaded()
             if (poseDetector == null) {
-                onLetra("-", 0f, "corpo")
-                onFeedback("MODELO DE CORPO INDISPONIVEL", FEEDBACK_ALERTA)
+                notificarLetra("-", 0f, "corpo")
+                notificarFeedback("MODELO DE CORPO INDISPONIVEL", FEEDBACK_ALERTA)
                 return
             }
             val poseResult = poseDetector.detectForVideo(mpImage, timestamp)
@@ -286,7 +326,7 @@ class LibrasAnalyzer(
                 // Libera a mesma letra para ser digitada de novo: tirar a mão
                 // do quadro e refazer o sinal é a forma natural de repetir.
                 onRepeticaoPendente(null)
-                onFeedback("MAO FORA DO QUADRO", FEEDBACK_ALERTA)
+                notificarFeedback("MAO FORA DO QUADRO", FEEDBACK_ALERTA)
                 onNoHand()
             }
             return
@@ -322,7 +362,7 @@ class LibrasAnalyzer(
             val confianca = predicao.confianca
             val modo = predicao.modo
 
-            onLetra(letra, confianca, modo)
+            notificarLetra(letra, confianca, modo)
 
             val agora = System.currentTimeMillis()
             if (letra != "-") {
@@ -437,8 +477,8 @@ class LibrasAnalyzer(
 
         if (!bodyFrame.hasPose || !bodyFrame.hasHand) {
             bodyEngine.onCorpoAusente(agora)
-            onLetra("-", 0f, "corpo")
-            onFeedback("ENQUADRE CORPO E MAO", FEEDBACK_ALERTA)
+            notificarLetra("-", 0f, "corpo")
+            notificarFeedback("ENQUADRE CORPO E MAO", FEEDBACK_ALERTA)
             onNoHand()
             return
         }
@@ -461,14 +501,14 @@ class LibrasAnalyzer(
                 onFraseUpdate("")
             }
             bodyEngine.resetCapture()
-            onLetra("-", 0f, "corpo")
+            notificarLetra("-", 0f, "corpo")
             return
         } else {
             tempoInicioEsticado = 0L
             onGestoLimpar(0f)
         }
 
-        val novaFrase = bodyEngine.processarFrame(bodyFrame, agora, onLetra, onFeedback)
+        val novaFrase = bodyEngine.processarFrame(bodyFrame, agora, ::notificarLetra, ::notificarFeedback)
         if (novaFrase != null) {
             frase = novaFrase
             onFraseUpdate(frase)
@@ -484,11 +524,16 @@ class LibrasAnalyzer(
         frase = ""
         onFraseUpdate("")
         onRepeticaoPendente(null)
-        onLetra("-", 0f, novoModo.name.lowercase())
+        // resetEstadoAlfabeto() (acima) já zera o cache de dedup da letra;
+        // falta só o do feedback, pra troca de modo reafirmar a mensagem na
+        // UI mesmo que coincida por acaso com a última já notificada.
+        ultimaFeedbackMensagem = null
+        ultimaFeedbackNivel = -1
+        notificarLetra("-", 0f, novoModo.name.lowercase())
         if (novoModo == Modo.CORPO) {
-            onFeedback("MODO CORPO: ENQUADRE TRONCO E MAO", FEEDBACK_NEUTRO)
+            notificarFeedback("MODO CORPO: ENQUADRE TRONCO E MAO", FEEDBACK_NEUTRO)
         } else {
-            onFeedback("MODO LIBRAS: CENTRALIZE A MAO", FEEDBACK_NEUTRO)
+            notificarFeedback("MODO LIBRAS: CENTRALIZE A MAO", FEEDBACK_NEUTRO)
         }
     }
 

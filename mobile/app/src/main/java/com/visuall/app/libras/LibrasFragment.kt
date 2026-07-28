@@ -61,6 +61,14 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         // (~45) toda vez que a frase muda, então recompilar o regex ali
         // dentro seria refazer o mesmo trabalho repetidamente por frame.
         val DIACRITICS_REGEX = "\\p{Mn}+".toRegex()
+
+        // Cores fixas do chip de confiança: só 3 buckets possíveis, então não
+        // há motivo pra alocar um ColorStateList novo (via valueOf) a cada
+        // atualização — onLetraDetectada roda a cada letra reconhecida.
+        val TINT_CONFIANCA_ALTA = ColorStateList.valueOf(0xFFF5C842.toInt())
+        val TINT_CONFIANCA_MEDIA = ColorStateList.valueOf(0xFFE8A020.toInt())
+        val TINT_CONFIANCA_BAIXA = ColorStateList.valueOf(0xFF8E6A26.toInt())
+        val TINT_CONFIANCA_FUNDO = ColorStateList.valueOf(0x33242424)
     }
 
     private var _binding: FragmentLibrasBinding? = null
@@ -1043,10 +1051,8 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
                 binding.chipResult.visibility = View.VISIBLE
                 binding.progressConfidence.visibility = View.VISIBLE
                 binding.progressConfidence.progress = porcentagem
-                binding.progressConfidence.progressTintList =
-                    ColorStateList.valueOf(confidenceColor(confianca))
-                binding.progressConfidence.progressBackgroundTintList =
-                    ColorStateList.valueOf(0x33242424)
+                binding.progressConfidence.progressTintList = confidenceTint(confianca)
+                binding.progressConfidence.progressBackgroundTintList = TINT_CONFIANCA_FUNDO
                 // Bump: pequena pulsada quando a letra reconhecida muda.
                 if (letra != ultimaLetraChip) {
                     binding.chipResult.animate().scaleX(1.14f).scaleY(1.14f).setDuration(90)
@@ -1067,11 +1073,11 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         }
     }
 
-    private fun confidenceColor(confianca: Float): Int {
+    private fun confidenceTint(confianca: Float): ColorStateList {
         return when {
-            confianca >= 0.92f -> 0xFFF5C842.toInt()
-            confianca >= 0.84f -> 0xFFE8A020.toInt()
-            else -> 0xFF8E6A26.toInt()
+            confianca >= 0.92f -> TINT_CONFIANCA_ALTA
+            confianca >= 0.84f -> TINT_CONFIANCA_MEDIA
+            else -> TINT_CONFIANCA_BAIXA
         }
     }
 
