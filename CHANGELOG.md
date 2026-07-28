@@ -13,11 +13,32 @@ Formato: **Constante(s)** — valor atual — decisão e por quê — status.
 
 ## Não lançado
 
-- **`FACE_DETECT_STRIDE=3`** — FaceLandmarker (marcador de sobrancelha)
-  passa a rodar 1 a cada 3 frames em vez de todo frame; a sobrancelha
-  não muda de estado tão rápido quanto uma letra, e é o 3º modelo
-  completo rodando por frame. `964348f`. Pendente: medir o ganho real
-  de latência em celular.
+- **`MOVIMENTO_SUSTENTADO_MS=130`, `ESTAB_MIN_DINAMICO_MS=130`,
+  `ESTAB_MIN_ESTATICO_MS=500`** — as três antigas gates em CONTAGEM DE
+  FRAMES (`MOVIMENTO_SUSTENTADO_FRAMES=3`, `ESTAB_MIN_DINAMICO=3`,
+  `ESTAB_MIN_ESTATICO=8`) viraram tempo em milissegundos. Um celular
+  que analisa menos frames por segundo (aparelho mais fraco, ou os
+  três detectores MediaPipe competindo pelo mesmo frame) fazia "3
+  frames" corresponder a um tempo de parede bem maior que o pretendido
+  — a janela real de um gesto dinâmico (~300-500ms) terminava antes da
+  histerese liberar o classificador, perdendo H/J/K/X/Z justamente nos
+  aparelhos mais lentos, que era exatamente o problema reportado.
+  Tempo fixo se comporta igual não importa a taxa de quadros real.
+  Valores escolhidos como equivalentes aos antigos numa taxa de ~20fps.
+  Pendente: validar em celular real, principalmente num aparelho lento.
+
+- **`FACE_DETECT_STRIDE=5`** (era 3, era todo frame antes disso) —
+  FaceLandmarker é o 3º modelo completo rodando por frame; cada frame
+  que ele NÃO roda sobra mais orçamento pra mão+classificação, que é o
+  que realmente precisa de taxa de quadros alta pra pegar gestos
+  rápidos. A sobrancelha muda de estado bem mais devagar que isso.
+  `964348f` → este commit. Pendente: medir o ganho real em celular.
+
+- **Downscale sem filtro bilinear** (`prepararBitmap`, antes usava
+  `filter=true`) — essa transform roda todo frame; a imagem gerada só
+  alimenta o detector, não é exibida, então a suavização do bilinear é
+  custo pago à toa. Pendente: validar que a qualidade de detecção não
+  piora perceptivelmente num celular real.
 
 - **`LIMIAR_SOBRANCELHA=0.38`, `JANELA_SOBR=5`, `IDX_BROW_*`,
   `IDX_EYE_*`** — porte 1:1 do `ler_marcador` do Python
@@ -26,17 +47,14 @@ Formato: **Constante(s)** — valor atual — decisão e por quê — status.
   — não precisou remapear. `d9a4ddc`. Pendente: validar em celular
   real se a frase vira "?" de forma confiável.
 
-- **`LIMIAR_MOVIMENTO=0.30`, `MOVIMENTO_SUSTENTADO_FRAMES=3`** —
-  conflito resolvido entre 0.30 (Rafael, igual ao Python — deixava o
-  "J" disparar com qualquer tremida) e 0.55 (eu — travava gestos reais
-  de H/J/K/X/Z). A causa raiz era usar UMA variável pra duas coisas:
-  magnitude do movimento e se ele é intencional. Solução: volta a 0.30
-  (não perde gesto real), mas só é confiado depois de sustentado por
-  `MOVIMENTO_SUSTENTADO_FRAMES` frames seguidos (rejeita ruído de 1
-  frame). `d9a4ddc`. Pendente: teste real comparando falso-J vs.
-  H/J/K/X/Z perdidos; se ainda sair J fácil, subir
-  `MOVIMENTO_SUSTENTADO_FRAMES` antes de mexer em `LIMIAR_MOVIMENTO`
-  de novo.
+- **`LIMIAR_MOVIMENTO=0.30`** — conflito resolvido entre 0.30 (Rafael,
+  igual ao Python — deixava o "J" disparar com qualquer tremida) e
+  0.55 (eu — travava gestos reais de H/J/K/X/Z). A causa raiz era usar
+  UMA variável pra duas coisas: magnitude do movimento e se ele é
+  intencional. Solução: volta a 0.30 (não perde gesto real), mas só é
+  confiado depois de sustentado por `MOVIMENTO_SUSTENTADO_MS` (ver
+  acima — era em frames, virou tempo). `d9a4ddc`. Pendente: teste real
+  comparando falso-J vs. H/J/K/X/Z perdidos.
 
 - **`INPUT_SHORT_SIDE=300`** — meio-termo entre 360 (valor do Python)
   e 255 (Rafael, ganho de velocidade). 300 perde menos detalhe que 255

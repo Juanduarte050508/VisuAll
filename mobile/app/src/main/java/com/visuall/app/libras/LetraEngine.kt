@@ -31,13 +31,22 @@ internal class LetraEngine(
     private val calibrationBuffer = ArrayList<FloatArray>()
     @Volatile private var calibrationTarget: String? = null
 
-    // Frames seguidos com movimento acima de LIMIAR_MOVIMENTO. Só confiamos
-    // no modelo dinâmico depois de sustentado — ver comentário do
-    // LIMIAR_MOVIMENTO em LibrasAnalyzer.
-    private var movimentoSustentadoCount = 0
+    // Timestamp de quando o movimento acima de LIMIAR_MOVIMENTO começou a ser
+    // sustentado (0L = não está sustentando agora). Só confiamos no modelo
+    // dinâmico depois de sustentado por MOVIMENTO_SUSTENTADO_MS — ver
+    // comentário do LIMIAR_MOVIMENTO em LibrasAnalyzer.
+    //
+    // Era contado em FRAMES (não em tempo) até esta correção: num aparelho
+    // que analisa menos frames por segundo, "3 frames" passava a levar bem
+    // mais tempo de parede, então a janela de gesto (que dura ~300-500ms de
+    // verdade) terminava antes da histerese liberar o classificador
+    // dinâmico — o app perdia H/J/K/X/Z em celulares mais lentos. Tempo em
+    // vez de contagem de frames deixa o gate consistente independente da
+    // taxa de quadros real.
+    private var movimentoSustentadoDesde = 0L
 
     fun resetMovimentoSustentado() {
-        movimentoSustentadoCount = 0
+        movimentoSustentadoDesde = 0L
     }
 
     fun limparBuffer() {
@@ -142,13 +151,15 @@ internal class LetraEngine(
         // Histerese: LIMIAR_MOVIMENTO sozinho não distingue "tremida de 1
         // frame" de "traço real de H/J/K/X/Z" — os dois cruzam o mesmo valor
         // de magnitude. A diferença é a DURAÇÃO: um gesto de verdade sustenta
-        // o movimento por vários frames seguidos; ruído da câmera não.
-        movimentoSustentadoCount = if (movimento > LibrasAnalyzer.LIMIAR_MOVIMENTO) {
-            movimentoSustentadoCount + 1
+        // o movimento por um tempo mínimo; ruído da câmera não.
+        val agora = System.currentTimeMillis()
+        if (movimento > LibrasAnalyzer.LIMIAR_MOVIMENTO) {
+            if (movimentoSustentadoDesde == 0L) movimentoSustentadoDesde = agora
         } else {
-            0
+            movimentoSustentadoDesde = 0L
         }
-        val movimentoConfiavel = movimentoSustentadoCount >= LibrasAnalyzer.MOVIMENTO_SUSTENTADO_FRAMES
+        val movimentoConfiavel = movimentoSustentadoDesde != 0L &&
+            (agora - movimentoSustentadoDesde) >= LibrasAnalyzer.MOVIMENTO_SUSTENTADO_MS
 
         if (movimentoConfiavel && bufferLm.size >= LibrasAnalyzer.JANELA_MLP) {
             return classificarDinamico()

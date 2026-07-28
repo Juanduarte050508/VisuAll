@@ -74,18 +74,26 @@ class LibrasAnalyzer(
         // usavam a MESMA variável pra duas coisas diferentes: magnitude do
         // movimento E se ele é intencional. Separamos isso: LIMIAR_MOVIMENTO
         // volta a 0.30 (não perde gesto real, como o Rafael queria), mas só
-        // é CONFIADO depois de sustentado por alguns frames seguidos
-        // (MOVIMENTO_SUSTENTADO_FRAMES) — uma tremida de 1 frame não basta,
-        // um traço real de H/J/K/X/Z (que dura vários frames) sim. Precisa
-        // validar em celular real; se ainda sair J fácil, subir
-        // MOVIMENTO_SUSTENTADO_FRAMES antes de mexer em LIMIAR_MOVIMENTO de novo.
+        // é CONFIADO depois de sustentado por um tempo mínimo
+        // (MOVIMENTO_SUSTENTADO_MS) — uma tremida de 1 frame não basta, um
+        // traço real de H/J/K/X/Z (que dura ~300-500ms) sim.
         const val LIMIAR_MOVIMENTO       = 0.30f
-        const val MOVIMENTO_SUSTENTADO_FRAMES = 3
+        // Em MILISSEGUNDOS, não em frames (ver ESTAB_MIN_* abaixo pro mesmo
+        // motivo): num aparelho que analisa poucos frames por segundo, uma
+        // contagem em frames vira uma janela de tempo bem maior do que
+        // pretendido, e o app perde gestos rápidos. Tempo fixo se comporta
+        // igual não importa a taxa de quadros real do dispositivo. Precisa
+        // validar em celular real; se ainda sair J fácil, subir este valor
+        // antes de mexer em LIMIAR_MOVIMENTO de novo.
+        const val MOVIMENTO_SUSTENTADO_MS = 130L
         const val TEMPO_PRA_LIMPAR       = 3_000L
-        // Dinâmicas são transitórias; exigir muitos frames consecutivos faz a
-        // janela passar do gesto antes da letra ser adicionada.
-        const val ESTAB_MIN_DINAMICO     = 3
-        const val ESTAB_MIN_ESTATICO     = 8
+        // Tempo mínimo com a MESMA letra reconhecida antes de comitar na
+        // frase — em milissegundos, não em frames, pelo mesmo motivo do
+        // MOVIMENTO_SUSTENTADO_MS acima. Dinâmicas são transitórias; exigir
+        // tempo demais faz a janela passar do gesto antes da letra ser
+        // adicionada.
+        const val ESTAB_MIN_DINAMICO_MS  = 130L
+        const val ESTAB_MIN_ESTATICO_MS  = 500L
         const val COOLDOWN_DINAMICO      = 250L
         const val COOLDOWN_ESTATICO      = 450L
         const val NO_HAND_TOLERANCE      = 3
@@ -137,7 +145,13 @@ class LibrasAnalyzer(
         // A sobrancelha não muda de estado tão rápido quanto uma letra: rodar
         // o 3º modelo (FaceLandmarker) 1 a cada N frames economiza latência
         // sem atraso perceptível no marcador de pergunta.
-        const val FACE_DETECT_STRIDE = 3
+        // Subiu de 3 para 5: a taxa de quadros efetiva de análise (mão +
+        // ONNX + às vezes rosto) é o gargalo pra pegar letras/gestos com
+        // movimento rápido — cada frame que o FaceLandmarker NÃO roda é um
+        // frame a mais de orçamento pro que realmente importa (mão +
+        // classificação). A sobrancelha ainda muda de estado bem mais devagar
+        // que isso.
+        const val FACE_DETECT_STRIDE = 5
     }
 
     enum class Modo {
@@ -181,7 +195,10 @@ class LibrasAnalyzer(
     }
 
     private var ultimaPredicao        = ""
-    private var contadorEstabilidade  = 0
+    // Timestamp de quando ultimaPredicao começou a se repetir (0L = ainda
+    // não estabilizou). Em tempo, não em contagem de frames — ver
+    // ESTAB_MIN_*_MS.
+    private var estabilidadeDesde     = 0L
     private var ultimaLetraAdicionada = ""
     private var ultimoTempoAdicao     = 0L
     private var tempoInicioEsticado   = 0L
@@ -204,7 +221,7 @@ class LibrasAnalyzer(
     // não depender de lembrar a mesma lista de resets em cada lugar.
     private fun resetEstadoAlfabeto() {
         ultimaPredicao = ""
-        contadorEstabilidade = 0
+        estabilidadeDesde = 0L
         letraRepetidaPendente = ""
         ultimaLetraAdicionada = ""
         letraEngine.resetMovimentoSustentado()
@@ -307,19 +324,21 @@ class LibrasAnalyzer(
 
             onLetra(letra, confianca, modo)
 
+            val agora = System.currentTimeMillis()
             if (letra != "-") {
-                contadorEstabilidade = if (letra == ultimaPredicao) contadorEstabilidade + 1 else 1
+                if (letra != ultimaPredicao) estabilidadeDesde = agora
+                else if (estabilidadeDesde == 0L) estabilidadeDesde = agora
                 ultimaPredicao = letra
             } else {
-                contadorEstabilidade = 0
+                estabilidadeDesde = 0L
                 ultimaPredicao = ""
             }
 
-            val agora    = System.currentTimeMillis()
-            val estabMin = if (modo == "dinamico") ESTAB_MIN_DINAMICO else ESTAB_MIN_ESTATICO
-            val cooldown = if (modo == "dinamico") COOLDOWN_DINAMICO  else COOLDOWN_ESTATICO
+            val estabMinMs = if (modo == "dinamico") ESTAB_MIN_DINAMICO_MS else ESTAB_MIN_ESTATICO_MS
+            val cooldown   = if (modo == "dinamico") COOLDOWN_DINAMICO    else COOLDOWN_ESTATICO
+            val estabilidadeOk = estabilidadeDesde != 0L && (agora - estabilidadeDesde) >= estabMinMs
 
-            if (contadorEstabilidade >= estabMin
+            if (estabilidadeOk
                 && letra != "-"
                 && letra != ultimaLetraAdicionada
                 && (agora - ultimoTempoAdicao) > cooldown) {
@@ -341,7 +360,7 @@ class LibrasAnalyzer(
                 }
                 ultimaLetraAdicionada = letra
                 ultimoTempoAdicao     = agora
-                contadorEstabilidade  = 0
+                estabilidadeDesde     = 0L
             }
 
             // NÃO limpamos ultimaLetraAdicionada por tempo: fazer isso digitava
@@ -375,7 +394,13 @@ class LibrasAnalyzer(
         if (degrees != 0f) matrix.postRotate(degrees)
         if (espelhar) matrix.postScale(-1f, 1f)
         if (matrix.isIdentity) return src
-        return Bitmap.createBitmap(src, 0, 0, src.width, src.height, matrix, true)
+        // filter=false (nearest-neighbor em vez de bilinear): esta transform
+        // roda em TODO frame, então a suavização do bilinear é custo pago
+        // sempre por uma imagem que já vai ser reduzida e só serve de
+        // entrada pro detector -- não é exibida. MediaPipe detecta bem sem
+        // ela; ainda não validado formalmente contra qualidade de detecção
+        // num celular real (mesmo compromisso não-validado do INPUT_SHORT_SIDE).
+        return Bitmap.createBitmap(src, 0, 0, src.width, src.height, matrix, false)
     }
 
     fun setEspelhamento(cameraFrontal: Boolean) {
@@ -490,7 +515,7 @@ class LibrasAnalyzer(
         }
 
         ultimaPredicao = ""
-        contadorEstabilidade = 0
+        estabilidadeDesde = 0L
         ultimaLetraAdicionada = ""
         letraRepetidaPendente = ""
         onRepeticaoPendente(null)
