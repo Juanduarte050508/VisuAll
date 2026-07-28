@@ -13,6 +13,18 @@ Formato: **Constante(s)** — valor atual — decisão e por quê — status.
 
 ## Não lançado
 
+- **Pipeline de treino de gestos corporais (novo)** — não existia NENHUM
+  treino publicado neste repositório pro `body_model.tflite` (ele vinha de
+  um pipeline externo, ver docstring de `linear/backend/app.py`). Criados
+  `linear/backend/data_extraction/extract_from_videos_corpo.py` (extração
+  de 225 features/frame — pose+mãos, normalização por ombros — reconstruída
+  a partir do consumidor real `BodyGestureEngine.kt`, não do treino
+  original) e `linear/backend/training/train_body_model.py` (LSTM Keras →
+  TFLite com Select TF Ops, arquitetura nova, não é port de nada). Pasta
+  `treinamento/` com `Capturar.bat`/`Treinar.bat` dá um jeito fácil de
+  gravar clipes e rodar os dois. Pendente: validar com dados reais — ainda
+  não há nenhum modelo de corpo treinado a partir desse pipeline.
+
 - **Delegate GPU com fallback pra CPU** (`HandLandmarker`,
   `PoseLandmarker`, `FaceLandmarker`) — os três detectores MediaPipe
   tentam `Delegate.GPU` primeiro (bem mais rápido que CPU nesses

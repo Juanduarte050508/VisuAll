@@ -5,4 +5,8 @@ scikit-learn>=1.3.0
 skl2onnx>=1.16.0
 onnx>=1.15.0
 websockets>=12.0
+# Treino do modelo de gestos corporais (linear/backend/training/) e
+# app.py/modular já importavam tensorflow sem ele estar pinado aqui.
 tensorflow>=2.16.0; python_version < "3.13"
+# Preview de webcam em treinamento/capturar.py.
+Pillow>=10.0.0
