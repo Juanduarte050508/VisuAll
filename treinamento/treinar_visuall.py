@@ -73,6 +73,12 @@ BODY_LABELS = [
 ]
 ALL_LABELS = set(STATIC_LABELS) | set(DYNAMIC_LABELS) | set(BODY_LABELS)
 PARTIAL_MODELS_TO_KEEP = 5
+# Rotulo especial: nao e letra nem gesto, e "isto NAO e sinal nenhum" (mao a
+# toa, cocando a cabeca, gesticulando enquanto fala). Usado so como exemplo
+# negativo no treino dos modelos individuais -- nunca vira classe de saida,
+# entao nao entra em ALL_LABELS nem em nenhum labels.txt do app.
+NEGATIVE_LABEL = "NADA"
+NEGATIVE_DIR = DATA_DIR / "raw_negativos"
 
 
 def safe_label_name(label: str) -> str:
@@ -374,6 +380,90 @@ def extract_dynamic_dataset(window: int = 10, step: int = 1) -> None:
     save_hand_dataset(rows, DATA_DIR / "dataset_dynamic.npz", DATA_DIR / "dynamic_external_dataset.csv", 420)
 
 
+def extract_negative_dataset(frame_stride: int = 5, window: int = 10, step: int = 2) -> None:
+    """Extrai os clipes de "nao e sinal nenhum" em dois datasets de uma vez.
+
+    O mesmo clipe serve pros dois casos: cada quadro isolado vira exemplo
+    negativo estatico (42 features) e cada janela de 10 quadros vira exemplo
+    negativo dinamico (420 features). Nao tem label -- e so um monte de "isto
+    aqui nao e letra".
+    """
+    require_cv_stack()
+    import cv2
+    from mediapipe.tasks.python.vision import RunningMode
+
+    videos = sorted(
+        path for path in NEGATIVE_DIR.rglob("*")
+        if path.is_file() and path.suffix.lower() in VIDEO_EXTS
+    ) if NEGATIVE_DIR.exists() else []
+
+    if not videos:
+        print("Sem clipes negativos (dados/raw_negativos/). Pulando.")
+        return
+
+    print(f"Extraindo negativos ({len(videos)} clipes)...")
+    hands = create_hand_landmarker(RunningMode.VIDEO, num_hands=1)
+    timestamp_ms = 0
+    estaticos: list[list[float]] = []
+    dinamicos: list[list[float]] = []
+
+    for video_path in videos:
+        cap = cv2.VideoCapture(str(video_path))
+        frames: list[list[float]] = []
+        frame_index = 0
+        while True:
+            ok, frame = cap.read()
+            if not ok:
+                break
+            result = hands.detect_for_video(mp_image_from_bgr(frame), timestamp_ms)
+            timestamp_ms += 1
+            points = first_hand_points(result)
+            if points is not None:
+                values = normalize_hand_landmarks(points)
+                frames.append(values)
+                # Sub-amostra os quadros pro dataset estatico: quadros
+                # vizinhos de um mesmo clipe sao quase identicos.
+                if frame_index % frame_stride == 0:
+                    estaticos.append(values)
+            else:
+                # Sem mao no quadro: quebra a sequencia (uma janela dinamica
+                # nao pode juntar dois trechos separados do video).
+                frames = []
+            frame_index += 1
+        cap.release()
+
+        for index in range(0, max(0, len(frames) - window + 1), step):
+            dinamicos.append(
+                np.array(frames[index:index + window], dtype=np.float32).flatten().tolist()
+            )
+
+    hands.close()
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+    for values, features, path in (
+        (estaticos, 42, DATA_DIR / "dataset_static_negativos.npz"),
+        (dinamicos, 420, DATA_DIR / "dataset_dynamic_negativos.npz"),
+    ):
+        if not values:
+            print(f"  nenhum negativo de {features} features gerado.")
+            continue
+        X = np.array(values, dtype=np.float32)
+        np.savez(path, X=X, y=np.array([NEGATIVE_LABEL] * len(X)))
+        print(f"  negativos salvos: {path} ({len(X)} amostras)")
+
+
+def load_negative_pool(name: str, features: int) -> np.ndarray | None:
+    path = DATA_DIR / f"dataset_{name}_negativos.npz"
+    if not path.exists():
+        return None
+    data = np.load(path, allow_pickle=True)
+    X = data["X"].astype(np.float32)
+    if X.ndim != 2 or X.shape[1] != features:
+        print(f"Ignorando {path}: shape {X.shape}, esperado [N, {features}].")
+        return None
+    return X
+
+
 def save_hand_dataset(
     rows: list[tuple[int, str, str, list[float]]],
     npz_path: Path,
@@ -490,26 +580,58 @@ def train_individual_mlp(name: str, features: int, labels: list[str], max_per_cl
     trained_labels: list[str] = []
     rng = np.random.default_rng(42)
 
+    # Exemplos de "nao e sinal nenhum" (dados/raw_negativos/). Sem eles, um
+    # modelo individual so aprende a separar SUA letra das OUTRAS LETRAS --
+    # nunca ve mao a toa, entao no app ele fica confiante demais em qualquer
+    # movimento e o reconhecimento dispara sem a pessoa estar sinalizando.
+    # Ver CONFIANCA_INDIVIDUAL em LibrasAnalyzer.kt, que e o remendo do lado
+    # do app pro mesmo problema.
+    negativos = load_negative_pool(name, features)
+    if negativos is None:
+        print(
+            f"  AVISO: sem clipes de 'Nada' pra {name}. Os modelos individuais vao "
+            "ficar mais propensos a reconhecer letra onde nao tem. Grave alguns "
+            "clipes na categoria 'Nada (nao e sinal nenhum)' do Capturar."
+        )
+    else:
+        print(f"  usando {len(negativos)} exemplos de 'nao e sinal nenhum'.")
+
     print(f"Treinando modelos individuais {name}...")
     for label in labels:
-        pos_idx = np.where(y_all == label)[0]
-        neg_idx = np.where(y_all != label)[0]
-        if len(pos_idx) == 0:
+        positivos = X_all[y_all == label]
+        outras_letras = X_all[y_all != label]
+        if len(positivos) == 0:
             print(f"  {label}: sem amostras, nao treinado.")
             continue
-        if len(neg_idx) == 0:
+        if len(outras_letras) == 0 and negativos is None:
             print(f"  {label}: precisa de exemplos de outras classes para negativo.")
             continue
 
-        if len(pos_idx) > max_per_class:
-            pos_idx = rng.choice(pos_idx, max_per_class, replace=False)
-        neg_limit = min(len(neg_idx), max(len(pos_idx), 1) * 2, max_per_class * 2)
-        neg_idx = rng.choice(neg_idx, neg_limit, replace=False)
+        if len(positivos) > max_per_class:
+            positivos = positivos[rng.choice(len(positivos), max_per_class, replace=False)]
 
-        idx = np.concatenate([pos_idx, neg_idx])
-        rng.shuffle(idx)
-        X = X_all[idx]
-        y_binary = (y_all[idx] == label).astype(np.int64)
+        # Teto por fonte de negativo: sem isso, um punhado de positivos contra
+        # milhares de negativos faz o modelo aprender so a dizer "nao".
+        teto_negativo = min(max(len(positivos), 1) * 2, max_per_class * 2)
+        partes_negativas = []
+        for fonte in (outras_letras, negativos):
+            if fonte is None or len(fonte) == 0:
+                continue
+            limite = min(len(fonte), teto_negativo)
+            partes_negativas.append(fonte[rng.choice(len(fonte), limite, replace=False)])
+
+        if not partes_negativas:
+            print(f"  {label}: sem nenhum exemplo negativo, nao treinado.")
+            continue
+
+        negativos_label = np.concatenate(partes_negativas)
+        X = np.concatenate([positivos, negativos_label])
+        y_binary = np.concatenate([
+            np.ones(len(positivos), dtype=np.int64),
+            np.zeros(len(negativos_label), dtype=np.int64),
+        ])
+        ordem = rng.permutation(len(X))
+        X, y_binary = X[ordem], y_binary[ordem]
 
         stratify = y_binary if np.all(np.bincount(y_binary, minlength=2) >= 2) else None
         if len(X) >= 5 and len(np.unique(y_binary)) == 2:
@@ -552,7 +674,9 @@ def train_individual_mlp(name: str, features: int, labels: list[str], max_per_cl
         (output_dir / f"{safe}_RELATORIO.txt").write_text(
             f"MODELO INDIVIDUAL {name}:{label}\n\n"
             f"Positivos: {int((y_binary == 1).sum())}\n"
-            f"Negativos: {int((y_binary == 0).sum())}\n\n"
+            f"Negativos: {int((y_binary == 0).sum())}\n"
+            f"Exemplos de 'nao e sinal nenhum' no pool: "
+            f"{0 if negativos is None else len(negativos)}\n\n"
             f"{report_text}\n",
             encoding="utf-8",
         )
@@ -805,6 +929,7 @@ def print_status() -> None:
         DATA_DIR / "raw_static_videos",
         DATA_DIR / "raw_videos",
         DATA_DIR / "raw_body_videos",
+        NEGATIVE_DIR,
     ]:
         count = len([p for p in path.rglob("*") if p.is_file()]) if path.exists() else 0
         print(f"{path}: {count} arquivos")
@@ -813,6 +938,8 @@ def print_status() -> None:
         DATA_DIR / "dataset_static.npz",
         DATA_DIR / "dataset_dynamic.npz",
         DATA_DIR / "dataset_body.npz",
+        DATA_DIR / "dataset_static_negativos.npz",
+        DATA_DIR / "dataset_dynamic_negativos.npz",
         STATIC_ASSETS / "geral" / "model.onnx",
         DYNAMIC_ASSETS / "geral" / "model.onnx",
         GESTURE_ASSETS / "geral" / "model.tflite",
@@ -827,6 +954,10 @@ def run_extract(kinds: set[str]) -> None:
         extract_dynamic_dataset()
     if "body" in kinds:
         extract_body_dataset()
+    # Os negativos alimentam os modelos individuais de letra (estatica e
+    # dinamica), entao basta uma das duas categorias estar no pedido.
+    if kinds & {"static", "dynamic"}:
+        extract_negative_dataset()
 
 
 def run_train(kinds: set[str]) -> None:

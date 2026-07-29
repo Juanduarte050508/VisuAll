@@ -2,10 +2,19 @@ opencv-python>=4.8.0
 mediapipe>=0.10.0
 numpy>=1.24.0
 scikit-learn>=1.3.0
-skl2onnx>=1.16.0
-onnx>=1.15.0
 websockets>=12.0
-# Treino do modelo de gestos corporais (linear/backend/training/) e
+# ATENÇÃO ao mexer nas 3 linhas abaixo: elas são um conjunto que só funciona
+# junto. O mediapipe exige protobuf<4; onnx/skl2onnx recentes puxam
+# protobuf>=5. Instalar `skl2onnx>=1.16.0` sem teto de versão resolve pra
+# skl2onnx 1.20 + onnx 1.19 + protobuf 6, e aí o mediapipe PARA DE FUNCIONAR
+# ("MessageFactory object has no attribute GetPrototype" na hora de criar
+# qualquer detector) — ou seja, a captura e a extração de landmarks quebram
+# inteiras num ambiente recém-instalado. Os tetos abaixo prendem a
+# combinação que foi testada de verdade com mediapipe + tensorflow juntos.
+protobuf>=3.20.3,<4
+onnx>=1.15.0,<1.17
+skl2onnx>=1.16.0,<1.18
+# Treino do modelo de gestos corporais (treinamento/treinar_visuall.py) e
 # app.py/modular já importavam tensorflow sem ele estar pinado aqui.
 tensorflow>=2.16.0; python_version < "3.13"
 # Preview de webcam em treinamento/capturar.py.

@@ -51,6 +51,11 @@ CATEGORIAS = {
     "Letra parada (estática)": ("estatica", sorted(STATIC_LABELS)),
     "Letra com movimento (dinâmica)": ("dinamica", DYNAMIC_LABELS),
     "Gesto corporal": ("corpo", BODY_LABELS),
+    # "Nada" não é uma letra/gesto: são exemplos do que NÃO é sinal nenhum
+    # (mão à toa, coçando a cabeça, gesticulando enquanto fala). Servem só
+    # como exemplo negativo no treino -- ver comentário em
+    # treinar_visuall.py::train_individual_mlp.
+    "Nada (não é sinal nenhum)": ("negativo", ["NADA"]),
 }
 
 # Mesmos nomes de pasta que treinar_visuall.py espera (DATA_DIR / target_dir_for).
@@ -58,6 +63,7 @@ PASTA_POR_CATEGORIA = {
     "estatica": DATA_DIR / "raw_static_videos",
     "dinamica": DATA_DIR / "raw_videos",
     "corpo": DATA_DIR / "raw_body_videos",
+    "negativo": DATA_DIR / "raw_negativos",
 }
 
 IDLE, CONTAGEM, GRAVANDO, SALVANDO = "idle", "contagem", "gravando", "salvando"

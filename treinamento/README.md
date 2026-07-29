@@ -56,11 +56,30 @@ Dê duplo-clique em `Capturar.bat`. Na janela que abrir:
   mão sai do quadro no NEUTRO ele não aprende nada com aquele clipe). Sem
   amostras de NEUTRO o modelo tende a "ver sinais" em qualquer movimento
   parado.
+- **Nada (não é sinal nenhum)** — esta é a categoria mais fácil de gravar e
+  a que mais resolve o problema de "o app reconhece letra sem eu estar
+  fazendo letra". Grave **10-15 clipes** de você na frente da câmera, com a
+  mão à mostra, fazendo qualquer coisa que **não** seja uma letra: coçar a
+  cabeça, ajeitar o cabelo, gesticular como quem está falando, mexer a mão à
+  toa. Varie bastante.
+
+  Por que isso importa: os modelos de reforço por letra aprendem
+  respondendo "isto é a letra H ou não?". Se os únicos exemplos de "não"
+  que eles viram foram OUTRAS LETRAS, eles nunca aprenderam como é uma mão
+  que não está sinalizando nada — e no app acabam dizendo "é H!" pra
+  qualquer movimento. Os clipes de "Nada" são exatamente esses exemplos que
+  faltavam.
 
 Os clipes vão pra `treinamento\dados\raw_static_videos\<LETRA>\`,
-`treinamento\dados\raw_videos\<LETRA>\` ou
-`treinamento\dados\raw_body_videos\<GESTO>\` (pastas criadas
-automaticamente). Essa pasta `dados\` não vai pro git — fica só no seu PC.
+`treinamento\dados\raw_videos\<LETRA>\`,
+`treinamento\dados\raw_body_videos\<GESTO>\` ou
+`treinamento\dados\raw_negativos\NADA\` (pastas criadas automaticamente).
+Essa pasta `dados\` não vai pro git — fica só no seu PC.
+
+**Por onde começar, se for gravar pouco:** clipes de **Nada** (10-15) e das
+letras com movimento **H, K, X e Z** (15-20 cada). É o que ataca
+diretamente os dois problemas relatados — reconhecer sem estar sinalizando,
+e não reconhecer as letras com movimento.
 
 Já tem fotos/vídeos gravados de outro jeito (celular, outro programa)? Não
 precisa passar pelo Capturar — abra `abrir_treinamento.bat`, escolha a
@@ -106,6 +125,11 @@ tempo.
 
 No fim, é só recompilar o app Android (`assembleDebug` ou rodar pelo Android
 Studio) pra usar os modelos novos.
+
+**Depois de instalar o app novo, rode o teste do `VALIDACAO.md`** (na raiz do
+repo, ~10 minutos). Sem ele não dá pra saber se o modelo novo ficou melhor
+ou pior que o anterior — e já aconteceu de ajuste ser empilhado em cima de
+ajuste sem ninguém conferir o resultado.
 
 ## Perguntas comuns
 

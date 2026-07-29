@@ -13,6 +13,29 @@ Formato: **Constante(s)** — valor atual — decisão e por quê — status.
 
 ## Não lançado
 
+- **Exemplos negativos ("não é sinal nenhum") no treino** — ataca a causa
+  raiz do reconhecimento fácil demais, que a subida de limiares abaixo só
+  remendava. Os modelos individuais são binários ("é esta letra ou não?") e
+  só viam OUTRAS LETRAS como exemplo negativo — nunca uma mão à toa —, então
+  não tinham como aprender a rejeitar o que não é letra nenhuma. Agora o
+  Capturar tem a categoria "Nada (não é sinal nenhum)", e
+  `train_individual_mlp` mistura esses clipes no pool de negativos (com teto
+  por fonte, pra não afogar os positivos). Quem não gravar nenhum continua
+  treinando igual, só com um aviso. Pendente: gravar os clipes e medir com o
+  `VALIDACAO.md` — se a Parte 2 (falso positivo) zerar, dá pra considerar
+  baixar `CONFIANCA_INDIVIDUAL` de volta, já que ele existe como remendo do
+  mesmo problema.
+
+- **`requirements.txt`: pinos de `protobuf`/`onnx`/`skl2onnx`** — instalar o
+  arquivo como estava, do zero, resolvia pra skl2onnx 1.20 + onnx 1.19 +
+  protobuf 6, e nessa combinação o **mediapipe para de funcionar**
+  (`MessageFactory object has no attribute GetPrototype` ao criar qualquer
+  detector). Ou seja: quem clonasse o repo e rodasse `Capturar.bat` pela
+  primeira vez pegava um ambiente quebrado. Encontrado ao instalar as
+  dependências declaradas mas ausentes. Travado em `protobuf<4` +
+  `onnx<1.17` + `skl2onnx<1.18`, combinação verificada rodando mediapipe,
+  sklearn/ONNX e tensorflow juntos.
+
 - **`CONFIANCA_MINIMA` 0.90→0.93, `MARGEM_ESTATICA_MINIMA` 0.25→0.30,
   `CONFIANCA_DINAMICA` 0.92→0.95, `MARGEM_DINAMICA_MINIMA` 0.28→0.32,
   `BODY_CONFIDENCE` 0.85→0.90, `CONFIANCA_INDIVIDUAL` novo em 0.97** —
@@ -31,6 +54,28 @@ Formato: **Constante(s)** — valor atual — decisão e por quê — status.
   segura a mesma letra por mais tempo antes de comitar. Pendente: validar
   em celular real que ainda reconhece letras/gestos de verdade sem travar
   demais.
+
+- **Roteiro de validação (`VALIDACAO.md`) e primeiros testes automáticos do
+  lado Python** — quase toda entrada deste arquivo termina em "pendente:
+  validar em celular real", e nenhuma jamais foi validada: os ajustes foram
+  se empilhando sem ninguém medir se o anterior ajudou. `VALIDACAO.md` é um
+  teste de ~10 min (alfabeto A→Z + 30s sem sinalizar pra contar falso
+  positivo + gestos), feito sempre igual, pra comparar antes/depois. O teste
+  de falso positivo é o que faltava: sem ele dá pra "melhorar" o alfabeto só
+  afrouxando limiares e deixando o app chutar. Junto vieram 18 testes
+  automáticos do motor de treino (`treinamento/tests/`) e um workflow que
+  roda eles + verifica que o mediapipe realmente inicializa num ambiente
+  recém-instalado — era o buraco que deixou passar tanto o conflito do
+  protobuf acima quanto o modelo de corpo salvo no caminho errado.
+
+- **`LibrasFragment.kt`: extraídos `WordSuggestionEngine` e
+  `TrainingProgressCalculator`** — continuava sendo o maior arquivo do app
+  (~1250 linhas). Saíram as duas partes que eram lógica pura, sem View: a
+  pontuação/ranking das sugestões de palavra e as contas do painel de treino
+  (percentual, letras fracas, próxima a treinar). Ganharam 20 testes
+  unitários — antes, a única forma de conferir se "ban" sugeria "banheiro",
+  ou se 400 amostras de uma letra só não marcavam 100% no painel, era abrir
+  o app e soletrar na mão. Câmera, HUD e painéis continuam no Fragment.
 
 - **Ferramentas de treino unificadas em `treinamento/`** — duas pessoas
   construíram, em paralelo e sem saber uma da outra, ferramentas pro mesmo

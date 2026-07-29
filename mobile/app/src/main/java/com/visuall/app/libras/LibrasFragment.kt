@@ -48,7 +48,6 @@ import androidx.navigation.fragment.findNavController
 import com.visuall.app.R
 import com.visuall.app.databinding.FragmentLibrasBinding
 import java.io.File
-import java.text.Normalizer
 import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -57,11 +56,6 @@ import kotlin.math.roundToInt
 class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
 
     private companion object {
-        // Compilado uma vez: normalizarBusca() roda pra cada palavra sugerida
-        // (~45) toda vez que a frase muda, então recompilar o regex ali
-        // dentro seria refazer o mesmo trabalho repetidamente por frame.
-        val DIACRITICS_REGEX = "\\p{Mn}+".toRegex()
-
         // Cores fixas do chip de confiança: só 3 buckets possíveis, então não
         // há motivo pra alocar um ColorStateList novo (via valueOf) a cada
         // atualização — onLetraDetectada roda a cada letra reconhecida.
@@ -101,31 +95,7 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"
     )
     private val letrasDinamicasTreino = setOf("H", "J", "K", "X", "Z")
-    private val palavrasSugeridas = listOf(
-        "ajuda", "ajudar", "agua", "amigo", "amanha", "aprender", "aqui",
-        "banheiro", "bom", "boa", "casa", "comida", "computador", "conversa",
-        "conversar", "desculpa", "dor", "escola", "estou", "familia", "feliz",
-        "hoje", "jovi", "libras", "mae", "medico", "nao", "obrigado", "obrigada",
-        "oi", "onde", "pai", "pessoa", "por favor", "preciso", "professor",
-        "quero", "responder", "sim", "surdo", "tudo", "voce", "voltar"
-    )
-    private val sugestoesContextuais = mapOf(
-        "bom" to listOf("dia"),
-        "boa" to listOf("tarde", "noite"),
-        "por" to listOf("favor"),
-        "eu" to listOf("preciso", "quero", "estou"),
-        "voce" to listOf("pode", "quer", "entendeu"),
-        "preciso" to listOf("ajuda", "agua", "medico"),
-        "quero" to listOf("comida", "agua", "conversar")
-    )
     private var indiceCalibracao = letrasCalibracao.indexOf("E").coerceAtLeast(0)
-
-    private data class TrainingProgress(
-        val percent: Int,
-        val missingLetters: List<String>,
-        val trainedLetters: Int,
-        val totalSamples: Int
-    )
 
     private val speechLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -797,35 +767,15 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         binding.btnCalibrationExport.alpha = if (progress.totalSamples > 0) 1f else 0.45f
     }
 
-    private fun trainingProgress(): TrainingProgress {
-        val analyzer = librasAnalyzer
-        val target = LibrasAnalyzer.TRAINING_STRONG_TARGET_SAMPLES
-        var trainedLetters = 0
-        var totalSamples = 0
-        var cappedSamples = 0
-        val missing = mutableListOf<Pair<String, Int>>()
+    private fun contarAmostras(letra: String): Int =
+        librasAnalyzer?.getTrainingSampleCount(letra) ?: 0
 
-        letrasCalibracao.forEach { letra ->
-            val count = analyzer?.getTrainingSampleCount(letra) ?: 0
-            totalSamples += count
-            cappedSamples += count.coerceAtMost(target)
-            if (count >= target) {
-                trainedLetters++
-            } else {
-                missing += letra to count
-            }
-        }
-
-        val percent = if (letrasCalibracao.isEmpty()) {
-            0
-        } else {
-            (cappedSamples * 100 / (letrasCalibracao.size * target)).coerceIn(0, 100)
-        }
-        val sortedMissing = missing
-            .sortedWith(compareBy<Pair<String, Int>> { it.second }.thenBy { it.first })
-            .map { it.first }
-        return TrainingProgress(percent, sortedMissing, trainedLetters, totalSamples)
-    }
+    private fun trainingProgress(): TrainingProgressCalculator.Progress =
+        TrainingProgressCalculator.calcular(
+            letras = letrasCalibracao,
+            alvoForte = LibrasAnalyzer.TRAINING_STRONG_TARGET_SAMPLES,
+            contarAmostras = ::contarAmostras
+        )
 
     private fun goToNextWeakLetter() {
         val next = indiceProximaLetraFraca(includeCurrent = true)
@@ -857,26 +807,21 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
             ?: ((indiceCalibracao + 1) % letrasCalibracao.size)
     }
 
-    private fun indiceProximaLetraFraca(includeCurrent: Boolean): Int? {
-        if (letrasCalibracao.isEmpty()) return null
-        val offset = if (includeCurrent) 0 else 1
-        return letrasCalibracao.indices
-            .map { (indiceCalibracao + offset + it) % letrasCalibracao.size }
-            .firstOrNull { index ->
-                val letra = letrasCalibracao[index]
-                (librasAnalyzer?.getTrainingSampleCount(letra) ?: 0) <
-                    LibrasAnalyzer.TRAINING_STRONG_TARGET_SAMPLES
-            }
-    }
+    private fun indiceProximaLetraFraca(includeCurrent: Boolean): Int? =
+        TrainingProgressCalculator.indiceProximaLetraFraca(
+            letras = letrasCalibracao,
+            indiceAtual = indiceCalibracao,
+            includeCurrent = includeCurrent,
+            alvoForte = LibrasAnalyzer.TRAINING_STRONG_TARGET_SAMPLES,
+            contarAmostras = ::contarAmostras
+        )
 
-    private fun trainingLevel(count: Int): String {
-        return when {
-            count >= LibrasAnalyzer.TRAINING_STRONG_TARGET_SAMPLES -> "FORTE"
-            count >= LibrasAnalyzer.TRAINING_BASIC_TARGET_SAMPLES -> "BASICO"
-            count > 0 -> "INICIO"
-            else -> "SEM DADOS"
-        }
-    }
+    private fun trainingLevel(count: Int): String =
+        TrainingProgressCalculator.nivel(
+            count = count,
+            alvoForte = LibrasAnalyzer.TRAINING_STRONG_TARGET_SAMPLES,
+            alvoBasico = LibrasAnalyzer.TRAINING_BASIC_TARGET_SAMPLES
+        )
 
     private fun updateCalibrationVisibility() {
         val alfabeto = modoAtual == LibrasAnalyzer.Modo.ALFABETO
@@ -893,32 +838,7 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
             return
         }
 
-        val textoNormal = frase.lowercase(Locale("pt", "BR"))
-        val prefixo = textoNormal.substringAfterLast(' ').trim()
-        val prefixoBusca = normalizarBusca(prefixo)
-        val ultimaCompleta = textoNormal.trim().split(" ").lastOrNull().orEmpty()
-        val contextuais = if (frase.endsWith(" ")) {
-            sugestoesContextuais[normalizarBusca(ultimaCompleta)].orEmpty()
-        } else {
-            emptyList()
-        }
-
-        val sugestoes = (contextuais + palavrasSugeridas)
-            .distinct()
-            .mapNotNull { palavra ->
-                val busca = normalizarBusca(palavra)
-                val score = when {
-                    prefixoBusca.isBlank() && palavra in contextuais -> 100
-                    prefixoBusca.length < 2 -> -1
-                    busca.startsWith(prefixoBusca) -> 80 - (busca.length - prefixoBusca.length)
-                    busca.contains(prefixoBusca) -> 35 - busca.indexOf(prefixoBusca)
-                    else -> -1
-                }
-                if (score < 0 || busca == prefixoBusca) null else palavra to score
-            }
-            .sortedWith(compareByDescending<Pair<String, Int>> { it.second }.thenBy { it.first.length })
-            .map { it.first }
-            .take(3)
+        val sugestoes = WordSuggestionEngine.sugerir(frase)
 
         val botoes = listOf(binding.btnSuggestion1, binding.btnSuggestion2, binding.btnSuggestion3)
         botoes.forEachIndexed { index, botao ->
@@ -928,11 +848,6 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
             botao.isVisible = palavra != null
         }
         binding.suggestionsRow.isVisible = sugestoes.isNotEmpty()
-    }
-
-    private fun normalizarBusca(texto: String): String {
-        return Normalizer.normalize(texto.trim().lowercase(Locale("pt", "BR")), Normalizer.Form.NFD)
-            .replace(DIACRITICS_REGEX, "")
     }
 
     private fun hideSuggestions() {
