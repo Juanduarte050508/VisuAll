@@ -11,13 +11,12 @@
         android:id="@+id/preview_view"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        app:scaleType="fitCenter"
-        app:layout_constraintDimensionRatio="3:4"
+        app:implementationMode="compatible"
+        app:scaleType="fillCenter"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintVertical_bias="0.5" />
+        app:layout_constraintEnd_toEndOf="parent" />
 
     <!-- Flash -->
     <ImageView

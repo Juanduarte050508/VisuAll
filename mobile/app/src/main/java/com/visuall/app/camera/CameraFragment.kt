@@ -33,7 +33,6 @@ import androidx.camera.video.Recorder
 import androidx.camera.video.Recording
 import androidx.camera.video.VideoCapture
 import androidx.camera.video.VideoRecordEvent
-import androidx.constraintlayout.widget.ConstraintSet
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.LiveData
@@ -71,6 +70,8 @@ class CameraFragment : Fragment() {
     private var isPhysicalLandscape = false
     private var orientationListener: OrientationEventListener? = null
     private var landscapeHud: View? = null
+    private var bindRetryPosted = false
+    private var cameraStartRequested = false
 
     // Aspect ratio: true = 4:3 (padrão), false = 16:9
     private var is4to3 = true
@@ -109,9 +110,12 @@ class CameraFragment : Fragment() {
     // ── Câmera ─────────────────────────────────────────────────────────────
     private fun startCamera() {
         val context = context ?: return
+        if (cameraStartRequested) return
+        cameraStartRequested = true
         val future = ProcessCameraProvider.getInstance(context)
         future.addListener({
             if (_binding == null || !isAdded) return@addListener
+            cameraStartRequested = false
             cameraProvider = future.get()
             bindCamera()
         }, ContextCompat.getMainExecutor(context))
@@ -121,7 +125,20 @@ class CameraFragment : Fragment() {
         val currentBinding = _binding ?: return
         if (!isAdded || view == null) return
         val provider = cameraProvider ?: return
-        val selector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
+        if (!currentBinding.previewView.isAttachedToWindow ||
+            currentBinding.previewView.width == 0 ||
+            currentBinding.previewView.height == 0
+        ) {
+            if (!bindRetryPosted) {
+                bindRetryPosted = true
+                currentBinding.previewView.post {
+                    bindRetryPosted = false
+                    bindCamera()
+                }
+            }
+            return
+        }
+        val selector = cameraSelectorForAvailableLens(lensFacing)
         val targetRotation = currentTargetRotation()
 
         val aspectRatioStrategy = if (is4to3)
@@ -158,22 +175,40 @@ class CameraFragment : Fragment() {
             }
             setupZoom()
             applyAspectRatioToPreview()
-        } catch (e: Exception) { e.printStackTrace() }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Toast.makeText(requireContext(), "Nao consegui abrir a camera", Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun applyAspectRatioToPreview() {
-        val isLandscape = isLandscapeByBounds()
-        val ratio = when {
-            is4to3 && isLandscape -> "4:3"
-            is4to3 -> "3:4"
-            isLandscape -> "16:9"
-            else -> "9:16"
-        }
-        val cs = ConstraintSet()
-        cs.clone(binding.root)
-        cs.setDimensionRatio(R.id.preview_view, ratio)
-        cs.applyTo(binding.root)
+        binding.previewView.requestLayout()
         _binding?.btnAspectRatio?.text = if (is4to3) "4:3" else "16:9"
+    }
+
+    private fun cameraSelectorForAvailableLens(preferredLensFacing: Int): CameraSelector {
+        val provider = cameraProvider
+        val preferred = CameraSelector.Builder()
+            .requireLensFacing(preferredLensFacing)
+            .build()
+        if (provider == null || runCatching { provider.hasCamera(preferred) }.getOrDefault(false)) {
+            return preferred
+        }
+
+        val fallbackLensFacing = if (preferredLensFacing == CameraSelector.LENS_FACING_BACK) {
+            CameraSelector.LENS_FACING_FRONT
+        } else {
+            CameraSelector.LENS_FACING_BACK
+        }
+        val fallback = CameraSelector.Builder()
+            .requireLensFacing(fallbackLensFacing)
+            .build()
+        return if (runCatching { provider.hasCamera(fallback) }.getOrDefault(false)) {
+            lensFacing = fallbackLensFacing
+            fallback
+        } else {
+            preferred
+        }
     }
 
     private fun applyHudLayout() {

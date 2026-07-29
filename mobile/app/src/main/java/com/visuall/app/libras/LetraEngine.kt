@@ -22,15 +22,6 @@ internal class LetraEngine(
     private val sessionDinamico = ortEnv.createSession(
         context.assets.open("letras_dinamicas/geral/model.onnx").readBytes()
     )
-    // O modelo parcial é OPCIONAL (só existe se alguém treinou com parte das
-    // letras), então ausência não é erro. Mas se ele EXISTE e mesmo assim não
-    // abre, isso é problema de verdade e precisa aparecer no log — antes
-    // sumia sem deixar rastro, e o sintoma era só "continua errando as
-    // letras que eu acabei de treinar".
-    private val sessionDinamicoParcial: OrtSession? =
-        carregarOpcional(context, "letras_dinamicas/parcial/model.onnx") { bytes ->
-            ortEnv.createSession(bytes)
-        }
     // Estes labels.txt são a ÚNICA fonte da verdade sobre quais letras
     // existem: a ordem deles é o que traduz "saída número 3" na letra certa,
     // e eles são regravados junto do modelo a cada treino. Qualquer outra
@@ -47,10 +38,6 @@ internal class LetraEngine(
     // Quais delas exigem movimento — usado pra instrução na tela ("segure" vs
     // "faça o movimento").
     val labelsDinamicasSet: Set<String> = labelsDinamico.toSet()
-    private val labelsDinamicoParcial =
-        carregarOpcional(context, "letras_dinamicas/parcial/labels.txt") { bytes ->
-            bytes.decodeToString().lines().filter { it.isNotBlank() }
-        } ?: emptyList()
     private val modelosEstaticosIndividuais = carregarModelosIndividuais(
         context, labelsEstatico, "letras_estaticas"
     )
@@ -299,20 +286,6 @@ internal class LetraEngine(
             if (individual.letra != "-") return individual
         }
 
-        // Se existe um modelo parcial treinado pela ferramenta local, ele é
-        // usado primeiro para as classes que já têm dados novos (ex.: H/J/K/Z).
-        // O modelo completo continua como fallback, preservando letras ainda
-        // sem re-treino parcial, como X.
-        sessionDinamicoParcial?.let { partialSession ->
-            val parcial = classificarDinamicoComModelo(
-                entrada = entrada,
-                session = partialSession,
-                labels = labelsDinamicoParcial,
-                modo = "dinamico_parcial"
-            )
-            if (parcial.letra != "-") return parcial
-        }
-
         return classificarDinamicoComModelo(
             entrada = entrada,
             session = sessionDinamico,
@@ -464,11 +437,18 @@ internal class LetraEngine(
         // Antes das sessões: espera terminar de gravar as amostras de
         // calibração, que agora vão pra disco em segundo plano.
         trainingStore.close()
-        modelosEstaticosIndividuais.forEach { it.session.close() }
-        modelosDinamicosIndividuais.forEach { it.session.close() }
-        sessionEstatico.close()
-        sessionDinamicoParcial?.close()
-        sessionDinamico.close()
+        modelosEstaticosIndividuais.forEach { modelo ->
+            runCatching { modelo.session.close() }
+                .onFailure { Log.w("LetraEngine", "Falha ao fechar modelo individual ${modelo.label}", it) }
+        }
+        modelosDinamicosIndividuais.forEach { modelo ->
+            runCatching { modelo.session.close() }
+                .onFailure { Log.w("LetraEngine", "Falha ao fechar modelo individual ${modelo.label}", it) }
+        }
+        runCatching { sessionEstatico.close() }
+            .onFailure { Log.w("LetraEngine", "Falha ao fechar modelo estatico", it) }
+        runCatching { sessionDinamico.close() }
+            .onFailure { Log.w("LetraEngine", "Falha ao fechar modelo dinamico", it) }
         // OrtEnvironment.getEnvironment() retorna um ambiente compartilhado.
         // Fechar aqui quebra a proxima criacao do LetraEngine quando a camera
         // e aberta de novo ou quando o CameraX recria o analyzer.

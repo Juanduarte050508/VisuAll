@@ -83,6 +83,10 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
     private var isPhysicalLandscape = false
     private var orientationListener: OrientationEventListener? = null
     private var landscapeHud: View? = null
+    private var bindRetryPosted = false
+    private var cameraStartRequested = false
+    private var bindInProgress = false
+    private var pendingBind = false
 
     private var lensFacing = CameraSelector.LENS_FACING_FRONT
 
@@ -147,7 +151,6 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
             applyPreviewAspectRatio()
             applyHudLayout()
         }
-        startCamera()
         setupButtons()
         updateModeButtons()
         setupOrientationHudListener()
@@ -155,11 +158,30 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
 
     // ── Inicia provider uma única vez ──────────────────────────────────────
     private fun startCamera() {
+        if (cameraStartRequested) return
+        cameraStartRequested = true
         val future = ProcessCameraProvider.getInstance(requireContext())
         future.addListener({
+            if (!isAdded || _binding == null) return@addListener
+            cameraStartRequested = false
             cameraProvider = future.get()
-            bindCamera()
+            scheduleBindCamera()
         }, ContextCompat.getMainExecutor(requireContext()))
+    }
+
+    private fun scheduleBindCamera(delayMs: Long = 0L) {
+        val root = _binding?.root ?: return
+        root.removeCallbacks(bindRunnable)
+        if (delayMs > 0L) {
+            root.postDelayed(bindRunnable, delayMs)
+        } else {
+            root.post(bindRunnable)
+        }
+    }
+
+    private val bindRunnable = Runnable {
+        if (_binding == null || !isAdded) return@Runnable
+        bindCamera()
     }
     private fun cameraSelectorForAvailableLens(preferredLensFacing: Int): CameraSelector {
         val provider = cameraProvider
@@ -189,6 +211,25 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
     private fun bindCamera() {
         val provider = cameraProvider ?: return
         if (!isAdded || _binding == null) return
+        if (bindInProgress) {
+            pendingBind = true
+            return
+        }
+        if (!binding.previewView.isAttachedToWindow ||
+            binding.previewView.width == 0 ||
+            binding.previewView.height == 0
+        ) {
+            if (!bindRetryPosted) {
+                bindRetryPosted = true
+                binding.previewView.post {
+                    bindRetryPosted = false
+                    bindCamera()
+                }
+            }
+            return
+        }
+        bindInProgress = true
+        pendingBind = false
 
         val requestedLensFacing = lensFacing
         val selector = cameraSelectorForAvailableLens(requestedLensFacing)
@@ -214,9 +255,6 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         // que o executor entregue frames enquanto o provider já foi desvinculado
         val oldAnalyzer = librasAnalyzer
         librasAnalyzer = null
-
-        // Desvincula câmera (para entrega de frames no pipeline)
-        provider.unbindAll()
 
         // Recria executor se foi encerrado
         if (cameraExecutor.isShutdown) {
@@ -246,43 +284,89 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
 
         val usandoCameraFrontal = lensFacing == CameraSelector.LENS_FACING_FRONT
 
-        try {
+        val boundAnalysis = try {
+            provider.unbindAll()
             provider.bindToLifecycle(viewLifecycleOwner, selector, preview, analysis)
+            analysis
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.w("LibrasFragment", "Bind otimizado da camera de Libras falhou; tentando fallback simples", e)
+            try {
+                provider.unbindAll()
+                val fallbackPreview = Preview.Builder()
+                    .setTargetRotation(targetRotation)
+                    .build()
+                    .also { p -> p.setSurfaceProvider(binding.previewView.surfaceProvider) }
+                val fallbackAnalysis = ImageAnalysis.Builder()
+                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                    .setTargetRotation(targetRotation)
+                    .build()
+                provider.bindToLifecycle(viewLifecycleOwner, selector, fallbackPreview, fallbackAnalysis)
+                fallbackAnalysis
+            } catch (fallbackError: Exception) {
+                Log.e("LibrasFragment", "Nao consegui abrir a camera de Libras", fallbackError)
+                Toast.makeText(requireContext(), "Nao consegui abrir a camera de Libras", Toast.LENGTH_SHORT).show()
+                oldAnalyzer?.close()
+                bindInProgress = false
+                null
+            }
+        } ?: return
+
+        if (!isAdded || _binding == null) {
             oldAnalyzer?.close()
+            bindInProgress = false
             return
         }
 
         val appContext = requireContext().applicationContext
+        val rootView = binding.root
         cameraExecutor.execute {
             oldAnalyzer?.close()
 
-            val newAnalyzer = LibrasAnalyzer(
-                context       = appContext,
-                onLetra       = { letra, conf, _ -> onLetraDetectada(letra, conf) },
-                onFraseUpdate = { frase -> onFraseAtualizada(frase) },
-                onNoHand      = { onSemMao() },
-                onGestoLimpar = { prog -> onGestoLimpar(prog) },
-                onRepeticaoPendente = { letra -> onRepeticaoPendente(letra) },
-                onFeedback = { mensagem, nivel -> onFeedback(mensagem, nivel) },
-                onLandmarks = { hands, pose, frameAspect ->
-                    onLandmarksDetected(hands, pose, frameAspect)
-                },
-                onInterrogativo = { ativo -> onInterrogativoAtualizado(ativo) }
-            ).also {
-                it.setModo(modoAtual)
-                it.setEspelhamento(usandoCameraFrontal)
-            }
-
-            if (!isAdded || _binding == null || cameraExecutor.isShutdown) {
-                newAnalyzer.close()
+            val newAnalyzer = try {
+                LibrasAnalyzer(
+                    context       = appContext,
+                    onLetra       = { letra, conf, _ -> onLetraDetectada(letra, conf) },
+                    onFraseUpdate = { frase -> onFraseAtualizada(frase) },
+                    onNoHand      = { onSemMao() },
+                    onGestoLimpar = { prog -> onGestoLimpar(prog) },
+                    onRepeticaoPendente = { letra -> onRepeticaoPendente(letra) },
+                    onFeedback = { mensagem, nivel -> onFeedback(mensagem, nivel) },
+                    onLandmarks = { hands, pose, frameAspect ->
+                        onLandmarksDetected(hands, pose, frameAspect)
+                    },
+                    onInterrogativo = { ativo -> onInterrogativoAtualizado(ativo) }
+                ).also {
+                    it.setModo(modoAtual)
+                    it.setEspelhamento(usandoCameraFrontal)
+                }
+            } catch (error: Throwable) {
+                Log.e("LibrasFragment", "Nao consegui iniciar o reconhecedor de Libras", error)
+                rootView.post {
+                    context?.let { safeContext ->
+                        Toast.makeText(
+                            safeContext,
+                            "Reconhecimento de Libras nao iniciou",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                }
+                bindInProgress = false
+                if (pendingBind) rootView.postDelayed(bindRunnable, 180L)
                 return@execute
             }
 
-            librasAnalyzer = newAnalyzer
-            analysis.setAnalyzer(cameraExecutor, newAnalyzer)
-            binding.root.post { sincronizarAlfabeto(newAnalyzer) }
+            rootView.post {
+                if (!isAdded || _binding == null || cameraExecutor.isShutdown) {
+                    newAnalyzer.close()
+                    bindInProgress = false
+                    return@post
+                }
+                librasAnalyzer = newAnalyzer
+                boundAnalysis.setAnalyzer(cameraExecutor, newAnalyzer)
+                sincronizarAlfabeto(newAnalyzer)
+                bindInProgress = false
+                if (pendingBind) scheduleBindCamera(180L)
+            }
         }
     }
 
@@ -366,19 +450,14 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
     }
 
     private fun applyPreviewAspectRatio() {
-        val ratio = if (isLandscapeByBounds()) "4:3" else "3:4"
         val params = binding.previewView.layoutParams
                 as? ConstraintLayout.LayoutParams ?: return
-        // Só mexe se a proporção realmente mudou. Reaplicar layout à toa
-        // destrói e recria a surface do preview.
-        if (params.dimensionRatio == ratio) return
-        // Alteramos APENAS os params do preview. Antes usávamos
-        // ConstraintSet.clone()/applyTo() na raiz inteira, o que reconstruía
-        // todo o layout logo após o bind da câmera e derrubava a surface —
-        // era por isso que a câmera "fechava" ao entrar no modo Libras e só
-        // voltava ao inverter a câmera (que refaz o bind).
-        params.dimensionRatio = ratio
-        binding.previewView.layoutParams = params
+        if (params.dimensionRatio != null) {
+            params.dimensionRatio = null
+            binding.previewView.layoutParams = params
+        } else {
+            binding.previewView.requestLayout()
+        }
     }
 
     private fun applyHudLayout() {
@@ -444,7 +523,7 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
             lensFacing = if (lensFacing == CameraSelector.LENS_FACING_FRONT)
                 CameraSelector.LENS_FACING_BACK
             else CameraSelector.LENS_FACING_FRONT
-            bindCamera()
+            scheduleBindCamera(180L)
         }
         landscapeHud = hud
     }
@@ -496,6 +575,11 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         _binding?.root?.post {
             applyPreviewAspectRatio()
             applyHudLayout()
+            if (cameraProvider != null) {
+                scheduleBindCamera(250L)
+            } else {
+                _binding?.root?.postDelayed({ startCamera() }, 250L)
+            }
         }
     }
 
@@ -634,7 +718,7 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
             lensFacing = if (lensFacing == CameraSelector.LENS_FACING_FRONT)
                 CameraSelector.LENS_FACING_BACK
             else CameraSelector.LENS_FACING_FRONT
-            bindCamera()
+            scheduleBindCamera(180L)
         }
 
         // Toque: limpa a frase inteira (a lixeira zera tudo de uma vez).

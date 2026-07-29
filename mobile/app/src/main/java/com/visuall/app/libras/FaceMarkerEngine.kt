@@ -104,6 +104,8 @@ internal class FaceMarkerEngine(private val context: Context) {
     // vazamento real do detector nativo a cada troca de câmera (o Fragment
     // cria um LibrasAnalyzer novo por bind). Corrigido aqui.
     fun close() {
-        faceLandmarker?.close()
+        runCatching { faceLandmarker?.close() }
+            .onFailure { Log.w("FaceMarkerEngine", "Falha ao fechar FaceLandmarker", it) }
+        faceLandmarker = null
     }
 }

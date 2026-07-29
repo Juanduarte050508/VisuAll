@@ -422,6 +422,10 @@ class LibrasAnalyzer(
             // Ela só é liberada quando a mão sai do quadro (ver bloco sem mão)
             // ou pelo botão REPETIR, deixando a repetição sempre intencional.
         }
+      } catch (error: Throwable) {
+        android.util.Log.e("LibrasAnalyzer", "Falha ao analisar frame de Libras", error)
+        notificarLetra("-", 0f, modoAtual.name.lowercase())
+        notificarFeedback("ERRO NO RECONHECIMENTO", FEEDBACK_ALERTA)
       } finally {
         if (rawBitmap !== preparedBitmap) rawBitmap?.recycle()
         preparedBitmap?.recycle()
@@ -617,9 +621,13 @@ class LibrasAnalyzer(
     fun getFrase(): String = frase
 
     fun close() {
-        handLandmarker.close()
-        letraEngine.close()
-        bodyEngine.close()
-        faceEngine.close()
+        runCatching { handLandmarker.close() }
+            .onFailure { android.util.Log.w("LibrasAnalyzer", "Falha ao fechar HandLandmarker", it) }
+        runCatching { letraEngine.close() }
+            .onFailure { android.util.Log.w("LibrasAnalyzer", "Falha ao fechar LetraEngine", it) }
+        runCatching { bodyEngine.close() }
+            .onFailure { android.util.Log.w("LibrasAnalyzer", "Falha ao fechar BodyGestureEngine", it) }
+        runCatching { faceEngine.close() }
+            .onFailure { android.util.Log.w("LibrasAnalyzer", "Falha ao fechar FaceMarkerEngine", it) }
     }
 }

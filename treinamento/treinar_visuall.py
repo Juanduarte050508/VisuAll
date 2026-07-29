@@ -564,18 +564,83 @@ def save_hand_dataset(
         print(f"Nenhuma amostra gerada para {npz_path.name}.")
         return
 
-    X = np.array([row[3] for row in rows], dtype=np.float32)
-    y = np.array([row[1] for row in rows])
+    X_new = np.array([row[3] for row in rows], dtype=np.float32)
+    y_new = np.array([row[1] for row in rows])
+    X_new, y_new, removed_new = filter_outlier_samples(X_new, y_new)
+    if removed_new:
+        print(f"Outliers ignorados na extracao atual de {npz_path.name}: {removed_new}")
+    if len(X_new) == 0:
+        print(f"Nenhuma amostra consistente gerada para {npz_path.name}.")
+        return
+
+    if npz_path.exists():
+        old = np.load(npz_path, allow_pickle=True)
+        X_old = old["X"].astype(np.float32)
+        y_old = np.array([str(v).upper() for v in old["y"]])
+        if X_old.ndim == 2 and X_old.shape[1] == features:
+            X = np.concatenate([X_old, X_new])
+            y = np.concatenate([y_old, y_new])
+        else:
+            print(f"Ignorando dataset antigo com shape inesperado: {npz_path} {X_old.shape}")
+            X, y = X_new, y_new
+    else:
+        X, y = X_new, y_new
+
+    X, y = deduplicate_samples(X, y)
+    X, y, removed_total = filter_outlier_samples(X, y)
+    if removed_total:
+        print(f"Outliers ignorados no dataset acumulado de {npz_path.name}: {removed_total}")
     np.savez(npz_path, X=X, y=y)
 
     with csv_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(["timestamp", "label", "source"] + [f"f{i}" for i in range(features)])
-        for timestamp, label, source, values in rows:
-            writer.writerow([timestamp, label, source] + values)
+        for index, (label, values) in enumerate(zip(y, X, strict=True)):
+            writer.writerow([index, label, "dataset_acumulado"] + values.astype(float).tolist())
 
-    print(f"Dataset salvo: {npz_path} ({len(rows)} amostras)")
+    print(f"Dataset atualizado: {npz_path} ({len(X)} amostras acumuladas)")
     print(f"CSV salvo: {csv_path}")
+
+
+def deduplicate_samples(X: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    keep: list[int] = []
+    seen: set[tuple[str, bytes]] = set()
+    rounded = np.round(X.astype(np.float32), decimals=6)
+    for index, label in enumerate(y):
+        key = (str(label), rounded[index].tobytes())
+        if key in seen:
+            continue
+        seen.add(key)
+        keep.append(index)
+    return X[keep], y[keep]
+
+
+def filter_outlier_samples(
+    X: np.ndarray,
+    y: np.ndarray,
+    min_samples: int = 8,
+    mad_multiplier: float = 6.0,
+) -> tuple[np.ndarray, np.ndarray, dict[str, int]]:
+    keep = np.ones(len(X), dtype=bool)
+    removed: dict[str, int] = {}
+    for label in sorted(set(str(v) for v in y)):
+        idx = np.where(y == label)[0]
+        if len(idx) < min_samples:
+            continue
+        values = X[idx].astype(np.float32)
+        center = np.median(values, axis=0)
+        distances = np.linalg.norm(values - center, axis=1)
+        median_distance = float(np.median(distances))
+        mad = float(np.median(np.abs(distances - median_distance)))
+        if mad <= 1e-8:
+            threshold = float(np.percentile(distances, 99))
+        else:
+            threshold = median_distance + mad_multiplier * mad
+        drop = idx[distances > threshold]
+        if len(drop):
+            keep[drop] = False
+            removed[label] = int(len(drop))
+    return X[keep], y[keep], removed
 
 
 def load_npz_dataset(path: Path, features: int, labels: list[str]) -> tuple[np.ndarray, np.ndarray]:
@@ -637,8 +702,17 @@ def save_partial_model(
 
 def save_individual_assets(name: str, trained_labels: list[str]) -> None:
     base_assets = STATIC_ASSETS if name == "static" else DYNAMIC_ASSETS
+    label_order = STATIC_LABELS if name == "static" else DYNAMIC_LABELS
     base_assets.mkdir(parents=True, exist_ok=True)
-    save_labels(base_assets / "individual_labels.txt", trained_labels)
+    existing_path = base_assets / "individual_labels.txt"
+    existing_labels = []
+    if existing_path.exists():
+        existing_labels = [
+            line.strip().upper()
+            for line in existing_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+    merged = [label for label in label_order if label in set(existing_labels) | set(trained_labels)]
     for label in trained_labels:
         safe = safe_label_name(label)
         source = INDIVIDUAL_MODELS_DIR / name / f"{safe}.onnx"
@@ -646,6 +720,7 @@ def save_individual_assets(name: str, trained_labels: list[str]) -> None:
             target_dir = base_assets / safe
             target_dir.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, target_dir / "model.onnx")
+    save_labels(existing_path, merged)
 
 
 def train_individual_mlp(name: str, features: int, labels: list[str], max_per_class: int) -> None:
@@ -685,13 +760,11 @@ def train_individual_mlp(name: str, features: int, labels: list[str], max_per_cl
     else:
         print(f"  usando {len(negativos)} exemplos de 'nao e sinal nenhum'.")
 
-    print(f"Treinando modelos individuais {name}...")
-    for label in labels:
+    labels_com_amostras = [label for label in labels if np.any(y_all == label)]
+    print(f"Treinando modelos individuais {name}: {labels_com_amostras}")
+    for label in labels_com_amostras:
         positivos = X_all[y_all == label]
         outras_letras = X_all[y_all != label]
-        if len(positivos) == 0:
-            print(f"  {label}: sem amostras, nao treinado.")
-            continue
         if len(outras_letras) == 0 and negativos is None:
             print(f"  {label}: precisa de exemplos de outras classes para negativo.")
             continue
@@ -1083,7 +1156,7 @@ def run_train(kinds: set[str]) -> None:
     if "dynamic" in kinds:
         print("Verificando treino dynamic...")
         if (DATA_DIR / "dataset_dynamic.npz").exists():
-            train_mlp("dynamic", 420, DYNAMIC_LABELS, max_per_class=500)
+            print("Treino dynamic geral/parcial preservado; atualizando apenas modelos individuais.")
             train_individual_mlp("dynamic", 420, DYNAMIC_LABELS, max_per_class=500)
         else:
             print("Pulando dynamic: dataset_dynamic.npz nao existe.")

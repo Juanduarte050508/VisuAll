@@ -11,9 +11,9 @@ import android.view.View
  * Desenha as linhas de reconhecimento (esqueleto da mão e do corpo) por cima
  * do preview da câmera. Recebe landmarks normalizados (0..1) no MESMO espaço
  * do preview (imagem já rotacionada e espelhada como a câmera frontal mostra),
- * então basta mapear com a mesma lógica FIT_CENTER que a PreviewView usa
- * (app:scaleType="fitCenter"): o conteúdo cabe inteiro dentro da View,
- * com barras nas sobras.
+ * então basta mapear com a mesma lógica FILL_CENTER que a PreviewView usa
+ * (app:scaleType="fillCenter"): a View fica cheia e o excesso do sensor é
+ * recortado nas sobras.
  *
  * A proporção do conteúdo NÃO é fixa — ela vem do analyzer a cada frame
  * (muda entre retrato e paisagem), então o desenho acompanha a imagem real.
@@ -86,9 +86,8 @@ class LandmarkOverlayView @JvmOverloads constructor(
         postInvalidate()
     }
 
-    // Mapeamento FIT_CENTER: encaixa o conteúdo INTEIRO dentro da View,
-    // centralizado, deixando barras na sobra — igual ao
-    // app:scaleType="fitCenter" da PreviewView.
+    // Mapeamento FILL_CENTER: cobre a View inteira, centralizado, recortando
+    // o excesso — igual ao app:scaleType="fillCenter" da PreviewView.
     private var dispW = 0f
     private var dispH = 0f
     private var offX = 0f
@@ -100,17 +99,17 @@ class LandmarkOverlayView @JvmOverloads constructor(
         if (vw <= 0f || vh <= 0f) return
         val viewAspect = vw / vh
         if (viewAspect > contentAspect) {
-            // View mais larga que o conteúdo: encaixa pela altura (barras nas laterais).
-            dispH = vh
-            dispW = vh * contentAspect
-            offY = 0f
-            offX = (vw - dispW) / 2f
-        } else {
-            // View mais estreita/alta: encaixa pela largura (barras em cima/baixo).
+            // View mais larga que o conteúdo: cobre pela largura e recorta em cima/baixo.
             dispW = vw
             dispH = vw / contentAspect
             offX = 0f
             offY = (vh - dispH) / 2f
+        } else {
+            // View mais estreita/alta: cobre pela altura e recorta nas laterais.
+            dispH = vh
+            dispW = vh * contentAspect
+            offY = 0f
+            offX = (vw - dispW) / 2f
         }
     }
 

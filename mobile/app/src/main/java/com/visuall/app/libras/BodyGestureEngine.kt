@@ -349,9 +349,15 @@ internal class BodyGestureEngine(private val context: Context) {
     }
 
     fun close() {
-        poseLandmarker?.close()
-        bodyInterpreter?.close()
-        flexDelegate?.close()
+        runCatching { poseLandmarker?.close() }
+            .onFailure { Log.w("BodyGestureEngine", "Falha ao fechar PoseLandmarker", it) }
+        runCatching { bodyInterpreter?.close() }
+            .onFailure { Log.w("BodyGestureEngine", "Falha ao fechar Interpreter", it) }
+        runCatching { flexDelegate?.close() }
+            .onFailure { Log.w("BodyGestureEngine", "Falha ao fechar FlexDelegate", it) }
+        poseLandmarker = null
+        bodyInterpreter = null
+        flexDelegate = null
     }
 
     private fun loadAssetBuffer(assetName: String): ByteBuffer {
