@@ -461,6 +461,9 @@ internal class LetraEngine(
     }
 
     fun close() {
+        // Antes das sessões: espera terminar de gravar as amostras de
+        // calibração, que agora vão pra disco em segundo plano.
+        trainingStore.close()
         modelosEstaticosIndividuais.forEach { it.session.close() }
         modelosDinamicosIndividuais.forEach { it.session.close() }
         sessionEstatico.close()

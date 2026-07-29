@@ -1,7 +1,10 @@
 package com.visuall.app.libras
 
 import android.content.Context
+import android.util.Log
 import java.io.File
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 
 class CalibrationTrainingStore(
@@ -13,6 +16,15 @@ class CalibrationTrainingStore(
         // Teto de linhas guardadas por arquivo — ver appendCapped().
         const val MAX_STATIC_SAMPLE_ROWS = 6_000
         const val MAX_DYNAMIC_SAMPLE_ROWS = 1_500
+    }
+
+    // Toda escrita em disco passa por aqui. Uma thread só (não um pool) de
+    // propósito: garante que as gravações acontecem em ordem e que nunca há
+    // duas mexendo no mesmo arquivo ao mesmo tempo — inclusive o clear(),
+    // que também é enfileirado, senão poderia apagar o arquivo no meio de uma
+    // gravação ainda pendente.
+    private val ioExecutor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "visuall-calibracao-io")
     }
 
     data class Match(val letter: String, val distance: Float)
@@ -88,8 +100,13 @@ class CalibrationTrainingStore(
         loaded = true
         calibrationPrefs.edit().clear().apply()
         trainingPrefs.edit().clear().apply()
-        runCatching { File(context.filesDir, LibrasAnalyzer.TRAINING_FILE_NAME).delete() }
-        runCatching { File(context.filesDir, LibrasAnalyzer.DYNAMIC_TRAINING_FILE_NAME).delete() }
+        // Vai pra MESMA fila das gravações: se apagasse aqui direto, uma
+        // gravação ainda pendente rodaria depois e recriaria o arquivo que o
+        // usuário acabou de mandar zerar.
+        ioExecutor.execute {
+            runCatching { File(context.filesDir, LibrasAnalyzer.TRAINING_FILE_NAME).delete() }
+            runCatching { File(context.filesDir, LibrasAnalyzer.DYNAMIC_TRAINING_FILE_NAME).delete() }
+        }
     }
 
     fun saveStaticSamples(letter: String, frames: List<FloatArray>) {
@@ -138,21 +155,93 @@ class CalibrationTrainingStore(
         for (i in 0 until LibrasAnalyzer.FEATURES_DINAMICO) append(",f$i")
     }
 
-    // Cada calibração acrescenta linhas, sem limite, para sempre — em uso
-    // contínuo o CSV cresceria indefinidamente (linhas dinâmicas têm 420
-    // valores cada). Em vez de só anexar, mantemos as MAX_*_SAMPLE_ROWS
-    // linhas mais recentes: reescreve o arquivo com (dados antigos + novos)
-    // cortado às últimas N linhas. É mais I/O que um append puro, mas
-    // calibração é uma ação manual e rara do usuário, não por frame.
+    // Cada calibração acrescenta linhas, e sem teto o CSV cresceria pra
+    // sempre (uma linha dinâmica tem 420 números). Guardamos as
+    // MAX_*_SAMPLE_ROWS mais recentes.
+    //
+    // Duas coisas importam aqui, e as duas já causaram problema:
+    //
+    // 1. Roda FORA da thread da tela. Isto é chamado pelo botão de salvar
+    //    calibração; fazendo o I/O ali, o app congelava a cada amostra salva
+    //    — e piorava conforme o arquivo enchia, dando a impressão de que "foi
+    //    ficando lento". Quem grava dezenas de amostras seguidas sente isso o
+    //    tempo todo.
+    // 2. ANEXA em vez de reescrever tudo. A versão anterior lia e regravava o
+    //    arquivo inteiro a cada salvamento (~5 MB no caso dinâmico cheio) só
+    //    pra cortar as linhas velhas. Agora o custo normal é o das linhas
+    //    novas, e a poda só acontece quando o arquivo realmente passa do
+    //    teto.
+    //
+    // A contagem de linhas fica guardada nas prefs pra não precisar ler o
+    // arquivo só pra saber o tamanho; se sumir (instalação antiga), é
+    // recalculada uma vez.
     private fun appendCapped(file: File, header: String, newLines: List<String>, maxRows: Int) {
         if (newLines.isEmpty()) return
-        val existing = if (file.exists() && file.length() > 0L) file.readLines().drop(1) else emptyList()
-        val kept = (existing + newLines).takeLast(maxRows)
-        val text = buildString {
-            appendLine(header)
-            kept.forEach { appendLine(it) }
+        ioExecutor.execute {
+            runCatching {
+                val existiaAntes = file.exists() && file.length() > 0L
+                if (!existiaAntes) {
+                    file.writeText(buildString {
+                        appendLine(header)
+                        newLines.forEach { appendLine(it) }
+                    })
+                    guardarContagem(file, newLines.size)
+                    return@runCatching
+                }
+
+                file.appendText(buildString { newLines.forEach { appendLine(it) } })
+                val total = contagemDeLinhas(file) + newLines.size
+                if (total <= maxRows) {
+                    guardarContagem(file, total)
+                } else {
+                    podar(file, header, maxRows)
+                }
+            }.onFailure { erro ->
+                // Falha aqui não pode derrubar o app: a pessoa está no meio de
+                // uma sessão de gravação e perder uma amostra é melhor que
+                // perder a sessão. Mas precisa aparecer no log, senão vira
+                // "gravei 50 amostras e o treino não achou nada".
+                Log.e("CalibrationStore", "Falha ao gravar amostras em ${file.name}", erro)
+            }
         }
-        runCatching { file.writeText(text) }
+    }
+
+    // Reescreve o arquivo mantendo só as últimas maxRows linhas. Custa uma
+    // leitura completa, mas só acontece quando o teto é ultrapassado.
+    private fun podar(file: File, header: String, maxRows: Int) {
+        val mantidas = file.readLines().drop(1).takeLast(maxRows)
+        file.writeText(buildString {
+            appendLine(header)
+            mantidas.forEach { appendLine(it) }
+        })
+        guardarContagem(file, mantidas.size)
+    }
+
+    private fun chaveContagem(file: File): String = "rows_${file.name}"
+
+    private fun contagemDeLinhas(file: File): Int {
+        val guardada = trainingPrefs.getInt(chaveContagem(file), -1)
+        if (guardada >= 0) return guardada
+        // Sem contagem guardada (arquivo de uma versão anterior): conta uma
+        // vez e memoriza.
+        val contadas = if (file.exists()) (file.readLines().size - 1).coerceAtLeast(0) else 0
+        guardarContagem(file, contadas)
+        return contadas
+    }
+
+    private fun guardarContagem(file: File, linhas: Int) {
+        trainingPrefs.edit().putInt(chaveContagem(file), linhas).apply()
+    }
+
+    // Espera as gravações pendentes terminarem. Chamado quando o
+    // reconhecimento é encerrado, pra não perder a última amostra salva.
+    fun close() {
+        ioExecutor.shutdown()
+        runCatching {
+            if (!ioExecutor.awaitTermination(3, TimeUnit.SECONDS)) {
+                Log.w("CalibrationStore", "Gravacoes pendentes nao terminaram a tempo")
+            }
+        }
     }
 
     private fun calibrationKey(letter: String): String = "letter_${letter.uppercase()}"

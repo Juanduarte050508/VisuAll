@@ -13,6 +13,32 @@ Formato: **Constante(s)** — valor atual — decisão e por quê — status.
 
 ## Não lançado
 
+- **Salvar calibração deixa de travar a tela** — o botão de salvar amostra
+  lia e regravava o CSV de treino inteiro (até ~5 MB no caso dinâmico
+  cheio) na thread da interface. O app congelava a cada amostra salva, e
+  piorava conforme o arquivo enchia — parecia que "foi ficando lento".
+  Numa sessão de gravação são dezenas de salvamentos seguidos, então isso
+  aparecia o tempo todo. Agora a escrita vai pra uma thread própria (uma
+  só, pra as gravações não se atropelarem, e o `clear()` entra na mesma
+  fila pra não apagar em cima de uma gravação pendente) e o arquivo é
+  ANEXADO em vez de regravado: a poda das linhas antigas só acontece
+  quando o teto é de fato ultrapassado, com a contagem guardada em prefs
+  pra não precisar ler o arquivo só pra saber o tamanho.
+
+- **`LetterCommitGate`: a regra que aceita uma letra virou testável** — os
+  quatro portões (estabilidade mínima, letra válida, não repetir a última,
+  cooldown) viviam soltos no meio do processamento de câmera do
+  `LibrasAnalyzer`, onde só dava pra verificar com celular, câmera e modelo
+  na mão. É justamente a regra mais ajustada por tentativa e erro neste
+  arquivo. Extraída sem mudança de comportamento, agora com 11 testes que
+  fixam o que se espera dela em vez de só os números: "um quadro isolado
+  nunca vira letra", "mão parada não digita AAAA", "trocar de letra
+  reinicia a contagem", "dinâmica estabiliza mais rápido que estática",
+  "`dinamico_individual`/`dinamico_parcial` contam como dinâmica". Os
+  testes leem as constantes reais, então mexer nos limiares os mantém
+  válidos. Verificados injetando dois bugs de propósito (remover a trava de
+  repetição e trocar o prefixo por igualdade exata) — os dois foram pegos.
+
 - **Contrato travado entre a matemática do treino e a do app** — a mesma
   conta (normalização de mão, de corpo e reamostragem de janela) existia
   escrita duas vezes, em Python e em Kotlin, sem nada garantindo que

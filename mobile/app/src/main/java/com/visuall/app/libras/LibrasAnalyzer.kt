@@ -255,13 +255,9 @@ class LibrasAnalyzer(
         }
     }
 
-    private var ultimaPredicao        = ""
-    // Timestamp de quando ultimaPredicao começou a se repetir (0L = ainda
-    // não estabilizou). Em tempo, não em contagem de frames — ver
-    // ESTAB_MIN_*_MS.
-    private var estabilidadeDesde     = 0L
-    private var ultimaLetraAdicionada = ""
-    private var ultimoTempoAdicao     = 0L
+    // Os portões de estabilidade/cooldown que decidem se uma letra entra na
+    // frase — ver LetterCommitGate.
+    private val commitGate            = LetterCommitGate()
     private var tempoInicioEsticado   = 0L
     private var ultimoTempoLimpar     = 0L
     private var frase                 = ""
@@ -281,10 +277,8 @@ class LibrasAnalyzer(
     // juntos sempre que a mão some do quadro ou o modo troca — extraído para
     // não depender de lembrar a mesma lista de resets em cada lugar.
     private fun resetEstadoAlfabeto() {
-        ultimaPredicao = ""
-        estabilidadeDesde = 0L
+        commitGate.reset()
         letraRepetidaPendente = ""
-        ultimaLetraAdicionada = ""
         letraEngine.resetMovimentoSustentado()
         // Sem isso, tirar a mão do quadro e voltar a fazer O MESMO sinal (ex.:
         // "A" a 87%) seria filtrado pelo dedup de notificarLetra por parecer
@@ -386,7 +380,7 @@ class LibrasAnalyzer(
 
             if ((agora - tempoInicioEsticado) >= TEMPO_PRA_LIMPAR
                 && (agora - ultimoTempoLimpar) > 2_000L) {
-                frase = ""; ultimaLetraAdicionada = ""; letraRepetidaPendente = ""
+                frase = ""; commitGate.liberarRepeticao(); letraRepetidaPendente = ""
                 tempoInicioEsticado = 0L; ultimoTempoLimpar = agora
                 onRepeticaoPendente(null)
                 onFraseUpdate("")
@@ -403,24 +397,7 @@ class LibrasAnalyzer(
             notificarLetra(letra, confianca, modo)
 
             val agora = System.currentTimeMillis()
-            if (letra != "-") {
-                if (letra != ultimaPredicao) estabilidadeDesde = agora
-                else if (estabilidadeDesde == 0L) estabilidadeDesde = agora
-                ultimaPredicao = letra
-            } else {
-                estabilidadeDesde = 0L
-                ultimaPredicao = ""
-            }
-
-            val dinamico = modo.startsWith("dinamico")
-            val estabMinMs = if (dinamico) ESTAB_MIN_DINAMICO_MS else ESTAB_MIN_ESTATICO_MS
-            val cooldown   = if (dinamico) COOLDOWN_DINAMICO    else COOLDOWN_ESTATICO
-            val estabilidadeOk = estabilidadeDesde != 0L && (agora - estabilidadeDesde) >= estabMinMs
-
-            if (estabilidadeOk
-                && letra != "-"
-                && letra != ultimaLetraAdicionada
-                && (agora - ultimoTempoAdicao) > cooldown) {
+            if (commitGate.avaliar(letra, modo, agora)) {
                 if (frase.lastOrNull()?.toString() == letra) {
                     if (podeRepetirAutomaticamente(letra)) {
                         frase += letra
@@ -437,9 +414,7 @@ class LibrasAnalyzer(
                     onRepeticaoPendente(null)
                     onFraseUpdate(frase)
                 }
-                ultimaLetraAdicionada = letra
-                ultimoTempoAdicao     = agora
-                estabilidadeDesde     = 0L
+                commitGate.registrarComite(letra, agora)
             }
 
             // NÃO limpamos ultimaLetraAdicionada por tempo: fazer isso digitava
@@ -604,9 +579,7 @@ class LibrasAnalyzer(
             "$prefixo $sugestao "
         }
 
-        ultimaPredicao = ""
-        estabilidadeDesde = 0L
-        ultimaLetraAdicionada = ""
+        commitGate.reset()
         letraRepetidaPendente = ""
         onRepeticaoPendente(null)
         onFraseUpdate(frase)
@@ -617,7 +590,7 @@ class LibrasAnalyzer(
         if (letraRepetidaPendente.isNotBlank()) {
             frase += letraRepetidaPendente
             letraRepetidaPendente = ""
-            ultimaLetraAdicionada = ""
+            commitGate.liberarRepeticao()
             onRepeticaoPendente(null)
             onFraseUpdate(frase)
         }
@@ -632,12 +605,12 @@ class LibrasAnalyzer(
         }
         if (frase.isNotEmpty()) {
             frase = frase.dropLast(1)
-            letraRepetidaPendente = ""; ultimaLetraAdicionada = ""
+            letraRepetidaPendente = ""; commitGate.liberarRepeticao()
             onRepeticaoPendente(null); onFraseUpdate(frase)
         }
     }
     fun limparFrase() {
-        frase = ""; letraRepetidaPendente = ""; ultimaLetraAdicionada = ""
+        frase = ""; letraRepetidaPendente = ""; commitGate.liberarRepeticao()
         bodyEngine.limparTokens()
         onRepeticaoPendente(null); onFraseUpdate(frase)
     }
