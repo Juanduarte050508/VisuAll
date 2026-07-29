@@ -19,9 +19,17 @@ gerar modelos novos a partir delas.
 
 Na primeira vez que você roda qualquer um dos três `.bat`, ele instala
 sozinho um Python isolado (dentro de `treinamento\.venv`, não mexe no resto
-do seu PC) com tudo que precisa. Só exige ter **Python 3.10 ou mais novo**
-instalado e marcado "Add python.exe to PATH" na instalação
-(https://python.org/downloads/). Da segunda vez em diante abre na hora.
+do seu PC) com tudo que precisa. Da segunda vez em diante abre na hora.
+
+> **Antes de tudo: precisa de Python 3.10 ou mais novo.** Baixe em
+> https://python.org/downloads/ (a 3.11 é a testada aqui) e marque
+> **"Add python.exe to PATH"** na instalação. Se você já tem uma versão mais
+> antiga, não precisa desinstalar — instalar a nova ao lado resolve.
+>
+> O 3.9 **não serve**: as bibliotecas de visão (mediapipe) e de treino
+> (tensorflow) até instalam nele, mas quebram na hora de usar com um erro que
+> não explica nada. Os `.bat` checam sua versão e avisam antes de gastar
+> vários minutos baixando um ambiente que não ia funcionar.
 
 ## Passo 1 — Gravar amostras (`Capturar.bat`)
 

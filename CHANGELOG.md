@@ -13,6 +13,38 @@ Formato: **Constante(s)** — valor atual — decisão e por quê — status.
 
 ## Não lançado
 
+- **CI do Android voltou a rodar (nunca tinha rodado)** —
+  `mobile/gradle.properties`, que é versionado, tinha
+  `org.gradle.java.home=C:\Program Files\Android\Android Studio\jbr`: um
+  caminho absoluto de uma máquina específica. O runner é Linux, então o
+  Gradle abortava na primeira chamada ("Java home supplied is invalid").
+  A linha está lá desde a criação do arquivo, ou seja, o workflow do Android
+  **nunca passou** e ninguém tinha notado. Removida (com comentário
+  explicando por que não voltar a pôr): o Android Studio usa o JDK das
+  próprias configurações e a linha de comando usa `JAVA_HOME` — que é
+  obrigatório de todo jeito, porque o `gradlew` precisa de Java pra iniciar
+  antes de conseguir ler esse arquivo.
+
+- **`requirements.txt` reescrito depois de testar instalação limpa** — a
+  correção anterior (fixar `protobuf<4`) estava errada: ela foi deduzida da
+  versão antiga de mediapipe instalada nesta máquina. Instalando do zero num
+  venv limpo, o conjunto declarado resolvia pra mediapipe 1.0.0 + protobuf 6
+  e **não funcionava**. Investigando as versões de verdade apareceu um
+  conflito de três pontas: mediapipe 0.10.14-21 exige `protobuf<5`,
+  tensorflow 2.20 exige `protobuf>=5.28`, e onnx 1.19 (puxado por skl2onnx
+  recente) exige `protobuf>=5`. Agora os tetos são nas bibliotecas, não no
+  protobuf (que é consequência), e a combinação foi verificada resolvendo
+  sem conflito: mediapipe 0.10.21 + protobuf 4.25.9 + tensorflow 2.19.1 +
+  onnx 1.16.2.
+
+- **Aviso claro quando o Python é antigo demais** — descoberto no mesmo
+  teste: mediapipe 0.10.13+ e tensorflow 2.16+ instalam em Python 3.9
+  (existe wheel cp39) mas quebram no import com `TypeError: unhashable
+  type: 'list'`, um erro que não diz nada sobre a causa. O projeto sempre
+  documentou 3.10+, mas nada verificava — quem tivesse 3.9 esperava vários
+  minutos de download pra receber esse erro no fim. `_ambiente.bat` agora
+  checa a versão antes de montar o ambiente e explica o que fazer.
+
 - **Salvar calibração deixa de travar a tela** — o botão de salvar amostra
   lia e regravava o CSV de treino inteiro (até ~5 MB no caso dinâmico
   cheio) na thread da interface. O app congelava a cada amostra salva, e

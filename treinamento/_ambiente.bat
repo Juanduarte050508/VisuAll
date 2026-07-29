@@ -20,6 +20,28 @@ if errorlevel 1 (
     exit /b 1
 )
 
+REM Confere a VERSAO, nao so a existencia. O mediapipe e o tensorflow que este
+REM projeto usa instalam em Python 3.9 (existe wheel) mas quebram no import
+REM com "TypeError: unhashable type: 'list'" -- um erro que nao diz nada sobre
+REM a causa. Sem esta checagem, quem tiver 3.9 monta o ambiente inteiro (varios
+REM minutos de download) e so descobre o problema no fim, sem pista do motivo.
+python -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>nul
+if errorlevel 1 (
+    REM Sem variavel: !VAR! dependeria de o chamador ter ligado a expansao
+    REM atrasada, e o %VAR% seria expandido antes do for rodar.
+    python -c "import sys; print('[ERRO] Seu Python e a versao ' + sys.version.split()[0] + ', e este projeto precisa de 3.10 ou mais novo.')"
+    echo.
+    echo   O motivo: as bibliotecas de visao ^(mediapipe^) e de treino
+    echo   ^(tensorflow^) usadas aqui nao funcionam mais em 3.9 -- elas
+    echo   instalam, mas quebram na hora de usar.
+    echo.
+    echo   O que fazer: instale o Python 3.11 em https://python.org/downloads/
+    echo   e marque "Add python.exe to PATH" durante a instalacao. Nao precisa
+    echo   desinstalar o 3.9. Depois apague a pasta treinamento\.venv, se ela
+    echo   existir, e rode este arquivo de novo.
+    exit /b 1
+)
+
 if not exist "%VENV%\Scripts\python.exe" (
     echo Preparando o ambiente pela primeira vez, so vai demorar agora...
     python -m venv "%VENV%"
