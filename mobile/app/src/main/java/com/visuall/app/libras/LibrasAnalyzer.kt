@@ -337,7 +337,16 @@ class LibrasAnalyzer(
             val poseDetector = bodyEngine.ensureLoaded()
             if (poseDetector == null) {
                 notificarLetra("-", 0f, "corpo")
-                notificarFeedback("MODELO DE CORPO INDISPONIVEL", FEEDBACK_ALERTA)
+                // Inclui o motivo em vez de só "indisponível": depois de um
+                // retreino, saber se o arquivo sumiu ou se saiu no formato
+                // errado é a diferença entre corrigir em um minuto e ficar
+                // procurando problema na frente da câmera.
+                val motivo = bodyEngine.motivoFalha
+                notificarFeedback(
+                    if (motivo.isNullOrBlank()) "MODELO DE CORPO INDISPONIVEL"
+                    else "MODELO DE CORPO INDISPONIVEL: $motivo",
+                    FEEDBACK_ALERTA
+                )
                 return
             }
             val poseResult = poseDetector.detectForVideo(mpImage, timestamp)
@@ -577,6 +586,12 @@ class LibrasAnalyzer(
     fun getTrainingDatasetPath(): String = letraEngine.getTrainingDatasetPath()
     fun getDynamicTrainingDatasetPath(): String = letraEngine.getDynamicTrainingDatasetPath()
     fun clearTrainingData() = letraEngine.clearTrainingData()
+
+    // Vêm dos labels.txt que acompanham os modelos — ver comentário em
+    // LetraEngine. A UI de calibração usa estes em vez de uma lista própria,
+    // pra não haver duas versões do alfabeto podendo divergir.
+    fun labelsAlfabeto(): List<String> = letraEngine.labelsAlfabeto
+    fun labelsDinamicas(): Set<String> = letraEngine.labelsDinamicasSet
 
     fun aplicarSugestao(palavra: String) {
         val sugestao = palavra.trim()

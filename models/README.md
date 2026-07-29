@@ -1,19 +1,27 @@
 # Modelos pre-treinados
 
-Esta pasta contem os modelos prontos para inferencia do backend Python. Os
-mesmos scripts de treino tambem exportam os modelos usados pelo app Android em
-`mobile/app/src/main/assets/`.
+Esta pasta guarda os modelos em formato Python (`.pkl`), gerados como
+subproduto do treino. **Eles nao vao mais para o Git** (ver `.gitignore`):
+sao arquivos pesados que o app nao usa e cujo conteudo ja esta duplicado nos
+`.onnx`/`.tflite` que vao para `mobile/app/src/main/assets/`. Antes eram
+versionados a forca, e cada retreino guardava uma copia nova no historico
+para sempre — o repositorio so crescia.
 
-| Arquivo | Tamanho | Descrição |
+Se voce clonou o repositorio e esta pasta esta vazia, esta tudo certo: rode
+o treino (`treinamento/Treinar.bat`) e os `.pkl` reaparecem localmente. O que
+o app precisa para funcionar esta em `assets/`, e esses sim sao versionados.
+
+| Arquivo (local, nao versionado) | Tamanho | Descricao |
 |---|---|---|
-| `static_model.pkl` | ~570KB | MLP para letras estáticas (A, B, C, D, E, F, G, I, L, M, N, O, P, Q, R, S, T, U, V, W, Y) |
-| `static_classes.pkl` | <1KB | Mapeamento `idx → letra` do modelo estático |
-| `dynamic_model.pkl` | ~1.7MB | MLP para letras dinâmicas / com movimento (H, J, K, X, Z) |
-| `dynamic_classes.pkl` | <1KB | Mapeamento `idx → letra` do modelo dinâmico |
+| `static_model.pkl` | ~570KB | MLP para letras estaticas (A, B, C, D, E, F, G, I, L, M, N, O, P, Q, R, S, T, U, V, W, Y) |
+| `static_classes.pkl` | <1KB | Mapeamento `idx → letra` do modelo estatico |
+| `dynamic_model.pkl` | ~1.7MB | MLP para letras dinamicas / com movimento (H, J, K, X, Z) |
+| `dynamic_classes.pkl` | <1KB | Mapeamento `idx → letra` do modelo dinamico |
 
-Para retreinar do zero, veja `linear/backend/training/`.
+Para treinar ou retreinar, veja `treinamento/README.md`.
 
-Saidas Android geradas pelos treinos:
+Saidas Android geradas pelos treinos (estas sim versionadas, o app carrega
+direto):
 
 | Arquivo | Descricao |
 |---|---|
@@ -21,6 +29,8 @@ Saidas Android geradas pelos treinos:
 | `mobile/app/src/main/assets/letras_estaticas/geral/labels.txt` | Labels estaticos na mesma ordem da saida do ONNX |
 | `mobile/app/src/main/assets/letras_dinamicas/geral/model.onnx` | Modelo dinamico com entrada `landmarks_input`, shape `[1, 420]` |
 | `mobile/app/src/main/assets/letras_dinamicas/geral/labels.txt` | Labels dinamicos na mesma ordem da saida do ONNX |
+| `mobile/app/src/main/assets/gestos/geral/model.tflite` | Modelo de gestos corporais, entrada `[1, 30, 225]` |
+| `mobile/app/src/main/assets/gestos/geral/labels.txt` | Labels de gestos na mesma ordem da saida do TFLite |
 
 Modelos parciais e individuais do Android ficam em:
 
@@ -28,5 +38,9 @@ Modelos parciais e individuais do Android ficam em:
 - `mobile/app/src/main/assets/letras_dinamicas/<LETRA>/`
 - `mobile/app/src/main/assets/letras_estaticas/<LETRA>/`
 
-> **Nota:** modelos legados ou versões antigas devem ir para uma subpasta `legacy/` (presente no `.gitignore`).
+O treino verifica sozinho cada modelo exportado (nome e formato da entrada)
+antes de considerar o export valido — ver `verificar_modelo_exportado` em
+`treinamento/treinar_visuall.py`.
 
+> **Nota:** modelos legados ou versoes antigas devem ir para uma subpasta
+> `legacy/` (presente no `.gitignore`).

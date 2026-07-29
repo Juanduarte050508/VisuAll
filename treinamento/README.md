@@ -148,22 +148,43 @@ webcam (Zoom, Teams, outro Capturar.bat aberto) e tente de novo.
 **Quero forçar reinstalar as dependências Python.** Apague a pasta
 `treinamento\.venv` e rode qualquer um dos `.bat` de novo.
 
-## Estado atual (o que já existia vs. o que é novo)
+## Como os arquivos daqui se organizam
 
-- **Letras paradas e letras com movimento**: já existia um pipeline de
-  extração e treino "geral" fora desta pasta
-  (`linear/backend/data_extraction/extract_from_{images,videos}.py`,
-  `linear/backend/training/train_{static,dynamic}_model.py}`) — continua
-  existindo e funcionando, é o que `letras_*\geral\` usa por baixo.
-  `Capturar.bat` dá um jeito fácil de gerar dados novos pra ele, e
-  `treinar_visuall.py` (motor por trás de `Treinar.bat` e
-  `abrir_treinamento.bat`) acrescenta os modelos parciais/individuais por
-  cima.
-- **Gestos corporais**: não existia NENHUM treino publicado neste
-  repositório antes — o `model.tflite` atual (`gestos/geral/`) veio de um
-  pipeline externo (ver comentário em `linear/backend/app.py`). O suporte a
-  treinar gestos corporais aqui (extração de 225 features por quadro —
-  pose+mãos, normalização por ombros — e o modelo LSTM) é novo, escrito pra
-  bater exatamente com o que `BodyGestureEngine.kt` espera. **Ainda não
-  validado com dados reais** — é o ponto de partida pra gravarem e
-  testarem.
+Todo o código de treino mora nesta pasta. Antes ficava dividido entre aqui e
+`linear/backend/`, com duas implementações do mesmo treino — a de lá foi
+removida por estar duplicada e sem uso.
+
+| Arquivo | O que é |
+|---|---|
+| `capturar.py` | A janela de gravação (por trás do `Capturar.bat`). |
+| `treinar_visuall.py` | O motor: importa mídia, extrai landmarks, treina e exporta. Usado pelos dois launchers. |
+| `interface_treinamento.py` | A janela do `abrir_treinamento.bat`, que é uma casca em cima do motor. |
+| `training_common.py` | Listas de letras, balanceamento e export ONNX, compartilhados. |
+| `tests/` | Testes automáticos do motor — rodam sozinhos no CI a cada envio. |
+
+## Proteções automáticas (para você não descobrir problema tarde demais)
+
+- **Modelo exportado é conferido na hora.** Depois de cada treino, o próprio
+  programa abre o modelo gerado e verifica se ele tem o nome e o formato de
+  entrada que o app espera. Se estiver errado, ele avisa ali — em vez de você
+  descobrir só depois de instalar o app e ficar sem reconhecimento nenhum.
+- **A matemática do treino e a do app são travadas juntas.** Existem cópias
+  da mesma conta nos dois lados (Python e Kotlin), e elas precisam bater
+  exatamente. `tests/fixtures/landmark_contract.json` congela os números e
+  dois testes (um de cada lado) falham se alguém mexer em um só. Isso já
+  pegou uma divergência real: em pose ruim, o treino gerava valores 1000×
+  maiores que o app jamais produziria.
+- **Falha de carregamento aparece.** Se um modelo não abrir no celular, o app
+  agora diz o motivo na tela em vez de simplesmente parar de reconhecer.
+
+## Estado atual
+
+- **Letras (paradas e com movimento)**: pipeline funcionando; o que falta é
+  volume de dados, principalmente H, K, X e Z.
+- **Gestos corporais**: não existia NENHUM treino publicado neste repositório
+  antes — o `model.tflite` atual (`gestos/geral/`) veio de um pipeline
+  externo (ver comentário em `linear/backend/app.py`). O suporte a treinar
+  aqui (extração de 225 features por quadro — pose+mãos, normalização por
+  ombros — e o modelo LSTM) é novo, escrito pra bater exatamente com o que
+  `BodyGestureEngine.kt` espera. **Ainda não validado com dados reais** — é o
+  ponto de partida pra gravarem e testarem.

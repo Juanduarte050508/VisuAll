@@ -55,6 +55,17 @@ android {
     }
 }
 
+// O LandmarkContractTest le tests/fixtures/landmark_contract.json (fora do
+// modulo, compartilhado com os testes Python). Sem declarar isso como entrada,
+// o Gradle considera o teste "atualizado" quando so as fixtures mudam e nao
+// roda de novo -- ou seja, o contrato poderia sair de sincronia sem ninguem
+// perceber, que e exatamente o que esse teste existe pra evitar.
+tasks.withType(Test).configureEach {
+    inputs.file(rootProject.file('../tests/fixtures/landmark_contract.json'))
+        .withPropertyName('landmarkContractFixtures')
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+}
+
 dependencies {
     implementation 'androidx.core:core-ktx:1.12.0'
     implementation 'androidx.appcompat:appcompat:1.6.1'
@@ -80,6 +91,11 @@ dependencies {
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
 
     testImplementation 'junit:junit:4.13.2'
+    // O org.json que vem no android.jar e so um esqueleto: em teste JVM todo
+    // metodo lanca "Stub!". Esta dependencia poe a implementacao de verdade no
+    // classpath de teste (so de teste), pro LandmarkContractTest conseguir ler
+    // o arquivo de fixtures compartilhado com o Python.
+    testImplementation 'org.json:json:20231013'
 }
 
 

@@ -45,7 +45,7 @@ jobs:
           pip install -r requirements.txt
 
       - name: Check every Python file still parses
-        run: python -m compileall -q treinamento linear modular
+        run: python -m compileall -q treinamento linear modular tests
 
       # O conflito real que motivou os pinos no requirements.txt: com
       # protobuf>=4 o mediapipe importa mas estoura ao criar qualquer
@@ -84,3 +84,15 @@ jobs:
 
       - name: Run training pipeline tests
         run: python -m unittest discover -s treinamento/tests -v
+
+      # As fixtures sao geradas a partir do lado Python, entao regerar aqui e
+      # comparar prova que ninguem mexeu na matematica do treino sem atualizar
+      # o contrato. Se der diferenca, o lado Kotlin provavelmente ficou pra
+      # tras -- e e exatamente isso que nao pode passar batido.
+      - name: Contract fixtures are up to date
+        run: |
+          python tests/gerar_fixtures_contrato.py
+          git diff --exit-code tests/fixtures/landmark_contract.json \
+            || (echo "As fixtures do contrato estao desatualizadas: a matematica do" \
+                     "treino mudou sem o contrato ser regerado (e sem o Kotlin acompanhar)." \
+                && exit 1)

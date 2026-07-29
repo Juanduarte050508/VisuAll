@@ -4,6 +4,7 @@ import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import android.content.Context
+import android.util.Log
 import java.nio.FloatBuffer
 
 // Reconhecimento de letra do alfabeto (MLP estático + dinâmico) e calibração
@@ -21,18 +22,35 @@ internal class LetraEngine(
     private val sessionDinamico = ortEnv.createSession(
         context.assets.open("letras_dinamicas/geral/model.onnx").readBytes()
     )
+    // O modelo parcial é OPCIONAL (só existe se alguém treinou com parte das
+    // letras), então ausência não é erro. Mas se ele EXISTE e mesmo assim não
+    // abre, isso é problema de verdade e precisa aparecer no log — antes
+    // sumia sem deixar rastro, e o sintoma era só "continua errando as
+    // letras que eu acabei de treinar".
     private val sessionDinamicoParcial: OrtSession? =
-        runCatching {
-            ortEnv.createSession(context.assets.open("letras_dinamicas/parcial/model.onnx").readBytes())
-        }.getOrNull()
+        carregarOpcional(context, "letras_dinamicas/parcial/model.onnx") { bytes ->
+            ortEnv.createSession(bytes)
+        }
+    // Estes labels.txt são a ÚNICA fonte da verdade sobre quais letras
+    // existem: a ordem deles é o que traduz "saída número 3" na letra certa,
+    // e eles são regravados junto do modelo a cada treino. Qualquer outra
+    // lista de letras no app tem que sair daqui (ver labelsAlfabeto), senão
+    // uma some/entra no treino e a tela continua mostrando a lista velha.
     private val labelsEstatico  = context.assets.open("letras_estaticas/geral/labels.txt")
         .bufferedReader().readLines().filter { it.isNotBlank() }
     private val labelsDinamico  = context.assets.open("letras_dinamicas/geral/labels.txt")
         .bufferedReader().readLines().filter { it.isNotBlank() }
-    private val labelsDinamicoParcial = runCatching {
-        context.assets.open("letras_dinamicas/parcial/labels.txt")
-            .bufferedReader().readLines().filter { it.isNotBlank() }
-    }.getOrDefault(emptyList())
+
+    // Alfabeto completo (estáticas + dinâmicas), em ordem alfabética, pra UI
+    // de calibração percorrer.
+    val labelsAlfabeto: List<String> = (labelsEstatico + labelsDinamico).distinct().sorted()
+    // Quais delas exigem movimento — usado pra instrução na tela ("segure" vs
+    // "faça o movimento").
+    val labelsDinamicasSet: Set<String> = labelsDinamico.toSet()
+    private val labelsDinamicoParcial =
+        carregarOpcional(context, "letras_dinamicas/parcial/labels.txt") { bytes ->
+            bytes.decodeToString().lines().filter { it.isNotBlank() }
+        } ?: emptyList()
     private val modelosEstaticosIndividuais = carregarModelosIndividuais(
         context, labelsEstatico, "letras_estaticas"
     )
@@ -70,16 +88,41 @@ internal class LetraEngine(
         labels: List<String>,
         basePath: String
     ): List<ModeloIndividual> {
-        return labels.mapNotNull { label ->
+        val carregados = labels.mapNotNull { label ->
             val safe = label.uppercase().filter { it.isLetterOrDigit() || it == '_' || it == '-' }
-            runCatching {
-                ModeloIndividual(
-                    label = label,
-                    session = ortEnv.createSession(
-                        context.assets.open("$basePath/$safe/model.onnx").readBytes()
-                    )
-                )
-            }.getOrNull()
+            carregarOpcional(context, "$basePath/$safe/model.onnx") { bytes ->
+                ModeloIndividual(label = label, session = ortEnv.createSession(bytes))
+            }
+        }
+        Log.i("LetraEngine", "Modelos individuais em $basePath: " +
+            if (carregados.isEmpty()) "nenhum" else carregados.joinToString { it.label })
+        return carregados
+    }
+
+    // Carrega um asset que pode legitimamente não existir. A diferença que
+    // importa: NÃO existir é normal e silencioso; existir e falhar ao abrir é
+    // erro e vai pro log. Antes os dois casos eram engolidos igualmente, então
+    // um modelo corrompido ou em formato errado ficava indistinguível de um
+    // modelo que nunca foi treinado.
+    private fun <T> carregarOpcional(
+        context: Context,
+        asset: String,
+        build: (ByteArray) -> T
+    ): T? {
+        val bytes = try {
+            context.assets.open(asset).use { entrada -> entrada.readBytes() }
+        } catch (_: java.io.FileNotFoundException) {
+            return null
+        } catch (error: Throwable) {
+            Log.w("LetraEngine", "Não consegui ler o asset $asset", error)
+            return null
+        }
+        return try {
+            build(bytes)
+        } catch (error: Throwable) {
+            Log.e("LetraEngine", "Asset $asset existe mas não pôde ser carregado " +
+                "(modelo corrompido ou em formato incompatível?)", error)
+            null
         }
     }
 

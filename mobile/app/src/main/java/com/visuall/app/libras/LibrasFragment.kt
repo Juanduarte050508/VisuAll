@@ -63,6 +63,14 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         val TINT_CONFIANCA_MEDIA = ColorStateList.valueOf(0xFFE8A020.toInt())
         val TINT_CONFIANCA_BAIXA = ColorStateList.valueOf(0xFF8E6A26.toInt())
         val TINT_CONFIANCA_FUNDO = ColorStateList.valueOf(0x33242424)
+
+        // Usados só até o analyzer carregar e informar os labels reais dos
+        // modelos. NÃO são a fonte da verdade — os labels.txt em assets são.
+        val ALFABETO_PADRAO = listOf(
+            "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
+            "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"
+        )
+        val DINAMICAS_PADRAO = setOf("H", "J", "K", "X", "Z")
     }
 
     private var _binding: FragmentLibrasBinding? = null
@@ -90,11 +98,13 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
     private var ultimaLetraChip = ""
     private var linhasAtivas = true
     private var modoAtual = LibrasAnalyzer.Modo.ALFABETO
-    private val letrasCalibracao = listOf(
-        "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
-        "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"
-    )
-    private val letrasDinamicasTreino = setOf("H", "J", "K", "X", "Z")
+    // Substituídas pelos labels que acompanham os modelos assim que o analyzer
+    // carrega (ver sincronizarAlfabeto). Começam com o alfabeto padrão só pra
+    // a tela nunca ficar sem lista — se um dia os modelos passarem a conhecer
+    // letras diferentes, a UI acompanha sozinha em vez de ficar mostrando uma
+    // lista fixa que ninguém lembrou de atualizar.
+    private var letrasCalibracao = ALFABETO_PADRAO
+    private var letrasDinamicasTreino = DINAMICAS_PADRAO
     private var indiceCalibracao = letrasCalibracao.indexOf("E").coerceAtLeast(0)
 
     private val speechLauncher = registerForActivityResult(
@@ -272,7 +282,31 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
 
             librasAnalyzer = newAnalyzer
             analysis.setAnalyzer(cameraExecutor, newAnalyzer)
+            binding.root.post { sincronizarAlfabeto(newAnalyzer) }
         }
+    }
+
+    // Alinha a lista de letras da tela de calibração com a que os modelos
+    // realmente conhecem (vem dos labels.txt exportados junto de cada modelo).
+    // Antes a tela tinha o alfabeto escrito à mão: se um treino mudasse as
+    // letras, a calibração continuaria oferecendo as antigas e a pessoa
+    // gravaria amostras pra uma letra que o modelo não tem — sem nenhum aviso.
+    private fun sincronizarAlfabeto(analyzer: LibrasAnalyzer) {
+        if (_binding == null) return
+        val doModelo = analyzer.labelsAlfabeto()
+        if (doModelo.isEmpty()) return  // mantém o padrão em vez de zerar a tela
+
+        if (doModelo != letrasCalibracao) {
+            Log.i("LibrasFragment", "Alfabeto ajustado pelos modelos: $doModelo")
+            val letraAtual = letrasCalibracao.getOrNull(indiceCalibracao)
+            letrasCalibracao = doModelo
+            // Segue na mesma letra se ela ainda existir; senão volta pro começo.
+            indiceCalibracao = doModelo.indexOf(letraAtual).coerceAtLeast(0)
+        }
+        letrasDinamicasTreino = analyzer.labelsDinamicas().ifEmpty { DINAMICAS_PADRAO }
+
+        if (binding.calibrationPanel.isVisible) updateCalibrationPanel()
+        updateTrainingDashboard()
     }
 
     // Fallback só usado quando a preview ainda não tem Display anexado

@@ -13,6 +13,57 @@ Formato: **Constante(s)** — valor atual — decisão e por quê — status.
 
 ## Não lançado
 
+- **Contrato travado entre a matemática do treino e a do app** — a mesma
+  conta (normalização de mão, de corpo e reamostragem de janela) existia
+  escrita duas vezes, em Python e em Kotlin, sem nada garantindo que
+  batessem. Se uma mudasse sem a outra, nada quebrava e nenhum erro
+  aparecia: o app só passaria a errar mais, porque foi treinado num formato
+  e usado em outro. Agora `tests/fixtures/landmark_contract.json` congela
+  entradas/saídas e dois testes (`LandmarkContractTest` no Kotlin,
+  `test_landmark_contract.py` no Python) falham se um lado divergir; o CI
+  ainda regera as fixtures e exige que não mudem. **Já pegou uma divergência
+  real**: com os ombros quase colados (pose degenerada) o Python dividia por
+  ~1e-5 e gerava features na casa dos milhares, enquanto o Kotlin já
+  protegia e dividia por 1 — quadros assim envenenavam o treino com valores
+  que o app nunca produz. Os dois agora usam `ESCALA_MINIMA_OMBROS=0.0001`.
+  A verificação de que o teste realmente pega o erro foi feita injetando a
+  divergência de propósito (e revelou que a primeira versão do teste NÃO
+  pegava, por faltar um caso de cada lado do limiar — corrigido).
+
+- **Verificação automática do modelo exportado** — depois de cada treino, o
+  `.onnx`/`.tflite` gerado é aberto e conferido contra o que o app carrega
+  (entrada `landmarks_input`, forma `[N, features]`, saída de
+  probabilidades; no TFLite, `[1,30,225]` e execução real pra garantir o
+  Select TF Ops). Antes, um export com nome ou formato errado só aparecia
+  com o app já instalado, como "parou de reconhecer". 5 testes garantem que
+  a verificação REJEITA modelo errado — checagem que só aprova não protege.
+
+- **Falhas de carregamento de modelo deixam de ser silenciosas** — o modo
+  corpo desativava-se sozinho e a tela ficava muda; modelos individuais e
+  parciais eram engolidos por `runCatching{}.getOrNull()`, tornando "modelo
+  corrompido" indistinguível de "modelo nunca treinado". Agora o motivo vai
+  pro log e, no modo corpo, pra tela. Importante agora que os modelos passam
+  a ser regerados com frequência.
+
+- **Lista de letras unificada** — a tela de calibração tinha o alfabeto
+  escrito à mão, separado dos `labels.txt` que acompanham os modelos. Se um
+  treino mudasse as letras, a calibração seguiria oferecendo as antigas e a
+  pessoa gravaria amostras para uma letra que o modelo não tem. Agora a UI
+  deriva dos labels reais (com o alfabeto padrão só como rede de segurança,
+  pra tela nunca ficar vazia).
+
+- **Código de treino consolidado em `treinamento/`** — removidos 6 arquivos
+  em `linear/backend/` (`extract_from_{images,videos}.py`, os dois aliases
+  legados e `train_{static,dynamic}_model.py`) que nada mais chamava:
+  `treinar_visuall.py` já fazia tudo o que eles faziam, e manter os dois
+  convidava a mexer no arquivo errado. `training_common.py` veio junto.
+
+- **Modelos `.pkl` fora do controle de versão** — eram versionados à força
+  contra o próprio `.gitignore`, pesam ~2,3 MB, o app não os usa (ele lê
+  `.onnx`/`.tflite`) e cada retreino guardaria uma cópia nova no histórico
+  para sempre. Continuam sendo gerados localmente. Isso interrompe o
+  crescimento; o histórico já existente não foi reescrito.
+
 - **Exemplos negativos ("não é sinal nenhum") no treino** — ataca a causa
   raiz do reconhecimento fácil demais, que a subida de limiares abaixo só
   remendava. Os modelos individuais são binários ("é esta letra ou não?") e

@@ -48,9 +48,12 @@ MOBILE_ASSETS = PROJECT / "mobile" / "app" / "src" / "main" / "assets"
 STATIC_ASSETS = MOBILE_ASSETS / "letras_estaticas"
 DYNAMIC_ASSETS = MOBILE_ASSETS / "letras_dinamicas"
 GESTURE_ASSETS = MOBILE_ASSETS / "gestos"
-TRAINING_DIR = PROJECT / "linear" / "backend" / "training"
 
-sys.path.insert(0, str(TRAINING_DIR))
+# training_common.py mora aqui do lado (treinamento/). Ficava em
+# linear/backend/training/ junto de dois treinadores que este arquivo
+# substituiu; com eles removidos, nao fazia mais sentido o codigo de treino
+# ficar espalhado em duas pastas.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from training_common import (  # noqa: E402
     DYNAMIC_LABELS,
     MODELS_DIR,
@@ -464,6 +467,92 @@ def load_negative_pool(name: str, features: int) -> np.ndarray | None:
     return X
 
 
+class ModeloInvalidoError(RuntimeError):
+    """Modelo exportado nao bate com o que o app carrega."""
+
+
+def verificar_onnx_exportado(caminho: Path, features: int, n_classes: int | None = None) -> None:
+    """Confere se o .onnx recem-gerado e mesmo o que o app espera receber.
+
+    Sem isso, um export com o nome ou o formato de entrada errado passa
+    despercebido aqui e so aparece la na frente, com o app ja instalado no
+    celular: a tela simplesmente para de reconhecer, sem mensagem nenhuma.
+    O contrato conferido e o do LetraEngine.kt, que roda a sessao com
+    mapOf("landmarks_input" to tensor) e le a saida [1, n_classes].
+    """
+    import onnx
+
+    modelo = onnx.load(str(caminho))
+    onnx.checker.check_model(modelo)
+
+    entradas = modelo.graph.input
+    if len(entradas) != 1:
+        raise ModeloInvalidoError(
+            f"{caminho.name}: esperava 1 entrada, tem {len(entradas)} "
+            f"({[e.name for e in entradas]}). O app so alimenta uma."
+        )
+
+    entrada = entradas[0]
+    if entrada.name != "landmarks_input":
+        raise ModeloInvalidoError(
+            f"{caminho.name}: entrada se chama '{entrada.name}', mas o app procura "
+            "'landmarks_input' — ele nao conseguiria rodar este modelo."
+        )
+
+    dims = entrada.type.tensor_type.shape.dim
+    if len(dims) != 2 or dims[1].dim_value != features:
+        forma = [d.dim_value or d.dim_param or "?" for d in dims]
+        raise ModeloInvalidoError(
+            f"{caminho.name}: entrada tem forma {forma}, esperado [N, {features}]."
+        )
+
+    if n_classes is not None:
+        # O app le a SEGUNDA saida (out[1]) como as probabilidades por classe.
+        saidas = modelo.graph.output
+        if len(saidas) < 2:
+            raise ModeloInvalidoError(
+                f"{caminho.name}: tem {len(saidas)} saida(s); o app le a segunda "
+                "(probabilidades). Exportou sem zipmap=False?"
+            )
+
+
+def verificar_tflite_exportado(caminho: Path, janela: int, features: int, n_classes: int) -> None:
+    """Mesma ideia do verificar_onnx_exportado, pro modelo de gestos.
+
+    Confere o contrato do BodyGestureEngine.kt, que faz
+    resizeInput(0, [1, BODY_WINDOW, BODY_FEATURES]) e le a saida [1, n_classes].
+    """
+    import tensorflow as tf
+
+    interpretador = tf.lite.Interpreter(model_path=str(caminho))
+    interpretador.resize_tensor_input(
+        interpretador.get_input_details()[0]["index"], [1, janela, features]
+    )
+    interpretador.allocate_tensors()
+
+    entrada = interpretador.get_input_details()[0]
+    forma_entrada = list(entrada["shape"])
+    if forma_entrada != [1, janela, features]:
+        raise ModeloInvalidoError(
+            f"{caminho.name}: entrada {forma_entrada}, esperado [1, {janela}, {features}]."
+        )
+
+    saida = interpretador.get_output_details()[0]
+    forma_saida = list(saida["shape"])
+    if len(forma_saida) != 2 or forma_saida[1] != n_classes:
+        raise ModeloInvalidoError(
+            f"{caminho.name}: saida {forma_saida}, esperado [1, {n_classes}] "
+            f"(uma probabilidade por gesto do labels.txt)."
+        )
+
+    # Roda de verdade: o modelo usa LSTM, que precisa do Select TF Ops. Se o
+    # export tiver saido sem isso, e aqui que estoura -- e nao no celular.
+    interpretador.set_tensor(
+        entrada["index"], np.zeros((1, janela, features), dtype=np.float32)
+    )
+    interpretador.invoke()
+
+
 def save_hand_dataset(
     rows: list[tuple[int, str, str, list[float]]],
     npz_path: Path,
@@ -671,6 +760,8 @@ def train_individual_mlp(name: str, features: int, labels: list[str], max_per_cl
         safe = safe_label_name(label)
         save_pickle(output_dir / f"{safe}.pkl", model)
         export_onnx_model(model, output_dir / f"{safe}.onnx", features)
+        # Individuais sao binarios (2 classes: e a letra / nao e).
+        verificar_onnx_exportado(output_dir / f"{safe}.onnx", features, n_classes=2)
         (output_dir / f"{safe}_RELATORIO.txt").write_text(
             f"MODELO INDIVIDUAL {name}:{label}\n\n"
             f"Positivos: {int((y_binary == 1).sum())}\n"
@@ -770,7 +861,8 @@ def train_mlp(name: str, features: int, labels: list[str], max_per_class: int) -
     general_dir.mkdir(parents=True, exist_ok=True)
     save_labels(general_dir / "labels.txt", labels_for_model)
     export_onnx_model(model, general_dir / "model.onnx", features)
-    print(f"Modelo {name} exportado para backend e Android.")
+    verificar_onnx_exportado(general_dir / "model.onnx", features, len(labels_for_model))
+    print(f"Modelo {name} exportado e verificado para backend e Android.")
 
 
 def extract_body_points(pose_result, hand_result) -> tuple[np.ndarray, bool, bool]:
@@ -803,10 +895,22 @@ def extract_body_points(pose_result, hand_result) -> tuple[np.ndarray, bool, boo
     return np.concatenate([pose, left, right], axis=0), has_pose, has_hand
 
 
+# Escala minima aceita entre os ombros -- tem que ser IGUAL ao
+# LibrasMath.ESCALA_MINIMA_OMBROS do Kotlin. Antes aqui era `or 1.0`, que so
+# trata o zero exato: com os ombros quase colados (pose degenerada, pessoa de
+# lado, ombro fora do quadro) a escala virava ~1e-5 e as features explodiam --
+# um ponto a 1cm do centro virava 1000 no dataset de treino, enquanto o app
+# (que ja tinha o teto) gerava 0.01. Quadros assim envenenavam o treino com
+# valores que o app nunca produz.
+ESCALA_MINIMA_OMBROS = 0.0001
+
+
 def normalize_body_frame(frame: np.ndarray) -> np.ndarray:
     normalized = frame.copy()
     center = (frame[11] + frame[12]) / 2.0
-    scale = np.linalg.norm(frame[11] - frame[12]) or 1.0
+    scale = float(np.linalg.norm(frame[11] - frame[12]))
+    if scale <= ESCALA_MINIMA_OMBROS:
+        scale = 1.0
     normalized[:, :2] = (normalized[:, :2] - center[:2]) / scale
     return normalized
 
@@ -916,7 +1020,14 @@ def train_body_model() -> None:
     ]
     tflite_model = converter.convert()
     (gesture_general_dir / "model.tflite").write_bytes(tflite_model)
-    print(f"Modelo corporal Android salvo em: {gesture_general_dir / 'model.tflite'}")
+    verificar_tflite_exportado(
+        gesture_general_dir / "model.tflite",
+        janela=30,
+        features=225,
+        n_classes=len(BODY_LABELS),
+    )
+    print(f"Modelo corporal Android salvo e verificado em: "
+          f"{gesture_general_dir / 'model.tflite'}")
 
 
 def print_status() -> None:

@@ -13,7 +13,6 @@ import org.tensorflow.lite.Interpreter
 import org.tensorflow.lite.flex.FlexDelegate
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import kotlin.math.sqrt
 
 // Reconhecimento de sinais de corpo (pose + mãos + modelo TFLite) — extraído
 // do LibrasAnalyzer pra isolar a máquina de estado de captura/classificação
@@ -36,6 +35,10 @@ internal class BodyGestureEngine(private val context: Context) {
     private var flexDelegate: FlexDelegate? = null
     private var bodyInterpreter: Interpreter? = null
     private var labelsCorpo: List<String> = emptyList()
+    // Null enquanto nada falhou. Quando o modo corpo não consegue carregar,
+    // guarda o motivo pra ser mostrado na tela em vez de o app ficar mudo.
+    var motivoFalha: String? = null
+        private set
 
     private val bodyMovementBuffer = ArrayDeque<FloatArray>()
     private val bodyGestureBuffer  = ArrayList<FloatArray>()
@@ -101,8 +104,29 @@ internal class BodyGestureEngine(private val context: Context) {
             flexDelegate?.close()
             flexDelegate = null
             labelsCorpo = emptyList()
+            // Antes isso falhava em silêncio total: o modo corpo simplesmente
+            // não reconhecia nada e, de fora, parecia que a pessoa estava
+            // fazendo o sinal errado. Guardar o motivo (e mostrar na tela, ver
+            // motivoFalha) é o que transforma "não funciona" em algo
+            // diagnosticável — importante agora que os modelos passam a ser
+            // regerados com frequência pela ferramenta de treino.
+            motivoFalha = descreverFalha(error)
+            Log.e("BodyGestureEngine", "Falha ao carregar o modo corpo: $motivoFalha", error)
             null
         }
+    }
+
+    // Traduz a exceção pra algo que aponte o que fazer. Os dois casos comuns
+    // depois de um retreino são o arquivo não ter sido gerado e o modelo ter
+    // saído num formato que o app não consegue usar.
+    private fun descreverFalha(error: Throwable): String = when {
+        error is java.io.FileNotFoundException ->
+            "arquivo do modelo de gestos não encontrado em assets/gestos/geral/"
+        error.message?.contains("resize", ignoreCase = true) == true ||
+            error.message?.contains("shape", ignoreCase = true) == true ->
+            "modelo de gestos com formato inesperado (esperado [1, " +
+                "${LibrasAnalyzer.BODY_WINDOW}, ${LibrasAnalyzer.BODY_FEATURES}])"
+        else -> error.message ?: error::class.java.simpleName
     }
 
     fun extractFrame(
@@ -155,28 +179,6 @@ internal class BodyGestureEngine(private val context: Context) {
         frame[base + 2] = z
     }
 
-    private fun normalize(frame: FloatArray): FloatArray {
-        val normalized = frame.copyOf()
-        val leftShoulder = LibrasAnalyzer.BODY_POINT_LEFT_SHOULDER * 3
-        val rightShoulder = LibrasAnalyzer.BODY_POINT_RIGHT_SHOULDER * 3
-        val centerX = (frame[leftShoulder] + frame[rightShoulder]) / 2f
-        val centerY = (frame[leftShoulder + 1] + frame[rightShoulder + 1]) / 2f
-        // A escala é a distância entre os ombros em 3D — o Python faz
-        // np.linalg.norm(frame[11] - frame[12]) sobre vetores (x,y,z), então o
-        // dz ENTRA na conta. Usar só dx/dy deixava todas as features do corpo
-        // numa escala diferente da do treino.
-        val dx = frame[leftShoulder] - frame[rightShoulder]
-        val dy = frame[leftShoulder + 1] - frame[rightShoulder + 1]
-        val dz = frame[leftShoulder + 2] - frame[rightShoulder + 2]
-        val scale = sqrt(dx * dx + dy * dy + dz * dz).takeIf { it > 0.0001f } ?: 1f
-        for (point in 0 until LibrasAnalyzer.BODY_TOTAL_POINTS) {
-            val base = point * 3
-            normalized[base] = (normalized[base] - centerX) / scale
-            normalized[base + 1] = (normalized[base + 1] - centerY) / scale
-        }
-        return normalized
-    }
-
     private fun bodyMotion(): Float {
         if (bodyMovementBuffer.size < 3) return 0f
         var total = 0f
@@ -204,7 +206,7 @@ internal class BodyGestureEngine(private val context: Context) {
         onFeedback: (mensagem: String, nivel: Int) -> Unit
     ): String? {
         bodyNoHandSince = 0L
-        val normalized = normalize(bodyFrame.points)
+        val normalized = LibrasMath.normalizeBodyFrame(bodyFrame.points)
         bodyMovementBuffer.addLast(normalized)
         while (bodyMovementBuffer.size > LibrasAnalyzer.BODY_MOV_WINDOW) bodyMovementBuffer.removeFirst()
         val movimento = bodyMotion()
@@ -279,7 +281,7 @@ internal class BodyGestureEngine(private val context: Context) {
         val labels = labelsCorpo
         if (frames.size < LibrasAnalyzer.BODY_MIN_FRAMES || labels.isEmpty()) return null
 
-        val sampled = resample(frames, LibrasAnalyzer.BODY_WINDOW)
+        val sampled = LibrasMath.resample(frames, LibrasAnalyzer.BODY_WINDOW)
         val input = Array(1) { Array(LibrasAnalyzer.BODY_WINDOW) { FloatArray(LibrasAnalyzer.BODY_FEATURES) } }
         sampled.forEachIndexed { index, frame ->
             frame.copyInto(input[0][index])
@@ -298,14 +300,6 @@ internal class BodyGestureEngine(private val context: Context) {
         // Python aceita a palavra apenas com confiança >= 0.85 (e != NEUTRO,
         // tratado em processarFrame). Sem exigência de margem.
         return prediction.letra != "-" && prediction.confianca >= LibrasAnalyzer.BODY_CONFIDENCE
-    }
-
-    private fun resample(frames: List<FloatArray>, count: Int): List<FloatArray> {
-        if (frames.size == count) return frames
-        return List(count) { index ->
-            val sourceIndex = ((frames.size - 1) * index.toFloat() / (count - 1)).toInt()
-            frames[sourceIndex]
-        }
     }
 
     // Só zera a máquina de estado de captura (buffers/contadores) — chamado

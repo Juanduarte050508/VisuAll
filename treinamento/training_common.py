@@ -5,7 +5,8 @@ import pickle
 import numpy as np
 
 
-ROOT = Path(__file__).resolve().parents[3]
+# treinamento/training_common.py -> raiz do repo e um nivel acima.
+ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "data"
 MODELS_DIR = ROOT / "models"
 MOBILE_ASSETS_DIR = ROOT / "mobile" / "app" / "src" / "main" / "assets"

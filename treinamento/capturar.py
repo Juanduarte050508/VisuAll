@@ -27,7 +27,7 @@ import cv2
 from PIL import Image, ImageTk
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "linear" / "backend" / "training"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from training_common import DYNAMIC_LABELS, STATIC_LABELS  # noqa: E402
 
 CONTAGEM_S = 3.0

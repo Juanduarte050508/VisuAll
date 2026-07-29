@@ -109,13 +109,14 @@ what lives where and why there's more than one backend folder:
 |---|---|
 | `linear/backend/app.py` | **Reference implementation.** A single Python file with the full pipeline (camera capture → MediaPipe Holistic → MLP/LSTM classification → WebSocket → frontend). Start here to understand the logic end-to-end. |
 | `linear/frontend/` | The web UI (`index.html`) that `linear/backend/app.py` serves over WebSocket. |
-| `linear/backend/data_extraction/` | Scripts that turn raw photos/videos into the landmark datasets used to train the alphabet models, using the MediaPipe Tasks API — the same detector the mobile app uses at inference time. |
-| `linear/backend/training/` | Scripts that train the static/dynamic MLP models and export them to both `models/*.pkl` (Python) and `mobile/app/src/main/assets/*.onnx` (Android), from the same dataset. |
+| `treinamento/` | **Everything about collecting data and training models.** Record clips from a webcam (`Capturar.bat`), then extract landmarks and train (`Treinar.bat`, or `abrir_treinamento.bat` for the full GUI); models are written straight into `mobile/app/src/main/assets/`. See `treinamento/README.md`. |
+| `tests/` | Shared fixtures (`fixtures/landmark_contract.json`) pinning the landmark math that the Python training side and the Kotlin app side must both reproduce, plus the script that regenerates them. |
 | `modular/` | **The same backend as `linear/backend/app.py`, split into 10 small modules** (`m01_visuall_config.py` … `m10_visuall_servidor.py`) instead of one file. Entry point is `app_backend_unificado.py`. Behaves identically and reuses `linear/frontend/` — easier to navigate if you're extending the backend. |
 | `models/` | Pre-trained model files ready for inference. See `models/README.md` for what each file is. |
 | `mobile/` | **Android port** (Kotlin) of the same recognition pipeline, running fully on-device (MediaPipe Tasks API + ONNX Runtime + TFLite — no backend/WebSocket needed). See `mobile/README.md` to build and run it, and [CHANGELOG.md](CHANGELOG.md) for why its calibration constants have the values they do. |
 | `mobile/tools/` | Windows scripts to set up an Android emulator matching the mobile app's requirements (webcam-backed front camera, compatible CPU architecture). See `mobile/tools/README.md`. |
-| `.github/workflows/` | CI: compiles and runs unit tests against `mobile/` on every push/PR. |
+| `.github/workflows/` | CI: compiles and unit-tests `mobile/` on every push/PR, and separately installs the Python stack to run the training-pipeline tests and confirm MediaPipe still starts. |
+| `VALIDACAO.md` | The fixed ~10 minute on-device test to run before and after any recognition change, so "it feels better" can be replaced by a number. |
 
 **In short:** `linear/backend/app.py` and `modular/` are two shapes of
 the same desktop/Python system — pick whichever is easier to read for
