@@ -687,7 +687,11 @@ def save_partial_model(
         partial_dir.mkdir(parents=True, exist_ok=True)
         shutil.copy2(run_dir / "dynamic_model.onnx", partial_dir / "model.onnx")
         shutil.copy2(run_dir / "dynamic_labels.txt", partial_dir / "labels.txt")
-        print("Modelo parcial dinamico tambem foi aplicado como fallback prioritario no app.")
+        # ATENCAO: o app NAO le mais esta pasta. O LetraEngine.kt tinha um
+        # fallback pra "letras_dinamicas/parcial/" e ele foi removido no commit
+        # 1f33768. A copia continua aqui so pra inspecao manual do resultado --
+        # copiar por cima nao muda nada no celular.
+        print(f"Copia do parcial dinamico em: {partial_dir} (o app NAO usa esta pasta).")
     (run_dir / "RELATORIO.txt").write_text(
         "MODELO PARCIAL - NAO APLICADO NO APP\n\n"
         f"Labels treinados: {labels_for_model}\n"

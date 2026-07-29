@@ -118,18 +118,27 @@ Qualquer um dos dois salva os modelos novos direto em
   movimento.
 - `gestos\geral\model.tflite` — modelo geral, os gestos corporais.
 
-Cada `geral\` vem com um `labels.txt` do lado. Sempre que você grava dados
-novos de **todas** as letras de uma categoria, esse modelo geral é
-atualizado. Se faltar alguma letra (ex.: gravou só H, J, K mas não X e Z),
-ele treina e salva um **modelo parcial** só com o que existe — sem
-sobrescrever o geral — e, no caso de letra com movimento, esse parcial
-também é aplicado em `letras_dinamicas\parcial\` (o app tenta ele primeiro,
-com o geral como reserva). Cada letra/gesto com dados também ganha um
-**modelo individual** (`letras_estaticas\<LETRA>\`,
+Cada `geral\` vem com um `labels.txt` do lado. Cada letra/gesto com dados
+também ganha um **modelo individual** (`letras_estaticas\<LETRA>\`,
 `letras_dinamicas\<LETRA>\`) — um classificador dedicado só pra aquela letra,
 tentado antes de tudo. Isso deixa reforçar UMA letra problemática (H, por
 exemplo) sem precisar ter dados balanceados de todas as outras ao mesmo
 tempo.
+
+> **Atenção, letras com movimento (H, J, K, X, Z):** desde o commit
+> `1f33768`, treinar essa categoria **não mexe mais no modelo geral** dela —
+> só nos modelos individuais por letra. A razão é proteger o J, que é o único
+> que já reconhece bem: retreinar o geral com poucas amostras novas piorava
+> ele. O efeito prático é que gravar clipes de H/K/X/Z melhora o
+> reconhecimento **pela via do modelo individual**, que é a mais exigente.
+> Se depois de gravar 15-20 clipes por letra o reconhecimento não melhorar,
+> é aqui que se olha primeiro (a linha está em `run_train`, em
+> `treinar_visuall.py`).
+
+Para letras paradas e gestos corporais o geral continua sendo atualizado
+normalmente. Se faltar alguma letra da categoria (ex.: gravou só A, B, C),
+o treino salva um **modelo parcial** só com o que existe, sem sobrescrever o
+geral do app.
 
 No fim, é só recompilar o app Android (`assembleDebug` ou rodar pelo Android
 Studio) pra usar os modelos novos.

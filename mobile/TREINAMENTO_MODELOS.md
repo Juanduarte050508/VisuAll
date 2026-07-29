@@ -20,9 +20,9 @@ app/src/main/assets/letras_dinamicas/geral/labels.txt
 
 (além do modelo "geral" acima, `LetraEngine.kt` também pode carregar modelos
 individuais por letra em `letras_estaticas/<LETRA>/` e
-`letras_dinamicas/<LETRA>/`, e um modelo parcial em
-`letras_dinamicas/parcial/` — usados antes do geral quando existem, ver
-`treinamento/COMO_USAR.md`.)
+`letras_dinamicas/<LETRA>/` — usados antes do geral quando existem, ver
+`treinamento/README.md`. O fallback pra `letras_dinamicas/parcial/` existia
+mas foi removido no commit `1f33768`; aquela pasta nao e mais lida.)
 
 ## 1. Coletar amostras no celular
 

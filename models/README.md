@@ -32,11 +32,14 @@ direto):
 | `mobile/app/src/main/assets/gestos/geral/model.tflite` | Modelo de gestos corporais, entrada `[1, 30, 225]` |
 | `mobile/app/src/main/assets/gestos/geral/labels.txt` | Labels de gestos na mesma ordem da saida do TFLite |
 
-Modelos parciais e individuais do Android ficam em:
+Modelos individuais (um por letra, tentados antes do geral) ficam em:
 
-- `mobile/app/src/main/assets/letras_dinamicas/parcial/`
 - `mobile/app/src/main/assets/letras_dinamicas/<LETRA>/`
 - `mobile/app/src/main/assets/letras_estaticas/<LETRA>/`
+
+A pasta `letras_dinamicas/parcial/` ainda recebe copia do treino, mas **o app
+nao le mais ela** — o fallback foi removido do `LetraEngine.kt` no commit
+`1f33768`. Serve so pra inspecao manual.
 
 O treino verifica sozinho cada modelo exportado (nome e formato da entrada)
 antes de considerar o export valido — ver `verificar_modelo_exportado` em
