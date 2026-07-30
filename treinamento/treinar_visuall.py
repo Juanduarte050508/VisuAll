@@ -615,12 +615,90 @@ def deduplicate_samples(X: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.nd
     return X[keep], y[keep]
 
 
+"""Teto de quanto o filtro de outliers pode tirar de uma classe.
+
+Um recorte agressivo aqui e pior que nenhum: uma amostra ruim que passa custa
+um pouco de precisao, uma amostra boa apagada custa uma sessao de gravacao
+inteira. 5% ainda pega o caso pra que o filtro existe (alguns quadros com a
+mao saindo do enquadramento), e recusa qualquer coisa em escala de "grupo".
+"""
+LIMITE_FRACAO_DESCARTE = 0.05
+
+
+K_VIZINHOS = 3
+
+
+def _distancia_ao_kesimo_vizinho(
+    values: np.ndarray, k: int, bloco: int = 2048
+) -> np.ndarray:
+    """Pra cada amostra, a distancia ate o k-esimo vizinho mais proximo dela.
+
+    E esta a medida que separa "amostra ruim" de "amostra diferente": uma
+    deteccao degenerada fica SOZINHA no espaco, enquanto uma gravacao feita de
+    outra distancia forma um grupinho -- longe da media, mas com vizinhos
+    colados. Medir distancia ate a mediana da classe nao distingue os dois.
+
+    Sai em O(n^2), o que e tranquilo nos tamanhos daqui: 20 clipes de 3s a
+    30fps dao ~1800 amostras por classe, medido em 0,05s. O calculo e feito em
+    blocos de linhas so pra limitar a memoria -- de uma vez, 12 mil amostras
+    pediriam 576 MB de matriz.
+
+    Em float64 de proposito, apesar de as features serem float32. A identidade
+    |a-b|^2 = |a|^2 + |b|^2 - 2.a.b sofre cancelamento catastrofico quando as
+    amostras sao parecidas -- e sao: quadros do mesmo clipe. Medido: com 420
+    features e amostras bem juntas, float32 erra ate 1% na distancia, float64
+    erra 1e-11. Como e a distancia que decide o descarte, 1% e caro; a memoria
+    dobrada ja esta limitada pelos blocos.
+    """
+    values = np.ascontiguousarray(values, dtype=np.float64)
+    quad = np.sum(values * values, axis=1)
+    n = len(values)
+    resultado = np.empty(n, dtype=np.float64)
+    for inicio in range(0, n, bloco):
+        fim = min(inicio + bloco, n)
+        # |a-b|^2 = |a|^2 + |b|^2 - 2.a.b
+        d2 = quad[inicio:fim, None] + quad[None, :] - 2.0 * (values[inicio:fim] @ values.T)
+        np.maximum(d2, 0.0, out=d2)  # arredondamento produz -1e-12 na diagonal
+        # A amostra nao e vizinha de si mesma.
+        d2[np.arange(fim - inicio), np.arange(inicio, fim)] = np.inf
+        resultado[inicio:fim] = np.sqrt(np.partition(d2, k - 1, axis=1)[:, k - 1])
+    return resultado
+
+
 def filter_outlier_samples(
     X: np.ndarray,
     y: np.ndarray,
     min_samples: int = 8,
-    mad_multiplier: float = 6.0,
+    spread_multiplier: float = 6.0,
+    max_removed_fraction: float = LIMITE_FRACAO_DESCARTE,
 ) -> tuple[np.ndarray, np.ndarray, dict[str, int]]:
+    """Descarta amostras isoladas da propria classe -- mao saindo do quadro,
+    pose degenerada, deteccao ruim.
+
+    A medida e a distancia ao k-esimo vizinho, NAO a distancia ate a mediana da
+    classe. A primeira versao usava mediana + 6*MAD das distancias ao centro, e
+    medindo descobrimos que ela apagava grupos legitimos inteiros: quando as
+    amostras formam dois grupos -- o que acontece sempre que se grava de duas
+    distancias, que e justamente o que o README pede -- a partir de 60/40 o
+    grupo menor sumia 100%, porque a mediana e o MAD passavam a descrever so o
+    grupo maior. Trocar por percentis evitava a perda mas ia longe demais pro
+    outro lado: com dois grupos, a dispersao global inflava tanto que amostra
+    degenerada de verdade tambem passava.
+
+    Distancia ao vizinho resolve os dois porque faz a pergunta certa. Amostra
+    ruim esta SOZINHA; amostra de outro enquadramento tem vizinhos colados,
+    mesmo estando longe da media da classe.
+
+    Duas limitacoes assumidas de proposito:
+      - abaixo de min_samples o filtro nao roda (nao da pra medir vizinhanca);
+      - um grupo legitimo minusculo (menor que k+1 amostras) parece isolado e
+        pode ser descartado. Vale a troca: perder 3 quadros e barato, perder
+        40% da classe nao era.
+
+    Ver treinamento/tests/test_treinar_visuall.py::TestFiltroDeOutliers, que
+    fixa cada um desses casos -- inclusive o que separa esta versao da
+    anterior.
+    """
     keep = np.ones(len(X), dtype=bool)
     removed: dict[str, int] = {}
     for label in sorted(set(str(v) for v in y)):
@@ -628,18 +706,34 @@ def filter_outlier_samples(
         if len(idx) < min_samples:
             continue
         values = X[idx].astype(np.float32)
-        center = np.median(values, axis=0)
-        distances = np.linalg.norm(values - center, axis=1)
-        median_distance = float(np.median(distances))
-        mad = float(np.median(np.abs(distances - median_distance)))
-        if mad <= 1e-8:
-            threshold = float(np.percentile(distances, 99))
-        else:
-            threshold = median_distance + mad_multiplier * mad
+        distances = _distancia_ao_kesimo_vizinho(
+            values, min(K_VIZINHOS, len(idx) - 1)
+        )
+        p50 = float(np.percentile(distances, 50))
+        spread = float(np.percentile(distances, 90)) - p50
+        if spread <= 1e-8:
+            # Vizinhanca uniforme: nao ha dispersao pra medir e qualquer limite
+            # seria arbitrario. A versao original caia num percentil 99 aqui, o
+            # que descartava ~1% SEMPRE -- inclusive sem nenhuma amostra ruim.
+            continue
+        threshold = p50 + spread_multiplier * spread
         drop = idx[distances > threshold]
-        if len(drop):
-            keep[drop] = False
-            removed[label] = int(len(drop))
+        if not len(drop):
+            continue
+        # Trava final. O filtro existe pra tirar alguns quadros ruins; se ele
+        # quer levar um pedaco grande da classe, o que ele achou nao e ruido, e
+        # um grupo legitimo. Ai ele desiste e avisa, em vez de apagar calado.
+        if len(drop) > max_removed_fraction * len(idx):
+            print(
+                f"  [aviso] {label}: o filtro queria descartar {len(drop)} de "
+                f"{len(idx)} amostras ({100.0 * len(drop) / len(idx):.0f}%). E "
+                "demais pra ser ruido, entao NADA foi descartado desta classe. "
+                "Causa provavel: gravacoes em enquadramentos bem diferentes -- "
+                "o que e valido e deve ser mantido."
+            )
+            continue
+        keep[drop] = False
+        removed[label] = int(len(drop))
     return X[keep], y[keep], removed
 
 

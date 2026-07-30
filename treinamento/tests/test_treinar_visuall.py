@@ -257,5 +257,168 @@ class TestExemplosNegativos(TestPastasTemporarias):
         self.assertTrue((core.STATIC_ASSETS / "individual_labels.txt").exists())
 
 
+class TestFiltroDeOutliers(unittest.TestCase):
+    """Fixa o comportamento de filter_outlier_samples.
+
+    Este filtro decide o que ENTRA no treino, e o erro dele e invisivel: uma
+    amostra descartada nao aparece em lugar nenhum, so no modelo pior no fim.
+    A primeira versao (MAD das distancias) apagava grupos legitimos inteiros --
+    a partir de 60/40 entre dois enquadramentos, o grupo menor sumia 100%. Os
+    testes abaixo existem pra isso nao voltar sem alguem notar.
+
+    Ancora numerica: 42 features e a contagem de uma mao (21 pontos x, y), o
+    mesmo shape que o app usa.
+    """
+
+    FEATURES = 42
+
+    def _grupo(self, centro: np.ndarray, n: int, tremor: float, semente: int) -> np.ndarray:
+        """n amostras em volta de um centro -- imita quadros de um mesmo clipe."""
+        rng = np.random.default_rng(semente)
+        return np.clip(
+            centro + rng.normal(0.0, tremor, (n, self.FEATURES)), -1.0, 1.0
+        ).astype(np.float32)
+
+    def _centro(self, semente: int) -> np.ndarray:
+        return np.random.default_rng(semente).uniform(
+            -1.0, 1.0, self.FEATURES
+        ).astype(np.float32)
+
+    def _descartadas(self, X: np.ndarray) -> int:
+        _, _, removidos = core.filter_outlier_samples(X, np.array(["H"] * len(X)))
+        return removidos.get("H", 0)
+
+    def test_amostra_degenerada_e_descartada(self):
+        # A razao de existir do filtro: quadros em que a deteccao saiu errada
+        # (mao saindo do enquadramento) viram pontos soltos longe do miolo.
+        boas = self._grupo(self._centro(1), 100, tremor=0.01, semente=2)
+        lixo = np.random.default_rng(3).uniform(
+            -1.0, 1.0, (3, self.FEATURES)
+        ).astype(np.float32)
+        self.assertEqual(3, self._descartadas(np.concatenate([boas, lixo])))
+
+    def test_dados_limpos_nao_perdem_nada(self):
+        # A versao antiga caia num percentil 99 quando a dispersao era pequena,
+        # o que descartava ~1% SEMPRE -- mesmo sem nenhuma amostra ruim.
+        firme = self._grupo(self._centro(4), 90, tremor=0.003, semente=5)
+        self.assertEqual(0, self._descartadas(firme))
+
+    def test_grupo_minoritario_legitimo_nao_e_apagado(self):
+        # O caso real: gravar a maioria dos clipes a uma distancia e o resto a
+        # outra. As duas gravacoes valem, e o README pede essa variedade.
+        # Antes, de 60/40 pra cima o grupo menor era apagado inteiro.
+        centro = self._centro(6)
+        for maioria, minoria in ((60, 40), (70, 30), (80, 20)):
+            with self.subTest(proporcao=f"{maioria}/{minoria}"):
+                X = np.concatenate([
+                    self._grupo(centro, maioria, 0.01, semente=7),
+                    self._grupo(centro * 0.6, minoria, 0.01, semente=8),
+                ])
+                self.assertEqual(0, self._descartadas(X))
+
+    def test_trava_recusa_descarte_grande_em_vez_de_apagar_calado(self):
+        # Com a minoria bem pequena os percentis nao a alcancam, e o filtro
+        # ainda quer apaga-la. A trava de fracao e a ultima defesa: ela desiste
+        # da classe inteira em vez de tirar um pedaco grande em silencio.
+        centro = self._centro(9)
+        X = np.concatenate([
+            self._grupo(centro, 90, 0.01, semente=10),
+            self._grupo(centro * 0.6, 10, 0.01, semente=11),
+        ])
+        self.assertEqual(0, self._descartadas(X))
+
+    def test_ainda_limpa_lixo_quando_ha_dois_enquadramentos(self):
+        """O caso que separa a dispersao por percentis da dispersao por MAD.
+
+        A trava de fracao sozinha ja evita a PERDA de dados: com o MAD antigo
+        ela recusava o descarte inteiro e o grupo minoritario sobrevivia. Mas
+        recusar tem um preco -- o lixo de verdade tambem fica, e o usuario leva
+        um aviso assustador a cada treino, so por ter gravado de duas
+        distancias.
+
+        Com percentis o filtro continua FUNCIONANDO nessa situacao: tira as
+        amostras degeneradas e mantem os dois grupos. Sem este teste, os
+        outros passam igual com o algoritmo antigo -- foi verificado
+        reinjetando o MAD de proposito.
+        """
+        centro = self._centro(19)
+        X = np.concatenate([
+            self._grupo(centro, 80, 0.01, semente=20),        # enquadramento 1
+            self._grupo(centro * 0.6, 20, 0.01, semente=21),  # enquadramento 2
+            np.random.default_rng(22).uniform(               # deteccao ruim
+                -1.0, 1.0, (3, self.FEATURES)
+            ).astype(np.float32),
+        ])
+        _, _, removidos = core.filter_outlier_samples(X, np.array(["H"] * len(X)))
+        self.assertEqual(
+            3, removidos.get("H", 0),
+            "esperado tirar so as 3 degeneradas, mantendo os dois "
+            "enquadramentos legitimos",
+        )
+
+    def test_calculo_em_blocos_da_o_mesmo_resultado(self):
+        # A distancia ao vizinho e calculada em blocos de linhas pra limitar
+        # memoria, e cada bloco precisa marcar a diagonal na coluna GLOBAL
+        # certa. Um erro de indice ali faria a amostra virar vizinha de si
+        # mesma (distancia 0) sem quebrar nada visivelmente.
+        X = self._grupo(self._centro(23), 50, 0.05, semente=24)
+        inteiro = core._distancia_ao_kesimo_vizinho(X, 3, bloco=len(X))
+        picado = core._distancia_ao_kesimo_vizinho(X, 3, bloco=7)
+        np.testing.assert_allclose(inteiro, picado, rtol=1e-6)
+        # Distancia 0 significaria que a amostra se contou como vizinha.
+        self.assertTrue(np.all(picado > 0.0))
+
+    def test_teto_de_descarte_e_o_documentado(self):
+        # Se este valor mudar, o equilibrio dos testes acima muda junto --
+        # entao ele e lido daqui, nao repetido na mao.
+        self.assertEqual(0.05, core.LIMITE_FRACAO_DESCARTE)
+
+    def test_classe_com_poucas_amostras_nao_e_filtrada(self):
+        # Abaixo de min_samples nao ha estatistica pra confiar, entao o filtro
+        # nao roda -- e o lixo passa. Documentado de proposito: e melhor que
+        # inventar um limite com 7 pontos.
+        boas = self._grupo(self._centro(12), 6, tremor=0.01, semente=13)
+        lixo = np.random.default_rng(14).uniform(
+            -1.0, 1.0, (1, self.FEATURES)
+        ).astype(np.float32)
+        self.assertEqual(0, self._descartadas(np.concatenate([boas, lixo])))
+
+    def test_filtro_nao_mistura_classes(self):
+        # Cada letra e avaliada contra o proprio miolo. Se as classes fossem
+        # medidas juntas, a letra menos frequente viraria "outlier" em bloco.
+        a = self._grupo(self._centro(15), 40, 0.01, semente=16)
+        b = self._grupo(self._centro(17), 40, 0.01, semente=18)
+        X = np.concatenate([a, b])
+        y = np.array(["A"] * 40 + ["B"] * 40)
+        Xf, yf, removidos = core.filter_outlier_samples(X, y)
+        self.assertEqual({}, removidos)
+        self.assertEqual(80, len(Xf))
+
+
+class TestDeduplicacao(unittest.TestCase):
+
+    def test_extrair_duas_vezes_nao_duplica_o_dataset(self):
+        # A extracao reprocessa TODOS os videos da pasta e o resultado e
+        # somado ao dataset que ja existia. Sem deduplicar, rodar "extrair"
+        # duas vezes dobraria o peso de cada amostra no treino.
+        rng = np.random.default_rng(21)
+        X = rng.normal(0.0, 0.1, (50, 42)).astype(np.float32)
+        y = np.array(["H"] * 50)
+        Xd, yd = core.deduplicate_samples(
+            np.concatenate([X, X]), np.concatenate([y, y])
+        )
+        self.assertEqual(50, len(Xd))
+        self.assertEqual(50, len(yd))
+
+    def test_amostras_de_classes_diferentes_nao_se_anulam(self):
+        # Mesmos valores em rotulos diferentes sao amostras diferentes: a
+        # chave da deduplicacao precisa incluir o rotulo.
+        X = np.zeros((4, 42), dtype=np.float32)
+        y = np.array(["H", "H", "J", "J"])
+        Xd, yd = core.deduplicate_samples(X, y)
+        self.assertEqual(2, len(Xd))
+        self.assertEqual({"H", "J"}, set(yd))
+
+
 if __name__ == "__main__":
     unittest.main()

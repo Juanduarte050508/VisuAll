@@ -13,6 +13,24 @@ Formato: **Constante(s)** — valor atual — decisão e por quê — status.
 
 ## Não lançado
 
+- **`LIMITE_FRACAO_DESCARTE` = 0.05, e o filtro de outliers passou a medir
+  distância ao vizinho** — o filtro novo (`filter_outlier_samples`) usava
+  `mediana + 6*MAD` da distância até o centro da classe. Medido com dados no
+  formato real, ele **apagava grupos legítimos inteiros**: a partir de 60/40
+  entre dois enquadramentos, o grupo menor sumia 100% — porque com um grupo
+  dominante a mediana e o MAD passam a descrever só ele, e o limite fecha em
+  volta da maioria. Gravar de duas distâncias é justamente o que o README pede,
+  então isso destruiria 20-40% de qualquer coleta desbalanceada, em silêncio.
+  Trocar o MAD por percentis evitava a perda mas errava pro outro lado: com
+  dois grupos a dispersão global inflava e amostra degenerada de verdade
+  passava. A medida certa é a distância ao k-ésimo vizinho (k=3): amostra ruim
+  está **sozinha**, amostra de outro enquadramento tem vizinhos colados. O
+  `LIMITE_FRACAO_DESCARTE` ficou como trava final — se o filtro quiser levar
+  mais de 5% de uma classe, ele desiste e avisa em vez de apagar calado.
+  Coberto por `TestFiltroDeOutliers`, verificado reinjetando o algoritmo
+  antigo (falha) e revertendo (passa). Status: **ativo, ainda não medido com
+  dados de gravação real** — os cenários testados são sintéticos.
+
 - **CI do Android voltou a rodar (nunca tinha rodado)** —
   `mobile/gradle.properties`, que é versionado, tinha
   `org.gradle.java.home=C:\Program Files\Android\Android Studio\jbr`: um
