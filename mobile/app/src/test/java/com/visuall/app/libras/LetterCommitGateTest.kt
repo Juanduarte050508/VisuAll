@@ -27,9 +27,10 @@ class LetterCommitGateTest {
     private val estabDinamico = LibrasAnalyzer.ESTAB_MIN_DINAMICO_MS
     private val cooldownEstatico = LibrasAnalyzer.COOLDOWN_ESTATICO
 
-    // Base de tempo alta o bastante pra o cooldown inicial (ultimoTempoAdicao
-    // = 0) já ter passado — senão a primeira letra de todo teste esbarraria
-    // nele.
+    // Base de tempo arbitrária, só pra os testes lerem como tempo de relógio.
+    // Não precisa mais ser alta: o cooldown inicial agora é "nenhuma letra
+    // aceita ainda" em vez de "última aceita no instante 0" (ver o teste
+    // `funciona com o relogio comecando em zero`).
     private val t0 = 1_000_000L
 
     /** Segura a mesma letra por [duracao] ms; devolve se ela foi aceita. */
@@ -51,6 +52,18 @@ class LetterCommitGateTest {
             agora += passo
         }
         return aceita
+    }
+
+    @Test
+    fun `funciona com o relogio comecando em zero`() {
+        // Os dois portões deste pacote guardavam "desde quando" num Long com
+        // 0L significando "não começou". Isso torna o instante 0 indistinguível
+        // de "não começou", e o portão nunca abre. Não aparece em produção
+        // porque System.currentTimeMillis() nunca dá 0 — apareceu quando um
+        // teste do MovementGate passou a contar a partir de t=0, e a mesma
+        // estrutura estava aqui. Agora os dois usam null.
+        val gate = LetterCommitGate()
+        assertTrue(gate.segurar("A", estatico, estabEstatico * 2, inicio = 0L))
     }
 
     @Test

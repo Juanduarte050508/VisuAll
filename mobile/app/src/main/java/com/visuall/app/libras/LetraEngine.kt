@@ -51,19 +51,10 @@ internal class LetraEngine(
     private val calibrationBuffer = ArrayList<FloatArray>()
     @Volatile private var calibrationTarget: String? = null
 
-    // Timestamp de quando o movimento acima de LIMIAR_MOVIMENTO começou a ser
-    // sustentado (0L = não está sustentando agora). Só confiamos no modelo
-    // dinâmico depois de sustentado por MOVIMENTO_SUSTENTADO_MS — ver
-    // comentário do LIMIAR_MOVIMENTO em LibrasAnalyzer.
-    //
-    // Era contado em FRAMES (não em tempo) até esta correção: num aparelho
-    // que analisa menos frames por segundo, "3 frames" passava a levar bem
-    // mais tempo de parede, então a janela de gesto (que dura ~300-500ms de
-    // verdade) terminava antes da histerese liberar o classificador
-    // dinâmico — o app perdia H/J/K/X/Z em celulares mais lentos. Tempo em
-    // vez de contagem de frames deixa o gate consistente independente da
-    // taxa de quadros real.
-    private var movimentoSustentadoDesde = 0L
+    // Só confiamos no modelo dinâmico depois de o movimento ser sustentado por
+    // MOVIMENTO_SUSTENTADO_MS. A regra (e o histórico de por que ela é medida
+    // em tempo e não em contagem de frames) está no MovementGate.
+    private val movementGate = MovementGate()
 
     private data class ModeloIndividual(
         val label: String,
@@ -114,7 +105,7 @@ internal class LetraEngine(
     }
 
     fun resetMovimentoSustentado() {
-        movimentoSustentadoDesde = 0L
+        movementGate.reset()
     }
 
     fun limparBuffer() {
@@ -194,20 +185,6 @@ internal class LetraEngine(
         return Prediction(match.letter, confianca, "calibrado")
     }
 
-    private fun averageFrames(frames: List<FloatArray>): FloatArray {
-        val result = FloatArray(LibrasAnalyzer.FEATURES_ESTATICO)
-        if (frames.isEmpty()) return result
-        frames.forEach { frame ->
-            for (i in result.indices) {
-                result[i] += frame[i]
-            }
-        }
-        for (i in result.indices) {
-            result[i] = result[i] / frames.size.toFloat()
-        }
-        return result
-    }
-
     private fun calcularMovimento(): Float {
         if (bufferLm.size < 5) return 0f
         val recent = bufferLm.toList().takeLast(5)
@@ -216,18 +193,9 @@ internal class LetraEngine(
     }
 
     private fun escolherClassificacao(dados: FloatArray, movimento: Float): Prediction {
-        // Histerese: LIMIAR_MOVIMENTO sozinho não distingue "tremida de 1
-        // frame" de "traço real de H/J/K/X/Z" — os dois cruzam o mesmo valor
-        // de magnitude. A diferença é a DURAÇÃO: um gesto de verdade sustenta
-        // o movimento por um tempo mínimo; ruído da câmera não.
-        val agora = System.currentTimeMillis()
-        if (movimento > LibrasAnalyzer.LIMIAR_MOVIMENTO) {
-            if (movimentoSustentadoDesde == 0L) movimentoSustentadoDesde = agora
-        } else {
-            movimentoSustentadoDesde = 0L
-        }
-        val movimentoConfiavel = movimentoSustentadoDesde != 0L &&
-            (agora - movimentoSustentadoDesde) >= LibrasAnalyzer.MOVIMENTO_SUSTENTADO_MS
+        // A histerese de movimento (por que ela existe e como se comporta) vive
+        // no MovementGate, que é testável porque recebe o instante.
+        val movimentoConfiavel = movementGate.avaliar(movimento, System.currentTimeMillis())
 
         if (movimentoConfiavel && bufferLm.size >= LibrasAnalyzer.JANELA_MLP) {
             return classificarDinamico()
@@ -250,22 +218,27 @@ internal class LetraEngine(
             if (individual.letra != "-") return individual
         }
 
+        return LetterDecision.deProbabilidades(
+            probs = rodarModelo(sessionEstatico, dados, LibrasAnalyzer.FEATURES_ESTATICO),
+            labels = labelsEstatico,
+            confiancaMinima = LibrasAnalyzer.CONFIANCA_MINIMA,
+            margemMinima = LibrasAnalyzer.MARGEM_ESTATICA_MINIMA,
+            modo = "estatico"
+        )
+    }
+
+    // Roda uma sessão ONNX e devolve o vetor de probabilidades. O índice [1] da
+    // saída é a lista de probabilidades porque o treino exporta com
+    // zipmap=False (ver verificar_onnx_exportado em treinar_visuall.py, que
+    // falha o treino se isso mudar).
+    private fun rodarModelo(session: OrtSession, entrada: FloatArray, features: Int): FloatArray {
         val tensor = OnnxTensor.createTensor(
-            ortEnv, FloatBuffer.wrap(dados), longArrayOf(1, LibrasAnalyzer.FEATURES_ESTATICO.toLong()))
-        val out    = sessionEstatico.run(mapOf("landmarks_input" to tensor))
+            ortEnv, FloatBuffer.wrap(entrada), longArrayOf(1, features.toLong()))
+        val out = session.run(mapOf("landmarks_input" to tensor))
         @Suppress("UNCHECKED_CAST")
-        val probs  = (out[1].value as Array<FloatArray>)[0]
-        val idx    = probs.indices.maxByOrNull { probs[it] } ?: 0
-        val conf   = probs[idx]
-        // Margem contra a segunda melhor opção: se o modelo está dividido
-        // (ex.: C vs mão aberta), rejeitamos em vez de chutar.
-        val second = probs.indices.filter { it != idx }.maxOfOrNull { probs[it] } ?: 0f
-        val margem = conf - second
-        val label  = labelsEstatico.getOrNull(idx)
-        val letra  = if (label != null && conf >= LibrasAnalyzer.CONFIANCA_MINIMA &&
-                         margem >= LibrasAnalyzer.MARGEM_ESTATICA_MINIMA) label else "-"
+        val probs = (out[1].value as Array<FloatArray>)[0]
         tensor.close(); out.close()
-        return Prediction(letra, conf, "estatico", margem)
+        return probs
     }
 
     private fun classificarDinamico(): Prediction {
@@ -299,22 +272,13 @@ internal class LetraEngine(
         session: OrtSession,
         labels: List<String>,
         modo: String
-    ): Prediction {
-        val tensor = OnnxTensor.createTensor(
-            ortEnv, FloatBuffer.wrap(entrada), longArrayOf(1, LibrasAnalyzer.FEATURES_DINAMICO.toLong()))
-        val out    = session.run(mapOf("landmarks_input" to tensor))
-        @Suppress("UNCHECKED_CAST")
-        val probs  = (out[1].value as Array<FloatArray>)[0]
-        val idx    = probs.indices.maxByOrNull { probs[it] } ?: 0
-        val conf   = probs[idx]
-        val second = probs.indices.filter { it != idx }.maxOfOrNull { probs[it] } ?: 0f
-        val margem = conf - second
-        val letra  = if (conf >= LibrasAnalyzer.CONFIANCA_DINAMICA &&
-                         margem >= LibrasAnalyzer.MARGEM_DINAMICA_MINIMA &&
-                         idx < labels.size) labels[idx] else "-"
-        tensor.close(); out.close()
-        return Prediction(letra, conf, modo, margem)
-    }
+    ): Prediction = LetterDecision.deProbabilidades(
+        probs = rodarModelo(session, entrada, LibrasAnalyzer.FEATURES_DINAMICO),
+        labels = labels,
+        confiancaMinima = LibrasAnalyzer.CONFIANCA_DINAMICA,
+        margemMinima = LibrasAnalyzer.MARGEM_DINAMICA_MINIMA,
+        modo = modo
+    )
 
     private fun classificarIndividual(
         entrada: FloatArray,
@@ -324,35 +288,24 @@ internal class LetraEngine(
         margemMinima: Float,
         modo: String
     ): Prediction {
-        var melhorLabel = "-"
-        var melhorConf = 0f
-        var segundoConf = 0f
-
-        modelos.forEach { modelo ->
-            val tensor = OnnxTensor.createTensor(
-                ortEnv, FloatBuffer.wrap(entrada), longArrayOf(1, features.toLong()))
-            val out = modelo.session.run(mapOf("landmarks_input" to tensor))
-            @Suppress("UNCHECKED_CAST")
-            val probs = (out[1].value as Array<FloatArray>)[0]
+        val pontuacoes = modelos.map { modelo ->
+            val probs = rodarModelo(modelo.session, entrada, features)
+            // Modelo binário: a saída [1] é "é esta letra". Alguns exports com
+            // uma classe só devolvem um valor — aí ele é a própria resposta.
             val positivo = when {
                 probs.size >= 2 -> probs[1]
                 probs.size == 1 -> probs[0]
                 else -> 0f
             }
-            if (positivo > melhorConf) {
-                segundoConf = melhorConf
-                melhorConf = positivo
-                melhorLabel = modelo.label
-            } else if (positivo > segundoConf) {
-                segundoConf = positivo
-            }
-            tensor.close()
-            out.close()
+            modelo.label to positivo
         }
-
-        val margem = melhorConf - segundoConf
-        val letra = if (melhorConf >= confiancaMinima && margem >= margemMinima) melhorLabel else "-"
-        return Prediction(letra, melhorConf, modo, margem)
+        return LetterDecision.deModelosIndividuais(
+            pontuacoes = pontuacoes,
+            confiancaMinima = confiancaMinima,
+            margemMinima = margemMinima,
+            confiancaSemRival = LibrasAnalyzer.CONFIANCA_INDIVIDUAL_SEM_RIVAL,
+            modo = modo
+        )
     }
 
     // ── Calibração pessoal (API pública usada pela UI) ─────────────────────
@@ -381,7 +334,9 @@ internal class LetraEngine(
                 }
                 trainingStore.incrementSampleCount(letra, sequencias)
             } else {
-                val referencia = averageFrames(frames)
+                val referencia = LetterDecision.media(
+                    frames, LibrasAnalyzer.FEATURES_ESTATICO
+                )
                 trainingStore.saveStaticCalibration(letra, referencia)
                 trainingStore.saveStaticSamples(letra, frames)
                 trainingStore.incrementSampleCount(letra, frames.size)

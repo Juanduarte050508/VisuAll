@@ -27,13 +27,20 @@ package com.visuall.app.libras
 internal class LetterCommitGate {
 
     // Última letra vista (mesmo que ainda não aceita) e desde quando ela
-    // vem se repetindo. 0L = ainda não estabilizou.
+    // vem se repetindo. null = ainda não estabilizou.
+    //
+    // Nullable em vez de "0L significa que não começou": com o sentinela, um
+    // instante que por acaso valha 0 é indistinguível de "não começou" e o
+    // portão nunca abre. Em produção currentTimeMillis() não dá 0, então nunca
+    // apareceu aqui — mas apareceu no MovementGate, que tem a mesma estrutura,
+    // assim que um teste começou a contar em t=0.
     private var ultimaPredicao = ""
-    private var estabilidadeDesde = 0L
+    private var estabilidadeDesde: Long? = null
 
-    // Última letra que de fato entrou na frase, e quando.
+    // Última letra que de fato entrou na frase, e quando. null = nenhuma ainda,
+    // e aí não há cooldown pra respeitar.
     private var ultimaLetraAdicionada = ""
-    private var ultimoTempoAdicao = 0L
+    private var ultimoTempoAdicao: Long? = null
 
     val letraEstabilizando: String get() = ultimaPredicao
 
@@ -50,10 +57,10 @@ internal class LetterCommitGate {
             // Trocou de letra: recomeça a contagem. Se é a mesma e ainda não
             // havia contagem em andamento, começa agora.
             if (letra != ultimaPredicao) estabilidadeDesde = agora
-            else if (estabilidadeDesde == 0L) estabilidadeDesde = agora
+            else if (estabilidadeDesde == null) estabilidadeDesde = agora
             ultimaPredicao = letra
         } else {
-            estabilidadeDesde = 0L
+            estabilidadeDesde = null
             ultimaPredicao = ""
         }
 
@@ -68,20 +75,22 @@ internal class LetterCommitGate {
         } else {
             LibrasAnalyzer.COOLDOWN_ESTATICO
         }
-        val estabilidadeOk =
-            estabilidadeDesde != 0L && (agora - estabilidadeDesde) >= estabMinMs
+        val desde = estabilidadeDesde
+        val estabilidadeOk = desde != null && (agora - desde) >= estabMinMs
+        // Sem letra aceita antes, não há cooldown a cumprir.
+        val cooldownOk = ultimoTempoAdicao?.let { (agora - it) > cooldown } ?: true
 
         return estabilidadeOk &&
             letra != "-" &&
             letra != ultimaLetraAdicionada &&
-            (agora - ultimoTempoAdicao) > cooldown
+            cooldownOk
     }
 
     /** A letra entrou na frase: zera a estabilidade e arma o cooldown. */
     fun registrarComite(letra: String, agora: Long) {
         ultimaLetraAdicionada = letra
         ultimoTempoAdicao = agora
-        estabilidadeDesde = 0L
+        estabilidadeDesde = null
     }
 
     /**
@@ -108,7 +117,7 @@ internal class LetterCommitGate {
      */
     fun reset() {
         ultimaPredicao = ""
-        estabilidadeDesde = 0L
+        estabilidadeDesde = null
         ultimaLetraAdicionada = ""
     }
 }

@@ -83,6 +83,15 @@ class LibrasAnalyzer(
         // aprendeu a rejeitar o que não é nenhuma das classes que conhece.
         // Por isso a barra aqui é mais alta que a do modelo geral.
         const val CONFIANCA_INDIVIDUAL   = 0.97f
+        // Usado quando existe UM ÚNICO modelo individual treinado. Nesse caso
+        // não há segundo colocado, então a margem vira igual à confiança e o
+        // portão de margem não filtra nada — qualquer resposta acima de
+        // CONFIANCA_INDIVIDUAL passa. E esse é o primeiro cenário que vai
+        // acontecer, não um caso de borda: treinar uma letra só pra medir se
+        // gravar resolve gera exatamente um modelo. Como não há com quem
+        // comparar, a exigência sobe. Precisa validar em celular real: se a
+        // letra recém-treinada não aparecer nunca, é o primeiro valor a baixar.
+        const val CONFIANCA_INDIVIDUAL_SEM_RIVAL = 0.99f
         // Eu e o Rafael tínhamos valores incompatíveis aqui: 0.30 (dele, igual
         // ao Python) deixava o J disparar com qualquer tremida; 0.55 (meu)
         // travava gestos reais de H/J/K/X/Z no modelo estático. Os dois

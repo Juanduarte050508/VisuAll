@@ -13,6 +13,20 @@ Formato: **Constante(s)** — valor atual — decisão e por quê — status.
 
 ## Não lançado
 
+- **`CONFIANCA_INDIVIDUAL_SEM_RIVAL` = 0.99 (novo)** — o portão de margem dos
+  modelos individuais não filtrava nada quando existia **um único** modelo
+  treinado. Com um só, o segundo colocado é 0, então a margem passa a valer o
+  mesmo que a própria confiança e `margem >= 0.32` é satisfeito por qualquer
+  resposta acima de `CONFIANCA_INDIVIDUAL`. E esse não é um caso de borda: é o
+  primeiro que vai acontecer — treinar uma letra só, pra medir se gravar
+  resolve, gera exatamente um modelo individual. Como o binário nunca viu "mão
+  mexendo sem sinalizar" como negativo (mesmo motivo de `CONFIANCA_INDIVIDUAL`
+  ser alta), ele responde alto com facilidade, e o resultado seria a letra
+  recém-treinada aparecendo em qualquer movimento. Agora, sem rival, a
+  exigência sobe pra 0.99 e a margem é reportada como 0 em vez de fingir uma
+  folga que não foi medida. Status: **ativo, precisa validar em celular** — se
+  a letra treinada não aparecer nunca, este é o primeiro valor a baixar.
+
 - **`LIMITE_FRACAO_DESCARTE` = 0.05, e o filtro de outliers passou a medir
   distância ao vizinho** — o filtro novo (`filter_outlier_samples`) usava
   `mediana + 6*MAD` da distância até o centro da classe. Medido com dados no
