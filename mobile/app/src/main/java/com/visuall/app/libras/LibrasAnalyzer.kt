@@ -269,9 +269,10 @@ class LibrasAnalyzer(
     private val commitGate            = LetterCommitGate()
     private var tempoInicioEsticado   = 0L
     private var ultimoTempoLimpar     = 0L
-    private var frase                 = ""
+    // A frase e as regras de como ela muda (repetição, sugestão, apagar) moram
+    // no SentenceBuilder, que é testável em JVM.
+    private val sentence              = SentenceBuilder()
     private var framesSemMao          = 0
-    private var letraRepetidaPendente = ""
     // Timestamp monotônico exigido pelo modo VIDEO do MediaPipe. Precisa ser
     // estritamente crescente a cada frame para o rastreamento funcionar.
     private var videoTimestamp        = 0L
@@ -287,7 +288,7 @@ class LibrasAnalyzer(
     // não depender de lembrar a mesma lista de resets em cada lugar.
     private fun resetEstadoAlfabeto() {
         commitGate.reset()
-        letraRepetidaPendente = ""
+        sentence.limparPendente()
         letraEngine.resetMovimentoSustentado()
         // Sem isso, tirar a mão do quadro e voltar a fazer O MESMO sinal (ex.:
         // "A" a 87%) seria filtrado pelo dedup de notificarLetra por parecer
@@ -389,7 +390,7 @@ class LibrasAnalyzer(
 
             if ((agora - tempoInicioEsticado) >= TEMPO_PRA_LIMPAR
                 && (agora - ultimoTempoLimpar) > 2_000L) {
-                frase = ""; commitGate.liberarRepeticao(); letraRepetidaPendente = ""
+                sentence.limpar(); commitGate.liberarRepeticao()
                 tempoInicioEsticado = 0L; ultimoTempoLimpar = agora
                 onRepeticaoPendente(null)
                 onFraseUpdate("")
@@ -407,21 +408,13 @@ class LibrasAnalyzer(
 
             val agora = System.currentTimeMillis()
             if (commitGate.avaliar(letra, modo, agora)) {
-                if (frase.lastOrNull()?.toString() == letra) {
-                    if (podeRepetirAutomaticamente(letra)) {
-                        frase += letra
-                        letraRepetidaPendente = ""
+                when (sentence.aceitarLetra(letra)) {
+                    SentenceBuilder.Resultado.ADICIONADA -> {
                         onRepeticaoPendente(null)
-                        onFraseUpdate(frase)
-                    } else {
-                        letraRepetidaPendente = letra
-                        onRepeticaoPendente(letra)
+                        onFraseUpdate(sentence.frase)
                     }
-                } else {
-                    frase += letra
-                    letraRepetidaPendente = ""
-                    onRepeticaoPendente(null)
-                    onFraseUpdate(frase)
+                    SentenceBuilder.Resultado.AGUARDANDO_CONFIRMACAO ->
+                        onRepeticaoPendente(letra)
                 }
                 commitGate.registrarComite(letra, agora)
             }
@@ -492,11 +485,6 @@ class LibrasAnalyzer(
         }
     }
 
-    private fun podeRepetirAutomaticamente(letra: String): Boolean {
-        if (letra !in LETRAS_REPETICAO_AUTO) return false
-        return frase.length < 2 || frase[frase.length - 2].toString() != letra
-    }
-
     private fun analisarCorpo(handResult: HandLandmarkerResult, poseResult: PoseLandmarkerResult) {
         onLandmarks(handsToArrays(handResult), poseToArray(poseResult), frameAspect)
         val bodyFrame = bodyEngine.extractFrame(handResult, poseResult, aspectX)
@@ -523,7 +511,7 @@ class LibrasAnalyzer(
             onGestoLimpar(progresso)
             if ((agora - tempoInicioEsticado) >= TEMPO_PRA_LIMPAR &&
                 (agora - ultimoTempoLimpar) > 2_000L) {
-                frase = ""; tempoInicioEsticado = 0L; ultimoTempoLimpar = agora
+                sentence.limpar(); tempoInicioEsticado = 0L; ultimoTempoLimpar = agora
                 bodyEngine.limparTokens()
                 onFraseUpdate("")
             }
@@ -537,8 +525,8 @@ class LibrasAnalyzer(
 
         val novaFrase = bodyEngine.processarFrame(bodyFrame, agora, ::notificarLetra, ::notificarFeedback)
         if (novaFrase != null) {
-            frase = novaFrase
-            onFraseUpdate(frase)
+            sentence.definir(novaFrase)
+            onFraseUpdate(sentence.frase)
         }
     }
 
@@ -548,7 +536,7 @@ class LibrasAnalyzer(
         resetEstadoAlfabeto()
         // Troca de modo começa uma frase nova (letras e sinais de corpo não se
         // misturam na mesma frase).
-        frase = ""
+        sentence.limpar()
         onFraseUpdate("")
         onRepeticaoPendente(null)
         // resetEstadoAlfabeto() (acima) já zera o cache de dedup da letra;
@@ -582,52 +570,47 @@ class LibrasAnalyzer(
     fun labelsDinamicas(): Set<String> = letraEngine.labelsDinamicasSet
 
     fun aplicarSugestao(palavra: String) {
-        val sugestao = palavra.trim()
-        if (sugestao.isBlank()) return
-
-        val prefixo = frase.substringBeforeLast(" ", missingDelimiterValue = "")
-        frase = if (prefixo.isBlank()) {
-            "$sugestao "
-        } else {
-            "$prefixo $sugestao "
-        }
-
+        if (!sentence.aplicarSugestao(palavra)) return
         commitGate.reset()
-        letraRepetidaPendente = ""
         onRepeticaoPendente(null)
-        onFraseUpdate(frase)
+        onFraseUpdate(sentence.frase)
     }
 
-    fun adicionarEspaco()  { frase += " "; letraRepetidaPendente = ""; onRepeticaoPendente(null); onFraseUpdate(frase) }
+    fun adicionarEspaco() {
+        sentence.adicionarEspaco()
+        onRepeticaoPendente(null)
+        onFraseUpdate(sentence.frase)
+    }
+
     fun repetirLetraPendente() {
-        if (letraRepetidaPendente.isNotBlank()) {
-            frase += letraRepetidaPendente
-            letraRepetidaPendente = ""
-            commitGate.liberarRepeticao()
-            onRepeticaoPendente(null)
-            onFraseUpdate(frase)
-        }
+        if (!sentence.confirmarRepeticao()) return
+        commitGate.liberarRepeticao()
+        onRepeticaoPendente(null)
+        onFraseUpdate(sentence.frase)
     }
     fun apagarUltima() {
         if (modoAtual == Modo.CORPO) {
             // No corpo apagamos o último SINAL (token) e re-traduzimos.
             val novaFrase = bodyEngine.apagarUltimoToken() ?: return
-            frase = novaFrase
-            onFraseUpdate(frase)
+            sentence.definir(novaFrase)
+            onFraseUpdate(sentence.frase)
             return
         }
-        if (frase.isNotEmpty()) {
-            frase = frase.dropLast(1)
-            letraRepetidaPendente = ""; commitGate.liberarRepeticao()
-            onRepeticaoPendente(null); onFraseUpdate(frase)
-        }
+        if (!sentence.apagarUltima()) return
+        commitGate.liberarRepeticao()
+        onRepeticaoPendente(null)
+        onFraseUpdate(sentence.frase)
     }
+
     fun limparFrase() {
-        frase = ""; letraRepetidaPendente = ""; commitGate.liberarRepeticao()
+        sentence.limpar()
+        commitGate.liberarRepeticao()
         bodyEngine.limparTokens()
-        onRepeticaoPendente(null); onFraseUpdate(frase)
+        onRepeticaoPendente(null)
+        onFraseUpdate(sentence.frase)
     }
-    fun getFrase(): String = frase
+
+    fun getFrase(): String = sentence.frase
 
     fun close() {
         runCatching { handLandmarker.close() }
