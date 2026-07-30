@@ -1156,14 +1156,9 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
             binding.phraseBubble.isVisible = frase.isNotBlank()
             updateWordSuggestions(frase)
 
-            // TTS: fala a última letra adicionada
+            // TTS: fala o que acabou de entrar (regra e casos em PhraseOutput).
+            val fala = PhraseOutput.trechoParaFalar(frase, fraseAnterior)
             if (frase.length > fraseAnterior.length) {
-                val trechoNovo = frase.removePrefix(fraseAnterior).trim()
-                val fala = if (frase.endsWith(" ")) {
-                    frase.trim().substringAfterLast(' ')
-                } else {
-                    trechoNovo.ifBlank { frase.lastOrNull()?.toString().orEmpty() }
-                }
                 if (fala.isNotBlank()) {
                     tts?.speak(fala, TextToSpeech.QUEUE_FLUSH, null, null)
                 }
@@ -1175,16 +1170,7 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         }
     }
 
-    // Porta de montar_exibicao (app.py): acrescenta "?" ao texto mostrado
-    // quando a sobrancelha está levantada, sem mexer na frase armazenada.
-    private fun fraseExibida(): String {
-        val base = fraseBase
-        return if (interrogativoAtivo && base.isNotBlank() && !base.trimEnd().endsWith("?")) {
-            base.trimEnd() + "?"
-        } else {
-            base
-        }
-    }
+    private fun fraseExibida(): String = PhraseOutput.exibicao(fraseBase, interrogativoAtivo)
 
     private fun onInterrogativoAtualizado(ativo: Boolean) {
         activity?.runOnUiThread {
