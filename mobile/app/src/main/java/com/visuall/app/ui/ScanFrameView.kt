@@ -1,28 +1,49 @@
 package com.visuall.app.ui
 
+import android.animation.ArgbEvaluator
+import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.util.AttributeSet
 import android.view.View
+import android.view.animation.LinearInterpolator
 
+/**
+ * Moldura de escaneamento do modo Libras.
+ *
+ * A cor da moldura reflete o nível de feedback do reconhecimento
+ * (neutro / bom / alerta), para que o usuário não precise desviar o
+ * olhar da mão para ler o texto de status embaixo da tela.
+ */
 class ScanFrameView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
     defStyle: Int = 0
 ) : View(context, attrs, defStyle) {
 
+    companion object {
+        const val FEEDBACK_NEUTRO = 0
+        const val FEEDBACK_BOM = 1
+        const val FEEDBACK_ALERTA = 2
+
+        private val COLOR_NEUTRO = Color.parseColor("#E8A020")
+        private val COLOR_BOM = Color.parseColor("#4CD97A")
+        private val COLOR_ALERTA = Color.parseColor("#FF6B5E")
+    }
+
+    private var currentLevel = FEEDBACK_NEUTRO
+    private var animatedColor = COLOR_NEUTRO
+    private var colorAnimator: ValueAnimator? = null
+
     private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#66E8A020")
         style = Paint.Style.STROKE
         strokeWidth = 14f
         strokeCap = Paint.Cap.ROUND
-        setShadowLayer(22f, 0f, 0f, Color.parseColor("#AAE8A020"))
     }
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#E8A020")
         style = Paint.Style.STROKE
         strokeWidth = 7f
         strokeCap = Paint.Cap.ROUND
@@ -32,6 +53,39 @@ class ScanFrameView @JvmOverloads constructor(
 
     init {
         setLayerType(LAYER_TYPE_SOFTWARE, null)
+        applyColor(COLOR_NEUTRO)
+    }
+
+    /** Atualiza a cor da moldura conforme o nível de feedback do reconhecimento. */
+    fun setFeedbackLevel(level: Int) {
+        if (level == currentLevel) return
+        currentLevel = level
+        val target = when (level) {
+            FEEDBACK_BOM -> COLOR_BOM
+            FEEDBACK_ALERTA -> COLOR_ALERTA
+            else -> COLOR_NEUTRO
+        }
+        colorAnimator?.cancel()
+        colorAnimator = ValueAnimator.ofObject(ArgbEvaluator(), animatedColor, target).apply {
+            duration = 180L
+            interpolator = LinearInterpolator()
+            addUpdateListener {
+                applyColor(it.animatedValue as Int)
+                invalidate()
+            }
+            start()
+        }
+    }
+
+    private fun applyColor(color: Int) {
+        animatedColor = color
+        paint.color = color
+        glowPaint.color = ColorUtilsAlpha(color, 0x66)
+        glowPaint.setShadowLayer(22f, 0f, 0f, ColorUtilsAlpha(color, 0xAA))
+    }
+
+    private fun ColorUtilsAlpha(color: Int, alpha: Int): Int {
+        return (color and 0x00FFFFFF) or (alpha shl 24)
     }
 
     override fun onDraw(canvas: Canvas) {

@@ -54,6 +54,7 @@ class CameraFragment : Fragment() {
     private lateinit var cameraExecutor: ExecutorService
     private var cameraProvider: ProcessCameraProvider? = null
     private var camera: Camera? = null
+    private var preview: Preview? = null
     private var imageCapture: ImageCapture? = null
     private var videoCapture: VideoCapture<Recorder>? = null
     private var recording: Recording? = null
@@ -121,10 +122,11 @@ class CameraFragment : Fragment() {
             .setAspectRatioStrategy(aspectRatioStrategy)
             .build()
 
-        val preview = Preview.Builder()
+        val previewUseCase = Preview.Builder()
             .setResolutionSelector(resolutionSelector)
             .build()
             .also { it.setSurfaceProvider(currentBinding.previewView.surfaceProvider) }
+        preview = previewUseCase
 
         try {
             provider.unbindAll()
@@ -147,10 +149,23 @@ class CameraFragment : Fragment() {
         } catch (e: Exception) { e.printStackTrace() }
     }
 
-    // ── Aspect Ratio: H,4:3 = altura derivada da largura (match_parent) ───
+    // ── Aspect Ratio: altura derivada da largura (match_parent) ────────────
     private fun applyAspectRatioToPreview() {
-        // width=match_parent, height=0dp → ratio H,4:3 = altura = largura * 4/3
-        val ratio = if (is4to3) "H,3:4" else "H,9:16"
+        // Usa a resolução real entregue pela câmera (não uma suposição fixa
+        // de "3:4"/"9:16"): o sensor raramente entrega exatamente esse
+        // valor, e a caixa da preview precisa bater com o que é capturado
+        // de fato — senão a moldura mostrada não corresponde à foto/vídeo
+        // final e a imagem aparece cortada/deslocada.
+        val resolution = preview?.resolutionInfo?.resolution
+        val ratio = if (resolution != null && resolution.width > 0 && resolution.height > 0) {
+            val longSide = maxOf(resolution.width, resolution.height)
+            val shortSide = minOf(resolution.width, resolution.height)
+            "H,$shortSide:$longSide"
+        } else if (is4to3) {
+            "H,3:4"
+        } else {
+            "H,9:16"
+        }
         val cs = ConstraintSet()
         cs.clone(binding.root)
         cs.setDimensionRatio(R.id.preview_view, ratio)

@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="Theme.VisuAll" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <item name="colorPrimary">#E6A817</item>
-        <item name="colorPrimaryVariant">#C49010</item>
-        <item name="colorOnPrimary">#000000</item>
-        <item name="colorSurface">#1A1A1A</item>
-        <item name="colorOnSurface">#FFFFFF</item>
+        <item name="colorPrimary">@color/gold_primary</item>
+        <item name="colorPrimaryVariant">@color/gold_dark</item>
+        <item name="colorOnPrimary">@color/text_on_gold</item>
+        <item name="colorSurface">@color/surface</item>
+        <item name="colorOnSurface">@color/text_primary</item>
         <item name="android:windowBackground">#000000</item>
         <item name="android:statusBarColor">#000000</item>
         <item name="android:navigationBarColor">#000000</item>

@@ -2,65 +2,74 @@
 <androidx.constraintlayout.widget.ConstraintLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/root_layout"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#000000">
+    android:background="@color/background">
 
     <!--
-        PreviewView com ratio 3:4 (portrait 4:3) centralizado.
-        A largura é match_parent (0dp entre start/end),
-        a altura é derivada do dimensionRatio W,3:4 = altura = largura * 4/3.
-        Centralizado verticalmente entre topo e fundo do parent.
-    -->
-    <!--
-        Preview 4:3: largura = match_parent, altura = largura * 4/3.
-        Com width=match_parent e height=0dp + dimensionRatio H,4:3,
-        o ConstraintLayout calcula a altura a partir da largura.
-        Centralizado verticalmente pelo bias.
+        PreviewView com proporção dinâmica (4:3 ou 16:9, calculada em
+        CameraFragment a partir da resolução real da câmera).
+        Fica centralizada na faixa entre a barra de ícones do topo e a
+        fileira de modos (RETRATO/FOTO/VIDEO), em vez de flutuar do topo
+        até o fim da tela — isso evita que, em 16:9, a preview invada a
+        área dos controles inferiores.
     -->
     <androidx.camera.view.PreviewView
         android:id="@+id/preview_view"
         android:layout_width="match_parent"
         android:layout_height="0dp"
+        android:layout_marginTop="72dp"
+        android:layout_marginBottom="16dp"
         app:scaleType="fillCenter"
         app:layout_constraintDimensionRatio="H,3:4"
         app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintBottom_toTopOf="@id/modes_row"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintVertical_bias="0.5" />
+
+    <!-- Contorno sutil delimitando a área real de captura -->
+    <View
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:background="@drawable/bg_viewfinder_border"
+        app:layout_constraintTop_toTopOf="@id/preview_view"
+        app:layout_constraintBottom_toBottomOf="@id/preview_view"
+        app:layout_constraintStart_toStartOf="@id/preview_view"
+        app:layout_constraintEnd_toEndOf="@id/preview_view" />
 
     <!-- Flash -->
     <ImageView
         android:id="@+id/btn_flash"
         android:layout_width="44dp"
         android:layout_height="44dp"
-        android:layout_marginTop="48dp"
-        android:layout_marginStart="20dp"
-        android:src="@drawable/ic_flash_auto"
-        android:padding="8dp"
+        android:layout_marginStart="28dp"
+        android:layout_marginTop="16dp"
         android:contentDescription="Flash"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintStart_toStartOf="parent" />
+        android:padding="8dp"
+        android:src="@drawable/ic_flash_auto"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
 
     <!-- Botão Aspect Ratio (topo direito) -->
     <TextView
         android:id="@+id/btn_aspect_ratio"
-        android:layout_width="wrap_content"
-        android:layout_height="44dp"
-        android:layout_marginTop="48dp"
-        android:layout_marginEnd="20dp"
-        android:text="4:3"
-        android:textColor="#FFFFFF"
-        android:textSize="13sp"
-        android:textStyle="bold"
-        android:gravity="center"
-        android:paddingHorizontal="10dp"
+        android:layout_width="43dp"
+        android:layout_height="39dp"
+        android:layout_marginTop="16dp"
+        android:layout_marginEnd="24dp"
         android:background="@drawable/bg_zoom"
         android:contentDescription="Aspect Ratio"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintEnd_toEndOf="parent" />
+        android:gravity="center"
+        android:paddingHorizontal="10dp"
+        android:text="4:3"
+        android:textColor="@color/text_primary"
+        android:textSize="13sp"
+        android:textStyle="bold"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
 
     <!-- Timer gravação -->
     <TextView
@@ -72,7 +81,7 @@
         android:paddingHorizontal="10dp"
         android:paddingVertical="4dp"
         android:text="● 00:00"
-        android:textColor="#FFFFFF"
+        android:textColor="@color/text_primary"
         android:textSize="12sp"
         android:textStyle="bold"
         android:visibility="gone"
@@ -83,39 +92,39 @@
     <!-- Zoom -->
     <LinearLayout
         android:id="@+id/zoom_container"
-        android:layout_width="54dp"
-        android:layout_height="214dp"
+        android:layout_width="39dp"
+        android:layout_height="201dp"
         android:layout_marginEnd="14dp"
-        android:orientation="vertical"
-        android:gravity="center"
         android:background="@drawable/bg_zoom"
+        android:gravity="center"
+        android:orientation="vertical"
         android:paddingHorizontal="6dp"
         android:paddingVertical="10dp"
-        app:layout_constraintTop_toTopOf="@id/preview_view"
         app:layout_constraintBottom_toBottomOf="@id/preview_view"
-        app:layout_constraintEnd_toEndOf="parent">
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="@id/preview_view">
 
         <TextView
             android:id="@+id/tv_zoom_max"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="10x"
-            android:textColor="#E6A817"
+            android:textColor="@color/gold_primary"
             android:textSize="11sp"
             android:textStyle="bold" />
 
         <com.visuall.app.ui.VerticalZoomSlider
             android:id="@+id/seek_zoom"
             android:layout_width="34dp"
-            android:layout_height="142dp"
+            android:layout_height="121dp"
             android:layout_marginVertical="8dp" />
 
         <TextView
             android:id="@+id/tv_zoom_min"
             android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
+            android:layout_height="17dp"
             android:text="1x"
-            android:textColor="#F5F1E8"
+            android:textColor="@color/text_primary"
             android:textSize="11sp"
             android:textStyle="bold" />
 
@@ -136,19 +145,19 @@
         <TextView android:id="@+id/mode_retrato"
             android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:layout_marginHorizontal="14dp" android:text="RETRATO"
-            android:textColor="#808080" android:textSize="12sp"
+            android:textColor="@color/text_dim" android:textSize="12sp"
             android:letterSpacing="0.05" android:paddingVertical="6dp" />
 
         <TextView android:id="@+id/mode_foto"
             android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:layout_marginHorizontal="14dp" android:text="FOTO"
-            android:textColor="#E6A817" android:textSize="12sp"
+            android:textColor="@color/gold_primary" android:textSize="12sp"
             android:letterSpacing="0.05" android:paddingVertical="6dp" />
 
         <TextView android:id="@+id/mode_video"
             android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:layout_marginHorizontal="14dp" android:text="VIDEO"
-            android:textColor="#808080" android:textSize="12sp"
+            android:textColor="@color/text_dim" android:textSize="12sp"
             android:letterSpacing="0.05" android:paddingVertical="6dp" />
 
         <ImageView android:id="@+id/btn_libras_mode"
@@ -158,7 +167,7 @@
             android:contentDescription="Entrar no modo Libras"
             android:padding="8dp"
             android:src="@drawable/ic_accessibility"
-            app:tint="#E8A020" />
+            app:tint="@color/gold_primary" />
 
     </LinearLayout>
 
@@ -209,16 +218,16 @@
         <ImageView
             android:id="@+id/btn_flip"
             android:layout_width="54dp"
-            android:layout_height="54dp"
-            android:src="@drawable/ic_flip"
+            android:layout_height="53dp"
             android:contentDescription="Girar câmera"
             android:padding="10dp"
             android:scaleType="centerInside"
-            app:layout_constraintDimensionRatio="1:1"
-            app:layout_constraintTop_toTopOf="parent"
+            android:src="@drawable/ic_flip"
             app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintDimensionRatio="1:1"
+            app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toEndOf="@id/shutter_container"
-            app:layout_constraintEnd_toEndOf="parent" />
+            app:layout_constraintTop_toTopOf="parent" />
 
     </androidx.constraintlayout.widget.ConstraintLayout>
 

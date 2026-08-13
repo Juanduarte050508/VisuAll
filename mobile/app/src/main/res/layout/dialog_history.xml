@@ -22,7 +22,7 @@
         android:layout_marginHorizontal="20dp"
         android:layout_marginBottom="8dp"
         android:text="Conversa"
-        android:textColor="#FFFFFF"
+        android:textColor="@color/text_primary"
         android:textSize="16sp"
         android:textStyle="bold" />
 
@@ -44,7 +44,7 @@
             android:background="@drawable/vf_bg_mode_inactive"
             android:gravity="center"
             android:text="COPIAR"
-            android:textColor="#F5F1E8"
+            android:textColor="@color/text_primary"
             android:textSize="10sp"
             android:textStyle="bold" />
 
@@ -57,7 +57,7 @@
             android:background="@drawable/vf_bg_mode_active"
             android:gravity="center"
             android:text="COMPARTILHAR"
-            android:textColor="#070707"
+            android:textColor="@color/text_on_gold"
             android:textSize="10sp"
             android:textStyle="bold" />
 
@@ -70,7 +70,7 @@
             android:background="@drawable/vf_bg_mode_inactive"
             android:gravity="center"
             android:text="LIMPAR"
-            android:textColor="#F5F1E8"
+            android:textColor="@color/text_primary"
             android:textSize="10sp"
             android:textStyle="bold" />
     </LinearLayout>

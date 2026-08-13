@@ -4,10 +4,10 @@
     <item android:gravity="top|start">
         <layer-list>
             <item android:width="40dp" android:height="3dp">
-                <shape><solid android:color="#E6A817"/></shape>
+                <shape><solid android:color="@color/gold_primary"/></shape>
             </item>
             <item android:width="3dp" android:height="40dp">
-                <shape><solid android:color="#E6A817"/></shape>
+                <shape><solid android:color="@color/gold_primary"/></shape>
             </item>
         </layer-list>
     </item>
@@ -15,10 +15,10 @@
     <item android:gravity="top|end">
         <layer-list>
             <item android:width="40dp" android:height="3dp">
-                <shape><solid android:color="#E6A817"/></shape>
+                <shape><solid android:color="@color/gold_primary"/></shape>
             </item>
             <item android:gravity="end" android:width="3dp" android:height="40dp">
-                <shape><solid android:color="#E6A817"/></shape>
+                <shape><solid android:color="@color/gold_primary"/></shape>
             </item>
         </layer-list>
     </item>
@@ -26,10 +26,10 @@
     <item android:gravity="bottom|start">
         <layer-list>
             <item android:width="40dp" android:height="3dp">
-                <shape><solid android:color="#E6A817"/></shape>
+                <shape><solid android:color="@color/gold_primary"/></shape>
             </item>
             <item android:width="3dp" android:height="40dp">
-                <shape><solid android:color="#E6A817"/></shape>
+                <shape><solid android:color="@color/gold_primary"/></shape>
             </item>
         </layer-list>
     </item>
@@ -37,10 +37,10 @@
     <item android:gravity="bottom|end">
         <layer-list>
             <item android:width="40dp" android:height="3dp">
-                <shape><solid android:color="#E6A817"/></shape>
+                <shape><solid android:color="@color/gold_primary"/></shape>
             </item>
             <item android:gravity="end" android:width="3dp" android:height="40dp">
-                <shape><solid android:color="#E6A817"/></shape>
+                <shape><solid android:color="@color/gold_primary"/></shape>
             </item>
         </layer-list>
     </item>
