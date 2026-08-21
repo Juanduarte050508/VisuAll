@@ -1,9 +1,11 @@
 package com.visuall.app.libras
 
+import android.Manifest
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.content.res.ColorStateList
 import android.os.Build
@@ -160,16 +162,35 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
     }
 
     // ── Inicia provider uma única vez ──────────────────────────────────────
+    private fun hasCameraPermission(): Boolean {
+        val context = context ?: return false
+        return ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+            PackageManager.PERMISSION_GRANTED
+    }
+
     private fun startCamera() {
+        val context = context ?: return
+        // Ver a explicação longa no CameraFragment.startCamera: sem permissão
+        // o provider falha e o future.get() abaixo estoura na main thread,
+        // derrubando o app. O onResume tenta de novo depois.
+        if (!hasCameraPermission()) return
         if (cameraStartRequested) return
         cameraStartRequested = true
-        val future = ProcessCameraProvider.getInstance(requireContext())
+        val future = ProcessCameraProvider.getInstance(context)
         future.addListener({
-            if (!isAdded || _binding == null) return@addListener
+            // Zerar antes de qualquer return, senão a flag trava novas
+            // tentativas pra sempre.
             cameraStartRequested = false
-            cameraProvider = future.get()
+            if (!isAdded || _binding == null) return@addListener
+            cameraProvider = try {
+                future.get()
+            } catch (e: Exception) {
+                Log.e("LibrasFragment", "CameraX nao inicializou no modo Libras", e)
+                Toast.makeText(context, "Nao consegui abrir a camera de Libras", Toast.LENGTH_SHORT).show()
+                return@addListener
+            }
             scheduleBindCamera()
-        }, ContextCompat.getMainExecutor(requireContext()))
+        }, ContextCompat.getMainExecutor(context))
     }
 
     private fun scheduleBindCamera(delayMs: Long = 0L) {
@@ -214,6 +235,7 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
     private fun bindCamera() {
         val provider = cameraProvider ?: return
         if (!isAdded || _binding == null) return
+        if (!hasCameraPermission()) return
         if (bindInProgress) {
             pendingBind = true
             return
