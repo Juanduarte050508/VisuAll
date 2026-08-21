@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/hud_libras_land_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/transparent"
+    android:clickable="false"
+    android:focusable="false">
+
+    <com.visuall.app.ui.ScanFrameView
+        android:id="@+id/scan_frame_land"
+        android:layout_width="430dp"
+        android:layout_height="250dp"
+        android:layout_gravity="center" />
+
+    <LinearLayout
+        android:layout_width="56dp"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center_vertical|start"
+        android:layout_marginStart="14dp"
+        android:gravity="center"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/btn_exit_libras_land"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_marginVertical="6dp"
+            android:background="@drawable/vf_bg_action_btn"
+            android:contentDescription="Voltar para camera normal"
+            android:gravity="center"
+            android:text="&lt;"
+            android:textColor="#E8A020"
+            android:textSize="24sp"
+            android:textStyle="bold" />
+
+        <ImageView
+            android:id="@+id/btn_flip_libras_land"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_marginVertical="6dp"
+            android:background="@drawable/vf_bg_action_btn"
+            android:contentDescription="Girar camera"
+            android:padding="11dp"
+            android:src="@drawable/ic_flip" />
+    </LinearLayout>
+
+</FrameLayout>
