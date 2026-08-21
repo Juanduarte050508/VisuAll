@@ -10,6 +10,11 @@ __pycache__/
 .venv/
 venv/
 
+# Local training inputs/outputs
+treinamento/dados/
+treinamento/modelos_parciais/
+treinamento/modelos_individuais/
+
 # System
 .env
 .DS_Store
@@ -19,3 +24,4 @@ Thumbs.db
 .idea/
 *.iml
 .vscode/
+mobile/local.properties

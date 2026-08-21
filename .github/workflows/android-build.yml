@@ -1,0 +1,49 @@
+name: Android Build
+
+# Compila o app mobile a cada push/PR que tocar no código Android. Não
+# troca nenhum threshold nem lógica sozinho -- só garante que o projeto
+# ainda compila antes de mergear, para pegar quebras de build (ex.: dois
+# devs mexendo nas mesmas constantes de calibração) antes que virem
+# confusão em código já mergeado.
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "mobile/**"
+      - ".github/workflows/android-build.yml"
+  pull_request:
+    paths:
+      - "mobile/**"
+      - ".github/workflows/android-build.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Compile debug Kotlin
+        run: ./gradlew compileDebugKotlin --console=plain
+
+      - name: Run unit tests
+        run: ./gradlew testDebugUnitTest --console=plain
+
+      - name: Assemble debug APK
+        run: ./gradlew assembleDebug --console=plain

@@ -1,15 +1,3 @@
-<!--
-  README DO REPOSITÓRIO VisuAll
-  Cole no README.md do repo github.com/Juanduarte050508/VisuAll
-
-  ANTES DE COMMITAR, revise:
-  1. A seção "Project Status" reflete que a versão integrada ainda não subiu.
-     Quando subir o código unificado, apague essa seção ou marque tudo como ✅.
-  2. Ajuste os comandos de instalação/execução para os nomes reais dos seus
-     arquivos (ex: main.py, server.py — confira como se chamam no seu projeto).
-  3. Adicione um GIF/print de demo na seção indicada (faz MUITA diferença).
--->
-
 <div align="center">
 
 # 🤟 VisuAll
@@ -111,9 +99,56 @@ VisuAll combines **two recognition engines** in one unified system:
 
 ---
 
+## 🗂️ Repository Structure
+
+VisuAll ships **two Python backends implementing the same recognition
+pipeline**, plus **one native mobile port**. If you're new here, this is
+what lives where and why there's more than one backend folder:
+
+| Path | What it is |
+|---|---|
+| `linear/backend/app.py` | **Reference implementation — read it, don't expect to run it.** A single Python file with the full pipeline (camera capture → MediaPipe Holistic → MLP/LSTM classification → WebSocket → frontend). This is the spec the Kotlin port is checked against: `SentenceTranslator.kt`, `FaceMarkerEngine.kt`, `LibrasFragment.kt` and `LibrasAnalyzer.kt` all name the function here that they mirror. It **cannot recognise anything as checked out** — see the note under Getting Started. |
+| `linear/frontend/` | The web UI (`index.html`) that `linear/backend/app.py` serves over WebSocket. Same caveat as the backend. |
+| `treinamento/` | **Everything about collecting data and training models.** Record clips from a webcam (`Capturar.bat`), then extract landmarks and train (`Treinar.bat`, or `abrir_treinamento.bat` for the full GUI); models are written straight into `mobile/app/src/main/assets/`. See `treinamento/README.md`. |
+| `tests/` | Shared fixtures (`fixtures/landmark_contract.json`) pinning the landmark math that the Python training side and the Kotlin app side must both reproduce, plus the script that regenerates them. |
+| `modular/` | **The same backend as `linear/backend/app.py`, split into 10 small modules** (`m01_visuall_config.py` … `m10_visuall_servidor.py`) instead of one file. Entry point is `app_backend_unificado.py`. Behaves identically and reuses `linear/frontend/` — easier to navigate if you're extending the backend. |
+| `models/` | Pre-trained model files ready for inference. See `models/README.md` for what each file is. |
+| `mobile/` | **Android port** (Kotlin) of the same recognition pipeline, running fully on-device (MediaPipe Tasks API + ONNX Runtime + TFLite — no backend/WebSocket needed). See `mobile/README.md` to build and run it, and [CHANGELOG.md](CHANGELOG.md) for why its calibration constants have the values they do. |
+| `mobile/tools/` | Windows scripts to set up an Android emulator matching the mobile app's requirements (webcam-backed front camera, compatible CPU architecture). See `mobile/tools/README.md`. |
+| `.github/workflows/` | CI: compiles and unit-tests `mobile/` on every push/PR, and separately installs the Python stack to run the training-pipeline tests and confirm MediaPipe still starts. |
+| `VALIDACAO.md` | The fixed ~10 minute on-device test to run before and after any recognition change, so "it feels better" can be replaced by a number. |
+
+**In short:** `linear/backend/app.py` and `modular/` are two shapes of
+the same desktop/Python system — pick whichever is easier to read for
+what you're doing. `mobile/` is a separate, independent port of that
+same logic to Android.
+
+---
+
 ## ⚙️ Getting Started
 
-> Requires **Python 3.10+** and a webcam.
+> Requires **Python 3.10+**, a webcam, and **Git LFS**.
+
+> ### Install Git LFS before cloning
+>
+> Every model file in this repo (`*.task`, `*.onnx`, `*.tflite`, `*.pkl`,
+> `*.npz` — see `mobile/.gitattributes`) is stored with
+> [Git LFS](https://git-lfs.com). Clone without it and you get **132-byte text
+> pointers with the right filenames** instead of models. Nothing errors: the
+> Android app compiles, installs, opens the camera, and recognises nothing.
+>
+> ```bash
+> git lfs install          # once per machine, before cloning
+> git lfs pull             # if you already cloned without it
+> ```
+>
+> To check a clone is healthy, look at a size — it should be megabytes, not
+> bytes:
+>
+> ```bash
+> git lfs status
+> ls -l mobile/app/src/main/assets/hand_landmarker.task   # ~7.6 MB, not 132 B
+> ```
 
 ```bash
 # 1. Clone the repository
@@ -128,11 +163,38 @@ python -m venv .venv
 # 3. Install dependencies
 pip install -r requirements.txt
 
-# 4. Run
-python main.py                # ← ajuste para o nome real do seu entrypoint
+# 4. Run the backend — either version works the same way:
+python linear/backend/app.py            # single-file reference version
+python modular/app_backend_unificado.py # same thing, split into modules
 ```
 
-Then open the frontend in your browser and start signing. ✋
+Then open `linear/frontend/index.html` in your browser and start signing. ✋
+
+> ### ⚠️ The Python backends do not recognise anything as checked out
+>
+> They start, the camera opens, and nothing is ever recognised — every model
+> load sits in its own `try/except` that prints a warning and continues with
+> `None`. So the failure is quiet, and easy to mistake for "the recognition is
+> bad". What is missing:
+>
+> | What `app.py` looks for, beside itself | Status |
+> |---|---|
+> | `modelo_mlp_estatico.pkl`, `letras_mlp_estatico.pkl` | Same model exists as `models/static_model.pkl` + `static_classes.pkl` (verified: `MLPClassifier`, 42 inputs, 21 classes) — different filename, so it isn't found. |
+> | `modelo_mlp.pkl`, `letras_mlp.pkl` | Same as `models/dynamic_model.pkl` + `dynamic_classes.pkl` (verified: 420 inputs, 5 classes). |
+> | `modelo_sinais.h5`, `classes_sinais.npy` | **Not in this repository at all.** The file header says they came "from the Articulacao folder", which was never committed. Body gestures cannot work here. |
+>
+> Copying and renaming the two pairs from `models/` should restore the
+> alphabet — untested, and the pickles were saved with scikit-learn 1.6.1 while
+> `requirements.txt` now resolves to 1.9.0, which warns about exactly this.
+>
+> **None of this affects the Android app or the training tools**, which are what
+> is actively developed. `mobile/` loads its own models from
+> `mobile/app/src/main/assets/`, and `treinamento/` writes them there.
+> Use `treinamento/` to train and `mobile/` to run; read `linear/` and
+> `modular/` to understand the algorithm.
+
+Looking for the Android app instead? It doesn't need this backend at all —
+everything runs on-device. See [`mobile/README.md`](mobile/README.md).
 
 ---
 
