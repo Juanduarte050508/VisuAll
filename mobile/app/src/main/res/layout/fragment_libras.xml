@@ -37,7 +37,7 @@
         android:id="@+id/btn_exit_libras"
         android:layout_width="42dp"
         android:layout_height="42dp"
-        android:layout_marginStart="16dp"
+        android:layout_marginStart="12dp"
         android:layout_marginTop="44dp"
         android:background="@drawable/vf_bg_action_btn"
         android:elevation="8dp"
@@ -51,15 +51,20 @@
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintStart_toStartOf="parent" />
 
+    <!--
+        LINHAS entra no topo (no lugar do antigo "AO VIVO"): e um controle
+        de exibicao, mais proximo dos ajustes do que das acoes da conversa.
+    -->
     <TextView
-        android:id="@+id/tv_live"
+        android:id="@+id/btn_lines"
         android:layout_width="wrap_content"
-        android:layout_height="30dp"
-        android:layout_marginStart="10dp"
-        android:background="@drawable/vf_bg_live"
+        android:layout_height="34dp"
+        android:layout_marginStart="12dp"
+        android:background="@drawable/vf_bg_mode_inactive"
         android:gravity="center"
+        android:maxLines="1"
         android:paddingHorizontal="12dp"
-        android:text="AO VIVO"
+        android:text="LINHAS ON"
         android:textColor="@color/text_primary"
         android:textSize="10sp"
         android:textStyle="bold"
@@ -68,25 +73,46 @@
         app:layout_constraintBottom_toBottomOf="@id/btn_exit_libras"
         app:layout_constraintStart_toEndOf="@id/btn_exit_libras" />
 
+    <!--
+        Rotulo de estado, nao botao: sem fundo nem borda, so texto sobre a
+        camera, para nao sugerir que e clicavel.
+    -->
     <TextView
         android:id="@+id/tv_mode_label"
-        android:layout_width="0dp"
-        android:layout_height="30dp"
+        android:layout_width="wrap_content"
+        android:layout_height="34dp"
         android:layout_marginStart="8dp"
-        android:layout_marginEnd="16dp"
-        android:background="@drawable/vf_bg_badge_gold"
+        android:layout_marginEnd="8dp"
         android:ellipsize="end"
         android:gravity="center"
         android:maxLines="1"
-        android:paddingHorizontal="14dp"
+        android:maxWidth="150dp"
+        android:shadowColor="#CC000000"
+        android:shadowDx="0"
+        android:shadowDy="1"
+        android:shadowRadius="4"
         android:text="Modo Libras"
-        android:textColor="@color/text_primary"
-        android:textSize="10sp"
+        android:textColor="@color/gold_primary"
+        android:textSize="13sp"
         android:textStyle="bold"
         android:letterSpacing="0"
-        app:layout_constraintTop_toTopOf="@id/tv_live"
-        app:layout_constraintBottom_toBottomOf="@id/tv_live"
-        app:layout_constraintStart_toEndOf="@id/tv_live"
+        app:layout_constraintTop_toTopOf="@id/btn_lines"
+        app:layout_constraintBottom_toBottomOf="@id/btn_lines"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <ImageView
+        android:id="@+id/btn_history"
+        android:layout_width="42dp"
+        android:layout_height="42dp"
+        android:layout_marginEnd="12dp"
+        android:background="@drawable/vf_bg_action_btn"
+        android:contentDescription="Historico"
+        android:elevation="8dp"
+        android:padding="11dp"
+        android:src="@drawable/ic_history"
+        app:layout_constraintTop_toTopOf="@id/btn_exit_libras"
+        app:layout_constraintBottom_toBottomOf="@id/btn_exit_libras"
         app:layout_constraintEnd_toEndOf="parent" />
 
     <com.visuall.app.ui.ScanFrameView
@@ -94,10 +120,10 @@
         android:layout_width="0dp"
         android:layout_height="0dp"
         android:layout_marginHorizontal="28dp"
-        android:layout_marginTop="112dp"
-        android:layout_marginBottom="14dp"
+        android:layout_marginTop="104dp"
+        android:layout_marginBottom="8dp"
         app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintBottom_toTopOf="@id/chip_result"
+        app:layout_constraintBottom_toTopOf="@id/feedback_row"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
@@ -112,7 +138,7 @@
         android:paddingHorizontal="22dp"
         android:text="-   0% conf."
         android:textColor="@color/text_primary"
-        android:textSize="13sp"
+        android:textSize="15sp"
         android:textStyle="bold"
         android:visibility="invisible"
         app:layout_constraintBottom_toTopOf="@id/progress_confidence"
@@ -130,27 +156,65 @@
         android:progressTint="@color/gold_primary"
         android:progressBackgroundTint="#33242424"
         android:visibility="invisible"
-        app:layout_constraintBottom_toTopOf="@id/tv_feedback"
+        app:layout_constraintBottom_toBottomOf="@id/scan_frame"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
-    <TextView
-        android:id="@+id/tv_feedback"
+    <LinearLayout
+        android:id="@+id/feedback_row"
         android:layout_width="wrap_content"
-        android:layout_height="30dp"
-        android:layout_marginBottom="8dp"
-        android:background="@drawable/vf_bg_chip"
+        android:layout_height="44dp"
+        android:layout_marginHorizontal="16dp"
+        android:layout_marginBottom="6dp"
         android:gravity="center"
-        android:minWidth="154dp"
-        android:paddingHorizontal="16dp"
-        android:text="CENTRALIZE A MAO"
-        android:textColor="@color/text_primary"
-        android:textSize="10sp"
-        android:textStyle="bold"
-        android:visibility="invisible"
+        android:orientation="horizontal"
         app:layout_constraintBottom_toTopOf="@id/reply_bubble"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent" />
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <TextView
+            android:id="@+id/tv_feedback"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:layout_marginHorizontal="4dp"
+            android:background="@drawable/vf_bg_chip"
+            android:gravity="center"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:minWidth="154dp"
+            android:paddingHorizontal="16dp"
+            android:text="CENTRALIZE A MAO"
+            android:textColor="@color/text_primary"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:visibility="invisible" />
+
+        <TextView
+            android:id="@+id/btn_confirm_letter"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:layout_marginHorizontal="4dp"
+            android:background="@drawable/vf_bg_mode_active"
+            android:gravity="center"
+            android:minWidth="86dp"
+            android:paddingHorizontal="12dp"
+            android:text="REPETIR"
+            android:textColor="@color/text_on_gold"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:visibility="gone"
+            android:contentDescription="Repetir letra bloqueada" />
+
+        <ImageView
+            android:id="@+id/btn_delete_letter"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_marginHorizontal="4dp"
+            android:background="@drawable/vf_bg_action_btn"
+            android:contentDescription="Apagar ultima letra"
+            android:padding="10dp"
+            android:src="@drawable/ic_delete" />
+    </LinearLayout>
 
     <FrameLayout
         android:id="@+id/reply_bubble"
@@ -186,7 +250,7 @@
             android:paddingEnd="54dp"
             android:paddingVertical="10dp"
             android:textColor="@color/text_primary"
-            android:textSize="15sp" />
+            android:textSize="17sp" />
 
         <ImageView
             android:id="@+id/btn_reply_clear"
@@ -235,26 +299,26 @@
             android:paddingEnd="16dp"
             android:paddingVertical="10dp"
             android:textColor="@color/text_primary"
-            android:textSize="15sp" />
+            android:textSize="17sp" />
     </FrameLayout>
 
     <LinearLayout
         android:id="@+id/suggestions_row"
         android:layout_width="0dp"
-        android:layout_height="36dp"
+        android:layout_height="40dp"
         android:layout_marginHorizontal="28dp"
         android:layout_marginBottom="8dp"
         android:gravity="center"
         android:orientation="horizontal"
         android:visibility="gone"
-        app:layout_constraintBottom_toTopOf="@id/action_row"
+        app:layout_constraintBottom_toTopOf="@id/modes_row"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
 
         <TextView
             android:id="@+id/btn_suggestion_1"
             android:layout_width="0dp"
-            android:layout_height="32dp"
+            android:layout_height="36dp"
             android:layout_marginEnd="5dp"
             android:layout_weight="1"
             android:background="@drawable/vf_bg_mode_inactive"
@@ -263,13 +327,13 @@
             android:maxLines="1"
             android:paddingHorizontal="8dp"
             android:textColor="@color/text_primary"
-            android:textSize="10sp"
+            android:textSize="12sp"
             android:textStyle="bold" />
 
         <TextView
             android:id="@+id/btn_suggestion_2"
             android:layout_width="0dp"
-            android:layout_height="32dp"
+            android:layout_height="36dp"
             android:layout_marginHorizontal="5dp"
             android:layout_weight="1"
             android:background="@drawable/vf_bg_mode_inactive"
@@ -278,13 +342,13 @@
             android:maxLines="1"
             android:paddingHorizontal="8dp"
             android:textColor="@color/text_primary"
-            android:textSize="10sp"
+            android:textSize="12sp"
             android:textStyle="bold" />
 
         <TextView
             android:id="@+id/btn_suggestion_3"
             android:layout_width="0dp"
-            android:layout_height="32dp"
+            android:layout_height="36dp"
             android:layout_marginStart="5dp"
             android:layout_weight="1"
             android:background="@drawable/vf_bg_mode_inactive"
@@ -293,7 +357,7 @@
             android:maxLines="1"
             android:paddingHorizontal="8dp"
             android:textColor="@color/text_primary"
-            android:textSize="10sp"
+            android:textSize="12sp"
             android:textStyle="bold" />
     </LinearLayout>
 
@@ -322,7 +386,7 @@
         android:background="@drawable/vf_bg_reply_panel"
         android:orientation="vertical"
         android:visibility="gone"
-        app:layout_constraintBottom_toTopOf="@id/action_row"
+        app:layout_constraintBottom_toTopOf="@id/modes_row"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
 
@@ -357,7 +421,7 @@
                 android:gravity="center"
                 android:text="AUDIO"
                 android:textColor="@color/text_primary"
-                android:textSize="10sp"
+                android:textSize="12sp"
                 android:textStyle="bold" />
 
             <TextView
@@ -370,7 +434,7 @@
                 android:gravity="center"
                 android:text="DIGITAR"
                 android:textColor="@color/text_on_gold"
-                android:textSize="10sp"
+                android:textSize="12sp"
                 android:textStyle="bold" />
 
             <TextView
@@ -383,7 +447,7 @@
                 android:gravity="center"
                 android:text="FALAR"
                 android:textColor="@color/text_on_gold"
-                android:textSize="10sp"
+                android:textSize="12sp"
                 android:textStyle="bold" />
 
             <TextView
@@ -396,174 +460,100 @@
                 android:gravity="center"
                 android:text="OK"
                 android:textColor="@color/text_primary"
-                android:textSize="10sp"
+                android:textSize="12sp"
                 android:textStyle="bold" />
         </LinearLayout>
     </LinearLayout>
 
 
-    <LinearLayout
-        android:id="@+id/action_row"
-        android:layout_width="wrap_content"
-        android:layout_height="46dp"
-        android:layout_marginBottom="10dp"
-        android:gravity="center"
-        android:orientation="horizontal"
-        app:layout_constraintBottom_toTopOf="@id/modes_row"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent">
-
-        <ImageView
-            android:id="@+id/btn_delete_letter"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:layout_marginHorizontal="4dp"
-            android:background="@drawable/vf_bg_action_btn"
-            android:contentDescription="Apagar ultima letra"
-            android:padding="10dp"
-            android:src="@drawable/ic_delete" />
-
-        <TextView
-            android:id="@+id/btn_confirm_letter"
-            android:layout_width="wrap_content"
-            android:layout_height="40dp"
-            android:layout_marginHorizontal="4dp"
-            android:background="@drawable/vf_bg_mode_active"
-            android:gravity="center"
-            android:minWidth="86dp"
-            android:paddingHorizontal="12dp"
-            android:text="REPETIR"
-            android:textColor="@color/text_on_gold"
-            android:textSize="10sp"
-            android:textStyle="bold"
-            android:visibility="gone"
-            android:contentDescription="Repetir letra bloqueada" />
-
-        <TextView
-            android:id="@+id/btn_reply"
-            android:layout_width="wrap_content"
-            android:layout_height="40dp"
-            android:layout_marginHorizontal="4dp"
-            android:background="@drawable/vf_bg_mode_inactive"
-            android:gravity="center"
-            android:minWidth="92dp"
-            android:paddingHorizontal="10dp"
-            android:text="RESPONDER"
-            android:textColor="@color/text_primary"
-            android:textSize="9sp"
-            android:textStyle="bold"
-            android:contentDescription="Falar e escrever resposta na tela" />
-
-        <ImageView
-            android:id="@+id/btn_history"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:layout_marginHorizontal="4dp"
-            android:background="@drawable/vf_bg_action_btn"
-            android:contentDescription="Historico"
-            android:padding="10dp"
-            android:src="@drawable/ic_history" />
-    </LinearLayout>
-
+    <!--
+        ALFABETO e CORPO ficam num container ancorado ao centro da tela, para
+        que o par fique exatamente centralizado independentemente da largura
+        do RESPONDER (esquerda) e do giro de camera (direita) — se estivessem
+        todos numa mesma linha com peso, o par sairia deslocado.
+    -->
     <LinearLayout
         android:id="@+id/modes_row"
         android:layout_width="wrap_content"
-        android:layout_height="38dp"
-        android:layout_marginBottom="16dp"
+        android:layout_height="52dp"
+        android:layout_marginBottom="52dp"
+        android:baselineAligned="false"
         android:gravity="center"
         android:orientation="horizontal"
-        app:layout_constraintBottom_toTopOf="@id/controls_row"
+        app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
 
         <TextView
             android:id="@+id/btn_mode_alphabet"
-            android:layout_width="wrap_content"
-            android:layout_height="32dp"
-            android:layout_marginHorizontal="4dp"
+            android:layout_width="112dp"
+            android:layout_height="48dp"
+            android:layout_marginEnd="5dp"
             android:background="@drawable/vf_bg_mode_active"
             android:gravity="center"
-            android:minWidth="92dp"
-            android:paddingHorizontal="14dp"
+            android:maxLines="1"
+            android:paddingHorizontal="4dp"
             android:text="ALFABETO"
             android:textColor="@color/text_on_gold"
-            android:textSize="10sp"
-            android:textStyle="bold" />
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:autoSizeTextType="uniform"
+            android:autoSizeMinTextSize="10sp"
+            android:autoSizeMaxTextSize="13sp" />
 
         <TextView
             android:id="@+id/btn_mode_body"
-            android:layout_width="wrap_content"
-            android:layout_height="32dp"
-            android:layout_marginHorizontal="4dp"
+            android:layout_width="112dp"
+            android:layout_height="48dp"
+            android:layout_marginStart="5dp"
             android:background="@drawable/vf_bg_mode_disabled"
             android:gravity="center"
-            android:minWidth="76dp"
-            android:paddingHorizontal="14dp"
+            android:maxLines="1"
+            android:paddingHorizontal="4dp"
             android:text="CORPO"
             android:textColor="@color/text_muted"
-            android:textSize="10sp"
-            android:textStyle="bold" />
-
-        <TextView
-            android:id="@+id/btn_lines"
-            android:layout_width="wrap_content"
-            android:layout_height="32dp"
-            android:layout_marginHorizontal="4dp"
-            android:background="@drawable/vf_bg_mode_inactive"
-            android:gravity="center"
-            android:minWidth="92dp"
-            android:paddingHorizontal="12dp"
-            android:text="LINHAS: ON"
-            android:textColor="@color/text_primary"
-            android:textSize="10sp"
-            android:textStyle="bold" />
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:autoSizeTextType="uniform"
+            android:autoSizeMinTextSize="10sp"
+            android:autoSizeMaxTextSize="13sp" />
     </LinearLayout>
 
-    <FrameLayout
-        android:id="@+id/controls_row"
+    <!-- Acao secundaria: ocupa o espaco livre a esquerda do par central -->
+    <TextView
+        android:id="@+id/btn_reply"
         android:layout_width="0dp"
-        android:layout_height="60dp"
-        android:layout_marginBottom="32dp"
-        app:layout_constraintBottom_toBottomOf="parent"
+        android:layout_height="40dp"
+        android:layout_marginStart="12dp"
+        android:layout_marginEnd="8dp"
+        android:background="@drawable/vf_bg_mode_inactive"
+        android:gravity="center"
+        android:maxLines="1"
+        android:paddingHorizontal="4dp"
+        android:text="RESPONDER"
+        android:textColor="@color/text_primary"
+        android:textSize="10sp"
+        android:textStyle="bold"
+        android:autoSizeTextType="uniform"
+        android:autoSizeMinTextSize="7sp"
+        android:autoSizeMaxTextSize="10sp"
+        android:contentDescription="Falar e escrever resposta na tela"
+        app:layout_constraintTop_toTopOf="@id/modes_row"
+        app:layout_constraintBottom_toBottomOf="@id/modes_row"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent">
+        app:layout_constraintEnd_toStartOf="@id/modes_row" />
 
-        <ImageView
-            android:id="@+id/btn_gallery"
-            android:layout_width="52dp"
-            android:layout_height="52dp"
-            android:layout_gravity="center_vertical|start"
-            android:layout_marginStart="42dp"
-            android:background="@drawable/bg_gallery"
-            android:contentDescription="Galeria"
-            android:src="@drawable/ic_gallery"
-            android:visibility="gone" />
-
-        <FrameLayout
-            android:id="@+id/shutter_container"
-            android:layout_width="72dp"
-            android:layout_height="72dp"
-            android:layout_gravity="center"
-            android:visibility="gone">
-
-            <ImageView
-                android:id="@+id/btn_shutter"
-                android:layout_width="72dp"
-                android:layout_height="72dp"
-                android:layout_gravity="center"
-                android:contentDescription="Capturar"
-                android:src="@drawable/ic_shutter" />
-        </FrameLayout>
-
-        <ImageView
-            android:id="@+id/btn_flip"
-            android:layout_width="52dp"
-            android:layout_height="52dp"
-            android:layout_gravity="center"
-            android:background="@drawable/vf_bg_action_btn"
-            android:contentDescription="Girar camera"
-            android:padding="12dp"
-            android:src="@drawable/ic_flip" />
-    </FrameLayout>
+    <ImageView
+        android:id="@+id/btn_flip"
+        android:layout_width="42dp"
+        android:layout_height="42dp"
+        android:layout_marginEnd="12dp"
+        android:background="@drawable/vf_bg_action_btn"
+        android:contentDescription="Girar camera"
+        android:padding="10dp"
+        android:src="@drawable/ic_flip"
+        app:layout_constraintTop_toTopOf="@id/modes_row"
+        app:layout_constraintBottom_toBottomOf="@id/modes_row"
+        app:layout_constraintEnd_toEndOf="parent" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>

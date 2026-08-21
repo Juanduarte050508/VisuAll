@@ -271,7 +271,7 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         binding.btnLines.setOnClickListener {
             linhasAtivas = !linhasAtivas
             binding.scanFrame.isVisible = linhasAtivas
-            binding.btnLines.text = if (linhasAtivas) "LINHAS: ON" else "LINHAS: OFF"
+            binding.btnLines.text = if (linhasAtivas) "LINHAS ON" else "LINHAS OFF"
         }
 
         binding.btnFlip.setOnClickListener {

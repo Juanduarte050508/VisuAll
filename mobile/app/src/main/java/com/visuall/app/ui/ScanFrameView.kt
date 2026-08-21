@@ -37,22 +37,19 @@ class ScanFrameView @JvmOverloads constructor(
     private var animatedColor = COLOR_NEUTRO
     private var colorAnimator: ValueAnimator? = null
 
-    private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeWidth = 14f
-        strokeCap = Paint.Cap.ROUND
-    }
-
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeWidth = 7f
-        strokeCap = Paint.Cap.ROUND
+        strokeWidth = 8f
+        // BUTT (e nao ROUND): a ponta arredondada afinava o traco no fim de
+        // cada braco e dava aspecto de esfumacado/cortado. Com BUTT a linha
+        // termina reta e solida.
+        strokeCap = Paint.Cap.BUTT
+        strokeJoin = Paint.Join.MITER
     }
 
-    private val armLen get() = width * 0.20f
+    private val armLen get() = width * 0.24f
 
     init {
-        setLayerType(LAYER_TYPE_SOFTWARE, null)
         applyColor(COLOR_NEUTRO)
     }
 
@@ -80,17 +77,10 @@ class ScanFrameView @JvmOverloads constructor(
     private fun applyColor(color: Int) {
         animatedColor = color
         paint.color = color
-        glowPaint.color = ColorUtilsAlpha(color, 0x66)
-        glowPaint.setShadowLayer(22f, 0f, 0f, ColorUtilsAlpha(color, 0xAA))
-    }
-
-    private fun ColorUtilsAlpha(color: Int, alpha: Int): Int {
-        return (color and 0x00FFFFFF) or (alpha shl 24)
     }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        drawCorners(canvas, glowPaint)
         drawCorners(canvas, paint)
     }
 
