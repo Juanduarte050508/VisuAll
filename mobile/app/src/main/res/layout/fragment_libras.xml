@@ -4,7 +4,7 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#000000">
+    android:background="@color/background">
 
     <androidx.camera.view.PreviewView
         android:id="@+id/preview_view"
@@ -55,7 +55,7 @@
         android:gravity="center"
         android:includeFontPadding="false"
         android:text="&lt;"
-        android:textColor="#E8A020"
+        android:textColor="@color/gold_primary"
         android:textSize="24sp"
         android:textStyle="bold"
         android:contentDescription="Voltar para camera normal"
@@ -71,7 +71,7 @@
         android:gravity="center"
         android:paddingHorizontal="12dp"
         android:text="AO VIVO"
-        android:textColor="#F5F1E8"
+        android:textColor="@color/text_primary"
         android:textSize="10sp"
         android:textStyle="bold"
         android:letterSpacing="0"
@@ -91,7 +91,7 @@
         android:maxLines="1"
         android:paddingHorizontal="14dp"
         android:text="Modo Libras"
-        android:textColor="#F5F1E8"
+        android:textColor="@color/text_primary"
         android:textSize="10sp"
         android:textStyle="bold"
         android:letterSpacing="0"
@@ -122,7 +122,7 @@
         android:minWidth="132dp"
         android:paddingHorizontal="22dp"
         android:text="-   0% conf."
-        android:textColor="#F5F1E8"
+        android:textColor="@color/text_primary"
         android:textSize="13sp"
         android:textStyle="bold"
         android:visibility="invisible"
@@ -138,7 +138,7 @@
         android:layout_marginBottom="8dp"
         android:max="100"
         android:progress="0"
-        android:progressTint="#E8A020"
+        android:progressTint="@color/gold_primary"
         android:progressBackgroundTint="#33242424"
         android:visibility="invisible"
         app:layout_constraintBottom_toTopOf="@id/tv_feedback"
@@ -155,7 +155,7 @@
         android:minWidth="154dp"
         android:paddingHorizontal="16dp"
         android:text="CENTRALIZE A MAO"
-        android:textColor="#F5F1E8"
+        android:textColor="@color/text_primary"
         android:textSize="10sp"
         android:textStyle="bold"
         android:visibility="invisible"
@@ -183,7 +183,7 @@
             android:layout_marginStart="13dp"
             android:contentDescription="Resposta por voz ou texto"
             android:src="@drawable/ic_voice_reply"
-            app:tint="#E8A020" />
+            app:tint="@color/gold_primary" />
 
         <TextView
             android:id="@+id/tv_reply"
@@ -196,7 +196,7 @@
             android:paddingStart="54dp"
             android:paddingEnd="54dp"
             android:paddingVertical="10dp"
-            android:textColor="#F5F1E8"
+            android:textColor="@color/text_primary"
             android:textSize="15sp" />
 
         <ImageView
@@ -209,7 +209,7 @@
             android:contentDescription="Apagar resposta"
             android:padding="7dp"
             android:src="@drawable/ic_delete"
-            app:tint="#E8A020" />
+            app:tint="@color/gold_primary" />
     </FrameLayout>
 
     <FrameLayout
@@ -232,7 +232,7 @@
             android:layout_marginStart="13dp"
             android:contentDescription="Texto reconhecido em Libras"
             android:src="@drawable/ic_hands"
-            app:tint="#E8A020" />
+            app:tint="@color/gold_primary" />
 
         <TextView
             android:id="@+id/tv_phrase"
@@ -245,7 +245,7 @@
             android:paddingStart="54dp"
             android:paddingEnd="16dp"
             android:paddingVertical="10dp"
-            android:textColor="#F5F1E8"
+            android:textColor="@color/text_primary"
             android:textSize="15sp" />
     </FrameLayout>
 
@@ -273,7 +273,7 @@
             android:gravity="center"
             android:maxLines="1"
             android:paddingHorizontal="8dp"
-            android:textColor="#F5F1E8"
+            android:textColor="@color/text_primary"
             android:textSize="10sp"
             android:textStyle="bold" />
 
@@ -288,7 +288,7 @@
             android:gravity="center"
             android:maxLines="1"
             android:paddingHorizontal="8dp"
-            android:textColor="#F5F1E8"
+            android:textColor="@color/text_primary"
             android:textSize="10sp"
             android:textStyle="bold" />
 
@@ -303,7 +303,7 @@
             android:gravity="center"
             android:maxLines="1"
             android:paddingHorizontal="8dp"
-            android:textColor="#F5F1E8"
+            android:textColor="@color/text_primary"
             android:textSize="10sp"
             android:textStyle="bold" />
     </LinearLayout>
@@ -317,7 +317,7 @@
         android:layout_marginBottom="10dp"
         android:max="100"
         android:progress="0"
-        android:progressTint="#FF6060"
+        android:progressTint="@color/feedback_alerta"
         android:progressBackgroundTint="#33FF6060"
         android:visibility="gone"
         app:layout_constraintBottom_toTopOf="@id/chip_result"
@@ -347,8 +347,8 @@
             android:inputType="textCapSentences|textMultiLine"
             android:maxLines="3"
             android:minHeight="48dp"
-            android:textColor="#F5F1E8"
-            android:textColorHint="#777777"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_muted"
             android:textSize="15sp" />
 
         <LinearLayout
@@ -367,7 +367,7 @@
                 android:background="@drawable/vf_bg_mode_inactive"
                 android:gravity="center"
                 android:text="AUDIO"
-                android:textColor="#F5F1E8"
+                android:textColor="@color/text_primary"
                 android:textSize="10sp"
                 android:textStyle="bold" />
 
@@ -380,7 +380,7 @@
                 android:background="@drawable/vf_bg_mode_active"
                 android:gravity="center"
                 android:text="DIGITAR"
-                android:textColor="#070707"
+                android:textColor="@color/text_on_gold"
                 android:textSize="10sp"
                 android:textStyle="bold" />
 
@@ -393,7 +393,7 @@
                 android:background="@drawable/vf_bg_mode_active"
                 android:gravity="center"
                 android:text="FALAR"
-                android:textColor="#070707"
+                android:textColor="@color/text_on_gold"
                 android:textSize="10sp"
                 android:textStyle="bold" />
 
@@ -406,225 +406,12 @@
                 android:background="@drawable/vf_bg_mode_inactive"
                 android:gravity="center"
                 android:text="OK"
-                android:textColor="#F5F1E8"
+                android:textColor="@color/text_primary"
                 android:textSize="10sp"
                 android:textStyle="bold" />
         </LinearLayout>
     </LinearLayout>
 
-    <LinearLayout
-        android:id="@+id/calibration_panel"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_marginHorizontal="22dp"
-        android:layout_marginBottom="10dp"
-        android:background="@drawable/vf_bg_reply_panel"
-        android:orientation="vertical"
-        android:visibility="gone"
-        app:layout_constraintBottom_toTopOf="@id/action_row"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent">
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="42dp"
-            android:gravity="center"
-            android:orientation="horizontal">
-
-            <TextView
-                android:id="@+id/btn_calibration_prev"
-                android:layout_width="42dp"
-                android:layout_height="36dp"
-                android:background="@drawable/vf_bg_mode_inactive"
-                android:gravity="center"
-                android:text="&lt;"
-                android:textColor="#F5F1E8"
-                android:textSize="16sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:id="@+id/tv_calibration_letter"
-                android:layout_width="0dp"
-                android:layout_height="36dp"
-                android:layout_marginHorizontal="8dp"
-                android:layout_weight="1"
-                android:background="@drawable/vf_bg_mode_active"
-                android:gravity="center"
-                android:text="E"
-                android:textColor="#070707"
-                android:textSize="18sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:id="@+id/btn_calibration_next"
-                android:layout_width="42dp"
-                android:layout_height="36dp"
-                android:background="@drawable/vf_bg_mode_inactive"
-                android:gravity="center"
-                android:text="&gt;"
-                android:textColor="#F5F1E8"
-                android:textSize="16sp"
-                android:textStyle="bold" />
-        </LinearLayout>
-
-        <TextView
-            android:id="@+id/tv_calibration_status"
-            android:layout_width="match_parent"
-            android:layout_height="28dp"
-            android:gravity="center"
-            android:text="CALIBRACAO"
-            android:textColor="#F5F1E8"
-            android:textSize="10sp"
-            android:textStyle="bold" />
-
-        <ProgressBar
-            android:id="@+id/progress_calibration"
-            style="@style/Widget.AppCompat.ProgressBar.Horizontal"
-            android:layout_width="match_parent"
-            android:layout_height="5dp"
-            android:layout_marginHorizontal="12dp"
-            android:layout_marginTop="4dp"
-            android:max="100"
-            android:progress="0"
-            android:progressTint="#E8A020"
-            android:progressBackgroundTint="#33242424" />
-
-        <TextView
-            android:id="@+id/tv_training_status"
-            android:layout_width="match_parent"
-            android:layout_height="24dp"
-            android:layout_marginTop="6dp"
-            android:ellipsize="end"
-            android:gravity="center"
-            android:maxLines="1"
-            android:text="0 AMOSTRAS NO CELULAR"
-            android:textColor="#8B8B8B"
-            android:textSize="9sp"
-            android:textStyle="bold" />
-
-        <ProgressBar
-            android:id="@+id/progress_training_total"
-            style="@style/Widget.AppCompat.ProgressBar.Horizontal"
-            android:layout_width="match_parent"
-            android:layout_height="5dp"
-            android:layout_marginHorizontal="12dp"
-            android:layout_marginTop="2dp"
-            android:max="100"
-            android:progress="0"
-            android:progressTint="#F5C842"
-            android:progressBackgroundTint="#33242424" />
-
-        <TextView
-            android:id="@+id/tv_training_dashboard"
-            android:layout_width="match_parent"
-            android:layout_height="40dp"
-            android:layout_marginHorizontal="8dp"
-            android:layout_marginTop="6dp"
-            android:ellipsize="end"
-            android:gravity="center"
-            android:maxLines="2"
-            android:text="FORTE 0% | FRACAS: A B C"
-            android:textColor="#F5F1E8"
-            android:textSize="9sp"
-            android:textStyle="bold" />
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="40dp"
-            android:layout_marginTop="8dp"
-            android:gravity="center"
-            android:orientation="horizontal">
-
-            <TextView
-                android:id="@+id/btn_calibration_record"
-                android:layout_width="0dp"
-                android:layout_height="36dp"
-                android:layout_marginEnd="6dp"
-                android:layout_weight="1"
-                android:background="@drawable/vf_bg_mode_active"
-                android:gravity="center"
-                android:text="GRAVAR"
-                android:textColor="#070707"
-                android:textSize="10sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:id="@+id/btn_calibration_save"
-                android:layout_width="0dp"
-                android:layout_height="36dp"
-                android:layout_marginHorizontal="6dp"
-                android:layout_weight="1"
-                android:background="@drawable/vf_bg_mode_active"
-                android:gravity="center"
-                android:text="SALVAR"
-                android:textColor="#070707"
-                android:textSize="10sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:id="@+id/btn_calibration_close"
-                android:layout_width="0dp"
-                android:layout_height="36dp"
-                android:layout_marginStart="6dp"
-                android:layout_weight="0.75"
-                android:background="@drawable/vf_bg_mode_inactive"
-                android:gravity="center"
-                android:text="OK"
-                android:textColor="#F5F1E8"
-                android:textSize="10sp"
-                android:textStyle="bold" />
-        </LinearLayout>
-
-        <TextView
-            android:id="@+id/btn_calibration_export"
-            android:layout_width="match_parent"
-            android:layout_height="36dp"
-            android:layout_marginHorizontal="6dp"
-            android:layout_marginTop="8dp"
-            android:background="@drawable/vf_bg_mode_inactive"
-            android:gravity="center"
-            android:text="EXPORTAR DADOS"
-            android:textColor="#F5F1E8"
-            android:textSize="10sp"
-            android:textStyle="bold"
-                android:contentDescription="Exportar dados de treino" />
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="40dp"
-            android:layout_marginTop="8dp"
-            android:gravity="center"
-            android:orientation="horizontal">
-
-            <TextView
-                android:id="@+id/btn_calibration_next_weak"
-                android:layout_width="0dp"
-                android:layout_height="36dp"
-                android:layout_marginEnd="6dp"
-                android:layout_weight="1"
-                android:background="@drawable/vf_bg_mode_active"
-                android:gravity="center"
-                android:text="PROXIMA FRACA"
-                android:textColor="#070707"
-                android:textSize="10sp"
-                android:textStyle="bold"
-                android:contentDescription="Ir para proxima letra com poucas amostras" />
-
-            <TextView
-                android:id="@+id/btn_calibration_reset_training"
-                android:layout_width="0dp"
-                android:layout_height="36dp"
-                android:layout_marginStart="6dp"
-                android:layout_weight="0.8"
-                android:background="@drawable/vf_bg_mode_inactive"
-                android:gravity="center"
-                android:text="ZERAR"
-                android:textColor="#F5F1E8"
-                android:textSize="10sp"
-                android:textStyle="bold"
-                android:contentDescription="Zerar dados de treino" />
-        </LinearLayout>
-    </LinearLayout>
 
     <LinearLayout
         android:id="@+id/action_row"
@@ -648,21 +435,6 @@
             android:src="@drawable/ic_delete" />
 
         <TextView
-            android:id="@+id/btn_calibrate"
-            android:layout_width="wrap_content"
-            android:layout_height="40dp"
-            android:layout_marginHorizontal="4dp"
-            android:background="@drawable/vf_bg_mode_inactive"
-            android:gravity="center"
-            android:minWidth="78dp"
-            android:paddingHorizontal="10dp"
-            android:text="CALIBRAR"
-            android:textColor="#F5F1E8"
-            android:textSize="9sp"
-            android:textStyle="bold"
-            android:contentDescription="Calibrar letra" />
-
-        <TextView
             android:id="@+id/btn_confirm_letter"
             android:layout_width="wrap_content"
             android:layout_height="40dp"
@@ -672,7 +444,7 @@
             android:minWidth="86dp"
             android:paddingHorizontal="12dp"
             android:text="REPETIR"
-            android:textColor="#070707"
+            android:textColor="@color/text_on_gold"
             android:textSize="10sp"
             android:textStyle="bold"
             android:visibility="gone"
@@ -688,7 +460,7 @@
             android:minWidth="92dp"
             android:paddingHorizontal="10dp"
             android:text="RESPONDER"
-            android:textColor="#F5F1E8"
+            android:textColor="@color/text_primary"
             android:textSize="9sp"
             android:textStyle="bold"
             android:contentDescription="Falar e escrever resposta na tela" />
@@ -725,7 +497,7 @@
             android:minWidth="92dp"
             android:paddingHorizontal="14dp"
             android:text="ALFABETO"
-            android:textColor="#070707"
+            android:textColor="@color/text_on_gold"
             android:textSize="10sp"
             android:textStyle="bold" />
 
@@ -739,7 +511,7 @@
             android:minWidth="76dp"
             android:paddingHorizontal="14dp"
             android:text="CORPO"
-            android:textColor="#8B8B8B"
+            android:textColor="@color/text_muted"
             android:textSize="10sp"
             android:textStyle="bold" />
 
@@ -753,7 +525,7 @@
             android:minWidth="92dp"
             android:paddingHorizontal="12dp"
             android:text="LINHAS: ON"
-            android:textColor="#F5F1E8"
+            android:textColor="@color/text_primary"
             android:textSize="10sp"
             android:textStyle="bold" />
     </LinearLayout>

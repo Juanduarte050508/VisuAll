@@ -22,7 +22,7 @@
             android:gravity="center"
             android:minWidth="76dp"
             android:paddingHorizontal="10dp"
-            android:textColor="#F5F1E8"
+            android:textColor="@color/text_primary"
             android:textSize="9sp"
             android:textStyle="bold" />
 
@@ -46,7 +46,7 @@
         android:maxWidth="300dp"
         android:paddingHorizontal="14dp"
         android:paddingVertical="10dp"
-        android:textColor="#FFFFFF"
+        android:textColor="@color/text_primary"
         android:textSize="15sp" />
 
 </LinearLayout>

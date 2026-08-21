@@ -6,7 +6,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
 import android.content.res.ColorStateList
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.VibrationEffect
@@ -29,6 +28,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+
 import androidx.appcompat.app.AlertDialog
 import android.util.Size
 import androidx.camera.camera2.interop.Camera2Interop
@@ -41,13 +41,15 @@ import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.core.content.ContextCompat
-import androidx.core.content.FileProvider
 import androidx.core.view.isVisible
 import androidx.fragment.app.Fragment
 import androidx.navigation.fragment.findNavController
 import com.visuall.app.R
 import com.visuall.app.databinding.FragmentLibrasBinding
-import java.io.File
+import com.visuall.app.ui.ScanFrameView
+import org.json.JSONArray
+import org.json.JSONObject
+import java.text.Normalizer
 import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -63,14 +65,6 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         val TINT_CONFIANCA_MEDIA = ColorStateList.valueOf(0xFFE8A020.toInt())
         val TINT_CONFIANCA_BAIXA = ColorStateList.valueOf(0xFF8E6A26.toInt())
         val TINT_CONFIANCA_FUNDO = ColorStateList.valueOf(0x33242424)
-
-        // Usados só até o analyzer carregar e informar os labels reais dos
-        // modelos. NÃO são a fonte da verdade — os labels.txt em assets são.
-        val ALFABETO_PADRAO = listOf(
-            "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
-            "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"
-        )
-        val DINAMICAS_PADRAO = setOf("H", "J", "K", "X", "Z")
     }
 
     private var _binding: FragmentLibrasBinding? = null
@@ -102,14 +96,23 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
     private var ultimaLetraChip = ""
     private var linhasAtivas = true
     private var modoAtual = LibrasAnalyzer.Modo.ALFABETO
-    // Substituídas pelos labels que acompanham os modelos assim que o analyzer
-    // carrega (ver sincronizarAlfabeto). Começam com o alfabeto padrão só pra
-    // a tela nunca ficar sem lista — se um dia os modelos passarem a conhecer
-    // letras diferentes, a UI acompanha sozinha em vez de ficar mostrando uma
-    // lista fixa que ninguém lembrou de atualizar.
-    private var letrasCalibracao = ALFABETO_PADRAO
-    private var letrasDinamicasTreino = DINAMICAS_PADRAO
-    private var indiceCalibracao = letrasCalibracao.indexOf("E").coerceAtLeast(0)
+    private val palavrasSugeridas = listOf(
+        "ajuda", "ajudar", "agua", "amigo", "amanha", "aprender", "aqui",
+        "banheiro", "bom", "boa", "casa", "comida", "computador", "conversa",
+        "conversar", "desculpa", "dor", "escola", "estou", "familia", "feliz",
+        "hoje", "jovi", "libras", "mae", "medico", "nao", "obrigado", "obrigada",
+        "oi", "onde", "pai", "pessoa", "por favor", "preciso", "professor",
+        "quero", "responder", "sim", "surdo", "tudo", "voce", "voltar"
+    )
+    private val sugestoesContextuais = mapOf(
+        "bom" to listOf("dia"),
+        "boa" to listOf("tarde", "noite"),
+        "por" to listOf("favor"),
+        "eu" to listOf("preciso", "quero", "estou"),
+        "voce" to listOf("pode", "quer", "entendeu"),
+        "preciso" to listOf("ajuda", "agua", "medico"),
+        "quero" to listOf("comida", "agua", "conversar")
+    )
 
     private val speechLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -370,27 +373,14 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         }
     }
 
-    // Alinha a lista de letras da tela de calibração com a que os modelos
-    // realmente conhecem (vem dos labels.txt exportados junto de cada modelo).
-    // Antes a tela tinha o alfabeto escrito à mão: se um treino mudasse as
-    // letras, a calibração continuaria oferecendo as antigas e a pessoa
-    // gravaria amostras pra uma letra que o modelo não tem — sem nenhum aviso.
+    // Loga quando o alfabeto que os modelos realmente conhecem (vem dos
+    // labels.txt exportados junto de cada modelo) muda — útil para
+    // diagnosticar treinos que alteraram o conjunto de letras suportado.
     private fun sincronizarAlfabeto(analyzer: LibrasAnalyzer) {
         if (_binding == null) return
         val doModelo = analyzer.labelsAlfabeto()
-        if (doModelo.isEmpty()) return  // mantém o padrão em vez de zerar a tela
-
-        if (doModelo != letrasCalibracao) {
-            Log.i("LibrasFragment", "Alfabeto ajustado pelos modelos: $doModelo")
-            val letraAtual = letrasCalibracao.getOrNull(indiceCalibracao)
-            letrasCalibracao = doModelo
-            // Segue na mesma letra se ela ainda existir; senão volta pro começo.
-            indiceCalibracao = doModelo.indexOf(letraAtual).coerceAtLeast(0)
-        }
-        letrasDinamicasTreino = analyzer.labelsDinamicas().ifEmpty { DINAMICAS_PADRAO }
-
-        if (binding.calibrationPanel.isVisible) updateCalibrationPanel()
-        updateTrainingDashboard()
+        if (doModelo.isEmpty()) return
+        Log.i("LibrasFragment", "Alfabeto dos modelos: $doModelo")
     }
 
     // Fallback só usado quando a preview ainda não tem Display anexado
@@ -502,7 +492,6 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         binding.phraseBubble.visibility = View.GONE
         binding.suggestionsRow.visibility = View.GONE
         binding.replyPanel.visibility = View.GONE
-        binding.calibrationPanel.visibility = View.GONE
     }
 
     private fun ensureLandscapeHud() {
@@ -604,72 +593,9 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
             clearReply()
         }
 
-        binding.btnCalibrate.setOnClickListener {
-            openCalibrationPanel()
-        }
-
         binding.btnSuggestion1.setOnClickListener { applySuggestionFrom(binding.btnSuggestion1) }
         binding.btnSuggestion2.setOnClickListener { applySuggestionFrom(binding.btnSuggestion2) }
         binding.btnSuggestion3.setOnClickListener { applySuggestionFrom(binding.btnSuggestion3) }
-
-        binding.btnCalibrationPrev.setOnClickListener {
-            indiceCalibracao = if (indiceCalibracao == 0) {
-                letrasCalibracao.lastIndex
-            } else {
-                indiceCalibracao - 1
-            }
-            updateCalibrationPanel()
-        }
-
-        binding.btnCalibrationNext.setOnClickListener {
-            indiceCalibracao = if (indiceCalibracao == letrasCalibracao.lastIndex) {
-                0
-            } else {
-                indiceCalibracao + 1
-            }
-            updateCalibrationPanel()
-        }
-
-        binding.btnCalibrationRecord.setOnClickListener {
-            val letra = currentCalibrationLetter()
-            librasAnalyzer?.startCalibration(letra)
-            updateCalibrationCaptureProgress()
-            val instrucao = if (letra in letrasDinamicasTreino) {
-                "Faca o movimento de $letra na camera"
-            } else {
-                "Segure o sinal de $letra por 2 segundos"
-            }
-            Toast.makeText(requireContext(), instrucao, Toast.LENGTH_SHORT).show()
-        }
-
-        binding.btnCalibrationSave.setOnClickListener {
-            val letra = currentCalibrationLetter()
-            val saved = librasAnalyzer?.finishCalibration() == true
-            if (saved) {
-                Toast.makeText(requireContext(), "$letra salva para calibracao e treino", Toast.LENGTH_SHORT).show()
-                indiceCalibracao = proximaLetraParaTreinar()
-                updateCalibrationPanel()
-            } else {
-                updateCalibrationCaptureProgress()
-                Toast.makeText(requireContext(), "Grave mais alguns frames da mao", Toast.LENGTH_SHORT).show()
-            }
-        }
-
-        binding.btnCalibrationClose.setOnClickListener {
-            closeCalibrationPanel()
-        }
-
-        binding.btnCalibrationExport.setOnClickListener {
-            exportTrainingData()
-        }
-
-        binding.btnCalibrationNextWeak.setOnClickListener {
-            goToNextWeakLetter()
-        }
-
-        binding.btnCalibrationResetTraining.setOnClickListener {
-            confirmResetTraining()
-        }
 
         binding.btnConfirmLetter.setOnClickListener {
             librasAnalyzer?.repetirLetraPendente()
@@ -696,14 +622,12 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
             modoAtual = LibrasAnalyzer.Modo.ALFABETO
             librasAnalyzer?.setModo(modoAtual)
             updateModeButtons()
-            updateCalibrationVisibility()
         }
 
         binding.btnModeBody.setOnClickListener {
             modoAtual = LibrasAnalyzer.Modo.CORPO
             librasAnalyzer?.setModo(modoAtual)
             updateModeButtons()
-            closeCalibrationPanel()
             Toast.makeText(requireContext(), "Modo corpo ativo", Toast.LENGTH_SHORT).show()
         }
 
@@ -741,8 +665,8 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
     }
 
     private fun updateModeButtons() {
-        val dark = 0xFF070707.toInt()
-        val light = 0xFFF5F1E8.toInt()
+        val dark = ContextCompat.getColor(requireContext(), R.color.text_on_gold)
+        val light = ContextCompat.getColor(requireContext(), R.color.text_primary)
 
         if (modoAtual == LibrasAnalyzer.Modo.ALFABETO) {
             binding.btnModeAlphabet.setBackgroundResource(R.drawable.vf_bg_mode_active)
@@ -761,193 +685,6 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         }
         binding.btnModeAlphabet.alpha = 1f
         binding.btnModeBody.alpha = 1f
-        updateCalibrationVisibility()
-    }
-
-    private fun currentCalibrationLetter(): String = letrasCalibracao[indiceCalibracao]
-
-    private fun openCalibrationPanel() {
-        if (isLandscapeHudCompact()) {
-            closeReplyPanel()
-            binding.calibrationPanel.isVisible = false
-            Toast.makeText(requireContext(), "Calibracao ocultada no HUD compacto", Toast.LENGTH_SHORT).show()
-            return
-        }
-        if (modoAtual != LibrasAnalyzer.Modo.ALFABETO) {
-            modoAtual = LibrasAnalyzer.Modo.ALFABETO
-            librasAnalyzer?.setModo(modoAtual)
-            updateModeButtons()
-        }
-        closeReplyPanel()
-        binding.calibrationPanel.isVisible = true
-        updateCalibrationPanel()
-    }
-
-    private fun closeCalibrationPanel() {
-        librasAnalyzer?.cancelCalibration()
-        binding.calibrationPanel.isVisible = false
-    }
-
-    private fun updateCalibrationPanel() {
-        val letra = currentCalibrationLetter()
-        binding.tvCalibrationLetter.text = letra
-        val total = librasAnalyzer?.getCalibrationCount() ?: 0
-        val amostrasLetra = librasAnalyzer?.getTrainingSampleCount(letra) ?: 0
-        val amostrasTotal = librasAnalyzer?.getTrainingSampleCount() ?: 0
-        val statusLetra = trainingLevel(amostrasLetra)
-        binding.tvCalibrationStatus.text = if (letra in letrasDinamicasTreino) {
-            "$total LETRAS CALIBRADAS | $letra DINAMICA"
-        } else {
-            "$total LETRAS CALIBRADAS"
-        }
-        binding.tvTrainingStatus.text =
-            "$letra $amostrasLetra/${LibrasAnalyzer.TRAINING_STRONG_TARGET_SAMPLES} $statusLetra  |  TOTAL $amostrasTotal"
-        binding.progressCalibration.progress = 0
-        updateTrainingDashboard()
-        librasAnalyzer?.cancelCalibration()
-    }
-
-    private fun updateCalibrationCaptureProgress() {
-        if (!binding.calibrationPanel.isVisible) return
-        val letra = currentCalibrationLetter()
-        val frames = librasAnalyzer?.getCalibrationFrameCount() ?: 0
-        val progress = (frames * 100 / LibrasAnalyzer.CALIBRATION_TARGET_FRAMES).coerceIn(0, 100)
-        binding.progressCalibration.progress = progress
-        val dinamica = letra in letrasDinamicasTreino
-        binding.tvCalibrationStatus.text = when {
-            frames == 0 && dinamica -> "TOQUE EM GRAVAR E MOVA $letra"
-            frames == 0 -> "TOQUE EM GRAVAR E SEGURE $letra"
-            frames < LibrasAnalyzer.CALIBRATION_MIN_FRAMES -> "GRAVANDO $letra  $frames/${LibrasAnalyzer.CALIBRATION_TARGET_FRAMES}"
-            frames < LibrasAnalyzer.CALIBRATION_TARGET_FRAMES && dinamica -> "BOM, REPITA O MOVIMENTO  $frames/${LibrasAnalyzer.CALIBRATION_TARGET_FRAMES}"
-            frames < LibrasAnalyzer.CALIBRATION_TARGET_FRAMES -> "BOM, CONTINUE FIRME  $frames/${LibrasAnalyzer.CALIBRATION_TARGET_FRAMES}"
-            else -> "PRONTO PARA SALVAR $letra"
-        }
-    }
-
-    private fun exportTrainingData() {
-        val analyzer = librasAnalyzer
-        val files = listOfNotNull(
-            analyzer?.getTrainingDatasetPath()?.let { File(it) },
-            analyzer?.getDynamicTrainingDatasetPath()?.let { File(it) }
-        ).filter { file -> file.exists() && file.length() > 0L }
-
-        if (files.isEmpty()) {
-            Toast.makeText(
-                requireContext(),
-                "Calibre algumas letras antes de exportar",
-                Toast.LENGTH_SHORT
-            ).show()
-            return
-        }
-
-        val authority = "${requireContext().packageName}.fileprovider"
-        val uris = ArrayList<Uri>(
-            files.map { file ->
-                FileProvider.getUriForFile(requireContext(), authority, file)
-            }
-        )
-
-        val intent = if (uris.size == 1) {
-            Intent(Intent.ACTION_SEND).apply {
-                type = "text/csv"
-                putExtra(Intent.EXTRA_STREAM, uris.first())
-            }
-        } else {
-            Intent(Intent.ACTION_SEND_MULTIPLE).apply {
-                type = "text/csv"
-                putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
-            }
-        }.apply {
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            putExtra(Intent.EXTRA_SUBJECT, "Dados de treino VisuAll")
-            putExtra(
-                Intent.EXTRA_TEXT,
-                "Dados coletados no celular para melhorar o reconhecimento de Libras."
-            )
-        }
-
-        startActivity(Intent.createChooser(intent, "Exportar dados VisuAll"))
-    }
-
-    private fun updateTrainingDashboard() {
-        val progress = trainingProgress()
-        binding.progressTrainingTotal.progress = progress.percent
-        val faltam = if (progress.missingLetters.isEmpty()) {
-            "TODAS PRONTAS"
-        } else {
-            progress.missingLetters.take(10).joinToString(" ")
-        }
-        binding.tvTrainingDashboard.text =
-            "FORTE ${progress.percent}% | ${progress.trainedLetters}/${letrasCalibracao.size} LETRAS\nFRACAS: $faltam"
-        binding.btnCalibrationNextWeak.isEnabled = progress.missingLetters.isNotEmpty()
-        binding.btnCalibrationNextWeak.alpha = if (progress.missingLetters.isNotEmpty()) 1f else 0.45f
-        binding.btnCalibrationExport.isEnabled = progress.totalSamples > 0
-        binding.btnCalibrationExport.alpha = if (progress.totalSamples > 0) 1f else 0.45f
-    }
-
-    private fun contarAmostras(letra: String): Int =
-        librasAnalyzer?.getTrainingSampleCount(letra) ?: 0
-
-    private fun trainingProgress(): TrainingProgressCalculator.Progress =
-        TrainingProgressCalculator.calcular(
-            letras = letrasCalibracao,
-            alvoForte = LibrasAnalyzer.TRAINING_STRONG_TARGET_SAMPLES,
-            contarAmostras = ::contarAmostras
-        )
-
-    private fun goToNextWeakLetter() {
-        val next = indiceProximaLetraFraca(includeCurrent = true)
-        if (next == null) {
-            Toast.makeText(requireContext(), "Todas as letras ja estao fortes", Toast.LENGTH_SHORT).show()
-            updateTrainingDashboard()
-            return
-        }
-        indiceCalibracao = next
-        updateCalibrationPanel()
-    }
-
-    private fun confirmResetTraining() {
-        AlertDialog.Builder(requireContext())
-            .setTitle("Zerar treino?")
-            .setMessage("Isso apaga as amostras e calibracoes salvas neste celular.")
-            .setPositiveButton("Zerar") { _, _ ->
-                librasAnalyzer?.clearTrainingData()
-                indiceCalibracao = letrasCalibracao.indexOf("E").coerceAtLeast(0)
-                updateCalibrationPanel()
-                Toast.makeText(requireContext(), "Treino zerado", Toast.LENGTH_SHORT).show()
-            }
-            .setNegativeButton("Cancelar", null)
-            .show()
-    }
-
-    private fun proximaLetraParaTreinar(): Int {
-        return indiceProximaLetraFraca(includeCurrent = false)
-            ?: ((indiceCalibracao + 1) % letrasCalibracao.size)
-    }
-
-    private fun indiceProximaLetraFraca(includeCurrent: Boolean): Int? =
-        TrainingProgressCalculator.indiceProximaLetraFraca(
-            letras = letrasCalibracao,
-            indiceAtual = indiceCalibracao,
-            includeCurrent = includeCurrent,
-            alvoForte = LibrasAnalyzer.TRAINING_STRONG_TARGET_SAMPLES,
-            contarAmostras = ::contarAmostras
-        )
-
-    private fun trainingLevel(count: Int): String =
-        TrainingProgressCalculator.nivel(
-            count = count,
-            alvoForte = LibrasAnalyzer.TRAINING_STRONG_TARGET_SAMPLES,
-            alvoBasico = LibrasAnalyzer.TRAINING_BASIC_TARGET_SAMPLES
-        )
-
-    private fun updateCalibrationVisibility() {
-        val alfabeto = modoAtual == LibrasAnalyzer.Modo.ALFABETO
-        binding.btnCalibrate.isVisible = alfabeto
-        if (!alfabeto) {
-            closeCalibrationPanel()
-            hideSuggestions()
-        }
     }
 
     private fun updateWordSuggestions(frase: String) {
@@ -1084,33 +821,27 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
                 binding.chipResult.visibility = View.VISIBLE
                 binding.progressConfidence.visibility = View.VISIBLE
                 binding.progressConfidence.progress = porcentagem
-                binding.progressConfidence.progressTintList = confidenceTint(confianca)
-                binding.progressConfidence.progressBackgroundTintList = TINT_CONFIANCA_FUNDO
-                // Bump: pequena pulsada quando a letra reconhecida muda.
-                if (letra != ultimaLetraChip) {
-                    binding.chipResult.animate().scaleX(1.14f).scaleY(1.14f).setDuration(90)
-                        .withEndAction {
-                            _binding?.chipResult?.animate()?.scaleX(1f)?.scaleY(1f)
-                                ?.setDuration(90)?.start()
-                        }.start()
-                }
-                ultimaLetraChip = letra
-                updateCalibrationCaptureProgress()
+
+                binding.progressConfidence.progressTintList =
+                    ColorStateList.valueOf(confidenceColor(confianca))
+                binding.progressConfidence.progressBackgroundTintList =
+                    ColorStateList.valueOf(0x33242424)
             } else {
                 ultimaLetraChip = ""
                 binding.chipResult.visibility = View.INVISIBLE
                 binding.progressConfidence.visibility = View.INVISIBLE
                 binding.progressConfidence.progress = 0
-                updateCalibrationCaptureProgress()
             }
         }
     }
 
-    private fun confidenceTint(confianca: Float): ColorStateList {
+    private fun confidenceColor(confianca: Float): Int {
+        val ctx = requireContext()
         return when {
-            confianca >= 0.92f -> TINT_CONFIANCA_ALTA
-            confianca >= 0.84f -> TINT_CONFIANCA_MEDIA
-            else -> TINT_CONFIANCA_BAIXA
+            confianca >= 0.92f -> ContextCompat.getColor(ctx, R.color.gold_light)
+            confianca >= 0.84f -> ContextCompat.getColor(ctx, R.color.gold_primary)
+            else -> 0xFF8E6A26.toInt()
+
         }
     }
 
@@ -1123,22 +854,22 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
             }
             if (mensagem.isBlank()) {
                 binding.tvFeedback.visibility = View.INVISIBLE
+                binding.scanFrame.setFeedbackLevel(ScanFrameView.FEEDBACK_NEUTRO)
                 return@runOnUiThread
             }
             binding.tvFeedback.text = mensagem
             binding.tvFeedback.visibility = View.VISIBLE
             binding.tvFeedback.setTextColor(feedbackColor(nivel))
-            if (binding.calibrationPanel.isVisible) {
-                updateCalibrationCaptureProgress()
-            }
+            binding.scanFrame.setFeedbackLevel(nivel)
         }
     }
 
     private fun feedbackColor(nivel: Int): Int {
+        val ctx = requireContext()
         return when (nivel) {
-            LibrasAnalyzer.FEEDBACK_BOM -> 0xFFF5C842.toInt()
-            LibrasAnalyzer.FEEDBACK_ALERTA -> 0xFFFF8A80.toInt()
-            else -> 0xFFF5F1E8.toInt()
+            LibrasAnalyzer.FEEDBACK_BOM -> ContextCompat.getColor(ctx, R.color.gold_light)
+            LibrasAnalyzer.FEEDBACK_ALERTA -> ContextCompat.getColor(ctx, R.color.feedback_alerta)
+            else -> ContextCompat.getColor(ctx, R.color.text_primary)
         }
     }
 

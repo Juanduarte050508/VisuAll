@@ -34,6 +34,7 @@ import androidx.camera.video.Recording
 import androidx.camera.video.VideoCapture
 import androidx.camera.video.VideoRecordEvent
 import androidx.core.content.ContextCompat
+import androidx.constraintlayout.widget.ConstraintSet
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.Observer
@@ -56,6 +57,7 @@ class CameraFragment : Fragment() {
     private lateinit var cameraExecutor: ExecutorService
     private var cameraProvider: ProcessCameraProvider? = null
     private var camera: Camera? = null
+    private var preview: Preview? = null
     private var imageCapture: ImageCapture? = null
     private var videoCapture: VideoCapture<Recorder>? = null
     private var recording: Recording? = null
@@ -150,11 +152,12 @@ class CameraFragment : Fragment() {
             .setAspectRatioStrategy(aspectRatioStrategy)
             .build()
 
-        val preview = Preview.Builder()
+        val previewUseCase = Preview.Builder()
             .setResolutionSelector(resolutionSelector)
             .setTargetRotation(targetRotation)
             .build()
             .also { it.setSurfaceProvider(currentBinding.previewView.surfaceProvider) }
+        preview = previewUseCase
 
         try {
             provider.unbindAll()
@@ -181,8 +184,29 @@ class CameraFragment : Fragment() {
         }
     }
 
+
+    // ── Aspect Ratio: altura derivada da largura (match_parent) ────────────
     private fun applyAspectRatioToPreview() {
-        binding.previewView.requestLayout()
+        // Usa a resolução real entregue pela câmera (não uma suposição fixa
+        // de "3:4"/"9:16"): o sensor raramente entrega exatamente esse
+        // valor, e a caixa da preview precisa bater com o que é capturado
+        // de fato — senão a moldura mostrada não corresponde à foto/vídeo
+        // final e a imagem aparece cortada/deslocada.
+        val resolution = preview?.resolutionInfo?.resolution
+        val ratio = if (resolution != null && resolution.width > 0 && resolution.height > 0) {
+            val longSide = maxOf(resolution.width, resolution.height)
+            val shortSide = minOf(resolution.width, resolution.height)
+            "H,$shortSide:$longSide"
+        } else if (is4to3) {
+            "H,3:4"
+        } else {
+            "H,9:16"
+        }
+        val cs = ConstraintSet()
+        cs.clone(binding.root)
+        cs.setDimensionRatio(R.id.preview_view, ratio)
+        cs.applyTo(binding.root)
+        
         _binding?.btnAspectRatio?.text = if (is4to3) "4:3" else "16:9"
     }
 
