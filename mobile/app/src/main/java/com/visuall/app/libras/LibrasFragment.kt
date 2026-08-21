@@ -752,13 +752,33 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         }
     }
 
+    // Desvincula a câmera ANTES de fechar o analyzer, e fecha o analyzer no
+    // mesmo executor (single-thread) que entrega os frames em analyze().
+    // Isso garante que nenhum frame ainda esteja em processamento quando os
+    // recursos nativos (ONNX Runtime, MediaPipe, TFLite) forem liberados —
+    // fechar esses recursos enquanto analyze() roda em paralelo em outra
+    // thread é undefined behavior e foi a causa raiz dos crashes nativos
+    // intermitentes ao sair do modo Libras (mais frequentes em x86_64).
+    private fun closeAnalyzerSafely() {
+        cameraProvider?.unbindAll()
+        cameraProvider = null
+
+        val analyzerToClose = librasAnalyzer
+        librasAnalyzer = null
+
+        if (analyzerToClose != null) {
+            if (!cameraExecutor.isShutdown) {
+                cameraExecutor.execute { analyzerToClose.close() }
+            } else {
+                analyzerToClose.close()
+            }
+        }
+        if (!cameraExecutor.isShutdown) cameraExecutor.shutdown()
+    }
+
     private fun exitLibrasMode() {
         try {
-            librasAnalyzer?.close()
-            librasAnalyzer = null
-            cameraProvider?.unbindAll()
-            cameraProvider = null
-            if (!cameraExecutor.isShutdown) cameraExecutor.shutdown()
+            closeAnalyzerSafely()
         } catch (e: Exception) {
             e.printStackTrace()
         } finally {
@@ -779,11 +799,7 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
     override fun onDestroyView() {
         super.onDestroyView()
         try {
-            librasAnalyzer?.close()
-            librasAnalyzer = null
-            cameraProvider?.unbindAll()
-            cameraProvider = null
-            if (!cameraExecutor.isShutdown) cameraExecutor.shutdown()
+            closeAnalyzerSafely()
         } catch (e: Exception) {
             e.printStackTrace()
         }

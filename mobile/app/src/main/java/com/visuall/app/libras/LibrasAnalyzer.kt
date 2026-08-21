@@ -183,6 +183,21 @@ class LibrasAnalyzer(
 
     @ExperimentalGetImage
     override fun analyze(imageProxy: ImageProxy) {
+        // O ImageAnalysis está configurado com STRATEGY_KEEP_ONLY_LATEST: a
+        // câmera só entrega o próximo frame depois que este imageProxy for
+        // fechado. Por isso o close() precisa acontecer sempre, mesmo se
+        // analyzeFrame() lançar uma exceção (ex.: erro do ONNX Runtime ou do
+        // MediaPipe) — sem o finally, uma falha no meio da análise deixava o
+        // imageProxy aberto para sempre e a pré-visualização "congelava".
+        try {
+            analyzeFrame(imageProxy)
+        } finally {
+            imageProxy.close()
+        }
+    }
+
+    @ExperimentalGetImage
+    private fun analyzeFrame(imageProxy: ImageProxy) {
         // ── Converter YUV → RGBA_8888 (exigido pelo MediaPipe) ────────────
         val bitmap = imageProxy.toBitmap()
         val rotatedBitmap = rotateBitmap(bitmap, imageProxy.imageInfo.rotationDegrees.toFloat())
@@ -195,12 +210,10 @@ class LibrasAnalyzer(
             if (poseDetector == null) {
                 onLetra("-", 0f, "corpo")
                 onFeedback("MODELO DE CORPO INDISPONIVEL", FEEDBACK_ALERTA)
-                imageProxy.close()
                 return
             }
             val poseResult = poseDetector.detect(mpImage)
             analisarCorpo(result, poseResult)
-            imageProxy.close()
             return
         }
 
@@ -217,7 +230,6 @@ class LibrasAnalyzer(
                 onFeedback("MAO FORA DO QUADRO", FEEDBACK_ALERTA)
                 onNoHand()
             }
-            imageProxy.close()
             return
         }
 
@@ -304,8 +316,6 @@ class LibrasAnalyzer(
             if ((agora - ultimoTempoAdicao) > COOLDOWN_REPETICAO)
                 ultimaLetraAdicionada = ""
         }
-
-        imageProxy.close()
     }
 
     // ── Rotacionar bitmap conforme a orientação da câmera ─────────────────
