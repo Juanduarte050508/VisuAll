@@ -51,8 +51,25 @@ android {
 
     sourceSets {
         androidTest.java.srcDirs = []
-        test.java.srcDirs = []
+        test.java.srcDirs = ['src/test/java']
     }
+}
+
+// O LandmarkContractTest le tests/fixtures/landmark_contract.json (fora do
+// modulo, compartilhado com os testes Python). Sem declarar isso como entrada,
+// o Gradle considera o teste "atualizado" quando so as fixtures mudam e nao
+// roda de novo -- ou seja, o contrato poderia sair de sincronia sem ninguem
+// perceber, que e exatamente o que esse teste existe pra evitar.
+tasks.withType(Test).configureEach {
+    inputs.file(rootProject.file('../tests/fixtures/landmark_contract.json'))
+        .withPropertyName('landmarkContractFixtures')
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+}
+
+tasks.register('unitTestClasses') {
+    group = 'verification'
+    description = 'Alias local para IDEs que procuram :app:unitTestClasses.'
+    dependsOn 'compileDebugUnitTestKotlin', 'compileDebugUnitTestJavaWithJavac'
 }
 
 dependencies {
@@ -78,6 +95,13 @@ dependencies {
     implementation 'org.tensorflow:tensorflow-lite:2.16.1'
     implementation 'org.tensorflow:tensorflow-lite-select-tf-ops:2.16.1'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+
+    testImplementation 'junit:junit:4.13.2'
+    // O org.json que vem no android.jar e so um esqueleto: em teste JVM todo
+    // metodo lanca "Stub!". Esta dependencia poe a implementacao de verdade no
+    // classpath de teste (so de teste), pro LandmarkContractTest conseguir ler
+    // o arquivo de fixtures compartilhado com o Python.
+    testImplementation 'org.json:json:20231013'
 }
 
 

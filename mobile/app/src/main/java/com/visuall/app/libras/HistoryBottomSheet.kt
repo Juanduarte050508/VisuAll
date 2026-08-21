@@ -44,10 +44,15 @@ class HistoryBottomSheet : BottomSheetDialogFragment() {
     companion object {
         private const val ARG_WORDS = "words"
 
-        fun newInstance(words: ArrayList<HistoryEntry>): HistoryBottomSheet {
+        fun newInstance(words: List<HistoryEntry>): HistoryBottomSheet {
             return HistoryBottomSheet().also { sheet ->
                 sheet.arguments = Bundle().apply {
-                    putParcelableArrayList(ARG_WORDS, words)
+                    // Cópia defensiva: em processo único, um Bundle guarda a
+                    // MESMA referência da lista (não serializa de verdade até
+                    // cruzar um processo). Sem isso, letras reconhecidas
+                    // enquanto o histórico está aberto mudam a lista por
+                    // baixo do RecyclerView sem notifyDataSetChanged().
+                    putParcelableArrayList(ARG_WORDS, ArrayList(words))
                 }
             }
         }

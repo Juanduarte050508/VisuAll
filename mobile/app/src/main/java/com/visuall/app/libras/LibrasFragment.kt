@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.content.res.ColorStateList
 import android.os.Build
 import android.os.Bundle
@@ -11,18 +12,34 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.speech.RecognizerIntent
 import android.speech.tts.TextToSpeech
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraManager
+import android.hardware.camera2.CaptureRequest
+import android.util.Log
+import android.util.Range
+import android.view.Surface
 import android.view.LayoutInflater
+import android.view.OrientationEventListener
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+
+import androidx.appcompat.app.AlertDialog
+import android.util.Size
+import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
+import androidx.camera.core.resolutionselector.AspectRatioStrategy
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.core.content.ContextCompat
 import androidx.core.view.isVisible
 import androidx.fragment.app.Fragment
@@ -36,8 +53,19 @@ import java.text.Normalizer
 import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import kotlin.math.roundToInt
 
 class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
+
+    private companion object {
+        // Cores fixas do chip de confiança: só 3 buckets possíveis, então não
+        // há motivo pra alocar um ColorStateList novo (via valueOf) a cada
+        // atualização — onLetraDetectada roda a cada letra reconhecida.
+        val TINT_CONFIANCA_ALTA = ColorStateList.valueOf(0xFFF5C842.toInt())
+        val TINT_CONFIANCA_MEDIA = ColorStateList.valueOf(0xFFE8A020.toInt())
+        val TINT_CONFIANCA_BAIXA = ColorStateList.valueOf(0xFF8E6A26.toInt())
+        val TINT_CONFIANCA_FUNDO = ColorStateList.valueOf(0x33242424)
+    }
 
     private var _binding: FragmentLibrasBinding? = null
     private val binding get() = _binding!!
@@ -46,16 +74,26 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
     private var librasAnalyzer: LibrasAnalyzer? = null
     private var cameraProvider: ProcessCameraProvider? = null
     private var tts: TextToSpeech? = null
+    private var isPhysicalLandscape = false
+    private var orientationListener: OrientationEventListener? = null
+    private var landscapeHud: View? = null
+    private var bindRetryPosted = false
+    private var cameraStartRequested = false
+    private var bindInProgress = false
+    private var pendingBind = false
 
     private var lensFacing = CameraSelector.LENS_FACING_FRONT
 
-    private val historicoEntries = arrayListOf<HistoryEntry>()
-    private var ultimaMensagemLibras = ""
-    private var indiceLibrasAtual = -1
-    private var indiceRespostaAtual = -1
+    private val historyStore by lazy { ConversationHistoryStore(requireContext().applicationContext) }
 
     // Controle de histórico: rastreia a frase completa anterior
     private var fraseAnterior = ""
+    // Texto bruto vindo do analyzer (letras/tokens, sem "?"). O "?" do
+    // marcador de sobrancelha é só de EXIBIÇÃO — igual ao Python, que nunca
+    // grava a interrogação no texto, só no que é mostrado na tela.
+    private var fraseBase = ""
+    private var interrogativoAtivo = false
+    private var ultimaLetraChip = ""
     private var linhasAtivas = true
     private var modoAtual = LibrasAnalyzer.Modo.ALFABETO
     private val palavrasSugeridas = listOf(
@@ -75,6 +113,7 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         "preciso" to listOf("ajuda", "agua", "medico"),
         "quero" to listOf("comida", "agua", "conversar")
     )
+
     private val speechLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -110,19 +149,42 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         super.onViewCreated(view, savedInstanceState)
         cameraExecutor = Executors.newSingleThreadExecutor()
         tts = TextToSpeech(requireContext(), this)
-        carregarConversaSalva()
-        startCamera()
+        historyStore.load()
+        view.post {
+            applyPreviewAspectRatio()
+            applyHudLayout()
+        }
         setupButtons()
         updateModeButtons()
+        setupOrientationHudListener()
     }
 
     // ── Inicia provider uma única vez ──────────────────────────────────────
     private fun startCamera() {
+        if (cameraStartRequested) return
+        cameraStartRequested = true
         val future = ProcessCameraProvider.getInstance(requireContext())
         future.addListener({
+            if (!isAdded || _binding == null) return@addListener
+            cameraStartRequested = false
             cameraProvider = future.get()
-            bindCamera()
+            scheduleBindCamera()
         }, ContextCompat.getMainExecutor(requireContext()))
+    }
+
+    private fun scheduleBindCamera(delayMs: Long = 0L) {
+        val root = _binding?.root ?: return
+        root.removeCallbacks(bindRunnable)
+        if (delayMs > 0L) {
+            root.postDelayed(bindRunnable, delayMs)
+        } else {
+            root.post(bindRunnable)
+        }
+    }
+
+    private val bindRunnable = Runnable {
+        if (_binding == null || !isAdded) return@Runnable
+        bindCamera()
     }
     private fun cameraSelectorForAvailableLens(preferredLensFacing: Int): CameraSelector {
         val provider = cameraProvider
@@ -152,60 +214,361 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
     private fun bindCamera() {
         val provider = cameraProvider ?: return
         if (!isAdded || _binding == null) return
+        if (bindInProgress) {
+            pendingBind = true
+            return
+        }
+        if (!binding.previewView.isAttachedToWindow ||
+            binding.previewView.width == 0 ||
+            binding.previewView.height == 0
+        ) {
+            if (!bindRetryPosted) {
+                bindRetryPosted = true
+                binding.previewView.post {
+                    bindRetryPosted = false
+                    bindCamera()
+                }
+            }
+            return
+        }
+        bindInProgress = true
+        pendingBind = false
 
         val requestedLensFacing = lensFacing
         val selector = cameraSelectorForAvailableLens(requestedLensFacing)
+        val targetRotation = currentTargetRotation()
 
-        val preview = Preview.Builder().build().also { p ->
-            p.setSurfaceProvider(binding.previewView.surfaceProvider)
-        }
+        val resolutionSelector = ResolutionSelector.Builder()
+            .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY)
+            .setResolutionStrategy(
+                ResolutionStrategy(
+                    Size(640, 480),
+                    ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER
+                )
+            )
+            .build()
+
+        val preview = Preview.Builder()
+            .setResolutionSelector(resolutionSelector)
+            .setTargetRotation(targetRotation)
+            .build()
+            .also { p -> p.setSurfaceProvider(binding.previewView.surfaceProvider) }
 
         // Para o analyzer atual — seta null ANTES de unbindAll para evitar
         // que o executor entregue frames enquanto o provider já foi desvinculado
         val oldAnalyzer = librasAnalyzer
         librasAnalyzer = null
 
-        // Desvincula câmera (para entrega de frames no pipeline)
-        provider.unbindAll()
-
         // Recria executor se foi encerrado
         if (cameraExecutor.isShutdown) {
             cameraExecutor = Executors.newSingleThreadExecutor()
         }
 
-        val analysis = ImageAnalysis.Builder()
+        // Pede uma análise de baixa resolução (~640x480, 4:3) para a inferência
+        // ficar rápida — igual à referência Python (480x360). Menos pixels =
+        // muito menos latência no MediaPipe/ONNX.
+        val analysisBuilder = ImageAnalysis.Builder()
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-            .build()
+            .setResolutionSelector(resolutionSelector)
+            .setTargetRotation(targetRotation)
 
-        try {
+        // Fixa o FPS numa faixa que a câmera realmente suporta. Pedir 60fps
+        // fixo sem checar antes falha silenciosamente em muitos aparelhos (o
+        // Camera2Interop simplesmente ignora o pedido) e, mesmo quando aceito,
+        // força exposição curta — pior imagem em ambiente escuro. Consultamos
+        // as faixas disponíveis e escolhemos a melhor, avisando no Logcat
+        // quando 60fps fixo não é suportado nativamente.
+        selecionarFaixaFps(requestedLensFacing)?.let { faixa ->
+            Camera2Interop.Extender(analysisBuilder)
+                .setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, faixa)
+        }
+
+        val analysis = analysisBuilder.build()
+
+        val usandoCameraFrontal = lensFacing == CameraSelector.LENS_FACING_FRONT
+
+        val boundAnalysis = try {
+            provider.unbindAll()
             provider.bindToLifecycle(viewLifecycleOwner, selector, preview, analysis)
+            analysis
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.w("LibrasFragment", "Bind otimizado da camera de Libras falhou; tentando fallback simples", e)
+            try {
+                provider.unbindAll()
+                val fallbackPreview = Preview.Builder()
+                    .setTargetRotation(targetRotation)
+                    .build()
+                    .also { p -> p.setSurfaceProvider(binding.previewView.surfaceProvider) }
+                val fallbackAnalysis = ImageAnalysis.Builder()
+                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                    .setTargetRotation(targetRotation)
+                    .build()
+                provider.bindToLifecycle(viewLifecycleOwner, selector, fallbackPreview, fallbackAnalysis)
+                fallbackAnalysis
+            } catch (fallbackError: Exception) {
+                Log.e("LibrasFragment", "Nao consegui abrir a camera de Libras", fallbackError)
+                Toast.makeText(requireContext(), "Nao consegui abrir a camera de Libras", Toast.LENGTH_SHORT).show()
+                oldAnalyzer?.close()
+                bindInProgress = false
+                null
+            }
+        } ?: return
+
+        if (!isAdded || _binding == null) {
             oldAnalyzer?.close()
+            bindInProgress = false
             return
         }
 
         val appContext = requireContext().applicationContext
+        val rootView = binding.root
         cameraExecutor.execute {
             oldAnalyzer?.close()
 
-            val newAnalyzer = LibrasAnalyzer(
-                context       = appContext,
-                onLetra       = { letra, conf, _ -> onLetraDetectada(letra, conf) },
-                onFraseUpdate = { frase -> onFraseAtualizada(frase) },
-                onNoHand      = { onSemMao() },
-                onGestoLimpar = { prog -> onGestoLimpar(prog) },
-                onRepeticaoPendente = { letra -> onRepeticaoPendente(letra) },
-                onFeedback = { mensagem, nivel -> onFeedback(mensagem, nivel) }
-            ).also { it.setModo(modoAtual) }
-
-            if (!isAdded || _binding == null || cameraExecutor.isShutdown) {
-                newAnalyzer.close()
+            val newAnalyzer = try {
+                LibrasAnalyzer(
+                    context       = appContext,
+                    onLetra       = { letra, conf, _ -> onLetraDetectada(letra, conf) },
+                    onFraseUpdate = { frase -> onFraseAtualizada(frase) },
+                    onNoHand      = { onSemMao() },
+                    onGestoLimpar = { prog -> onGestoLimpar(prog) },
+                    onRepeticaoPendente = { letra -> onRepeticaoPendente(letra) },
+                    onFeedback = { mensagem, nivel -> onFeedback(mensagem, nivel) },
+                    onLandmarks = { hands, pose, frameAspect ->
+                        onLandmarksDetected(hands, pose, frameAspect)
+                    },
+                    onInterrogativo = { ativo -> onInterrogativoAtualizado(ativo) }
+                ).also {
+                    it.setModo(modoAtual)
+                    it.setEspelhamento(usandoCameraFrontal)
+                }
+            } catch (error: Throwable) {
+                Log.e("LibrasFragment", "Nao consegui iniciar o reconhecedor de Libras", error)
+                rootView.post {
+                    context?.let { safeContext ->
+                        Toast.makeText(
+                            safeContext,
+                            "Reconhecimento de Libras nao iniciou",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                }
+                bindInProgress = false
+                if (pendingBind) rootView.postDelayed(bindRunnable, 180L)
                 return@execute
             }
 
-            librasAnalyzer = newAnalyzer
-            analysis.setAnalyzer(cameraExecutor, newAnalyzer)
+            rootView.post {
+                if (!isAdded || _binding == null || cameraExecutor.isShutdown) {
+                    newAnalyzer.close()
+                    bindInProgress = false
+                    return@post
+                }
+                librasAnalyzer = newAnalyzer
+                boundAnalysis.setAnalyzer(cameraExecutor, newAnalyzer)
+                sincronizarAlfabeto(newAnalyzer)
+                bindInProgress = false
+                if (pendingBind) scheduleBindCamera(180L)
+            }
+        }
+    }
+
+    // Loga quando o alfabeto que os modelos realmente conhecem (vem dos
+    // labels.txt exportados junto de cada modelo) muda — útil para
+    // diagnosticar treinos que alteraram o conjunto de letras suportado.
+    private fun sincronizarAlfabeto(analyzer: LibrasAnalyzer) {
+        if (_binding == null) return
+        val doModelo = analyzer.labelsAlfabeto()
+        if (doModelo.isEmpty()) return
+        Log.i("LibrasFragment", "Alfabeto dos modelos: $doModelo")
+    }
+
+    // Fallback só usado quando a preview ainda não tem Display anexado
+    // (_binding?.previewView?.display == null). Context.getDisplay() (API 30+)
+    // substitui o WindowManager.getDefaultDisplay() deprecated; abaixo de 30
+    // não tem substituto, então o uso do antigo fica isolado e suprimido aqui.
+    @Suppress("DEPRECATION")
+    private fun fallbackDisplay(): android.view.Display? {
+        val act = activity ?: return null
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) act.display
+        else act.windowManager.defaultDisplay
+    }
+
+    private fun currentTargetRotation(): Int {
+        return _binding?.previewView?.display?.rotation
+            ?: fallbackDisplay()?.rotation
+            ?: Surface.ROTATION_0
+    }
+
+    // Consulta as faixas de FPS que a câmera realmente suporta (Camera2) e
+    // escolhe a melhor opção em vez de forçar 60fps às cegas. Retorna null se
+    // não conseguir consultar (a câmera então usa o auto padrão do CameraX).
+    private fun selecionarFaixaFps(lensFacing: Int): Range<Int>? {
+        val desejada = Range(60, 60)
+        return try {
+            val manager = requireContext()
+                .getSystemService(Context.CAMERA_SERVICE) as CameraManager
+            val cameraId = manager.cameraIdList.firstOrNull { id ->
+                val facingCam = manager.getCameraCharacteristics(id)
+                    .get(CameraCharacteristics.LENS_FACING)
+                val facingDesejado = if (lensFacing == CameraSelector.LENS_FACING_FRONT) {
+                    CameraCharacteristics.LENS_FACING_FRONT
+                } else {
+                    CameraCharacteristics.LENS_FACING_BACK
+                }
+                facingCam == facingDesejado
+            } ?: return null
+
+            val faixas = manager.getCameraCharacteristics(cameraId)
+                .get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
+                ?: return null
+
+            faixas.firstOrNull { it == desejada } ?: run {
+                // Sem 60fps fixo nativo: usa a faixa de maior teto disponível
+                // em vez de insistir num valor que a câmera vai ignorar.
+                val melhor = faixas.maxByOrNull { it.upper }
+                Log.w(
+                    "LibrasFragment",
+                    "Camera sem suporte nativo a 60fps fixo; usando $melhor"
+                )
+                melhor
+            }
+        } catch (e: Exception) {
+            Log.w("LibrasFragment", "Falha ao consultar faixas de FPS da camera", e)
+            null
+        }
+    }
+
+    private fun applyPreviewAspectRatio() {
+        val params = binding.previewView.layoutParams
+                as? ConstraintLayout.LayoutParams ?: return
+        if (params.dimensionRatio != null) {
+            params.dimensionRatio = null
+            binding.previewView.layoutParams = params
+        } else {
+            binding.previewView.requestLayout()
+        }
+    }
+
+    private fun applyHudLayout() {
+        if (!isLandscapeHudCompact()) {
+            applyPortraitHudLayout()
+            return
+        }
+
+        setPortraitHudVisible(false)
+        ensureLandscapeHud()
+    }
+
+    private fun dp(value: Int): Int {
+        return (value * resources.displayMetrics.density).roundToInt()
+    }
+
+    private fun isLandscapeHudCompact(): Boolean {
+        return isLandscapeByBounds()
+    }
+
+    private fun applyPortraitHudLayout() {
+        removeLandscapeHud()
+        setPortraitHudVisible(true)
+    }
+
+    private fun setPortraitHudVisible(visible: Boolean) {
+        val visibility = if (visible) View.VISIBLE else View.GONE
+        binding.gradTop.visibility = visibility
+        binding.gradBottom.visibility = visibility
+        binding.btnExitLibras.visibility = visibility
+        binding.tvLive.visibility = visibility
+        binding.tvModeLabel.visibility = visibility
+        binding.scanFrame.visibility = visibility
+        binding.actionRow.visibility = visibility
+        binding.modesRow.visibility = visibility
+        binding.controlsRow.visibility = visibility
+        binding.chipResult.visibility = if (visible) View.INVISIBLE else View.GONE
+        binding.progressConfidence.visibility = if (visible) View.INVISIBLE else View.GONE
+        binding.tvFeedback.visibility = if (visible) View.INVISIBLE else View.GONE
+        binding.progressClear.visibility = View.GONE
+        binding.replyBubble.visibility = View.GONE
+        binding.phraseBubble.visibility = View.GONE
+        binding.suggestionsRow.visibility = View.GONE
+        binding.replyPanel.visibility = View.GONE
+    }
+
+    private fun ensureLandscapeHud() {
+        if (landscapeHud != null) return
+        val hud = layoutInflater.inflate(R.layout.hud_libras_land, binding.root, false)
+        hud.id = R.id.hud_libras_land_root
+        binding.root.addView(
+            hud,
+            ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        )
+        hud.findViewById<View>(R.id.btn_exit_libras_land).setOnClickListener {
+            exitLibrasMode()
+        }
+        hud.findViewById<View>(R.id.btn_flip_libras_land).setOnClickListener {
+            lensFacing = if (lensFacing == CameraSelector.LENS_FACING_FRONT)
+                CameraSelector.LENS_FACING_BACK
+            else CameraSelector.LENS_FACING_FRONT
+            scheduleBindCamera(180L)
+        }
+        landscapeHud = hud
+    }
+
+    private fun removeLandscapeHud() {
+        landscapeHud?.let { binding.root.removeView(it) }
+        landscapeHud = null
+    }
+
+    private fun isLandscapeByBounds(): Boolean {
+        if (isPhysicalLandscape) return true
+
+        val displayRotation = _binding?.previewView?.display?.rotation
+            ?: fallbackDisplay()?.rotation
+        if (displayRotation == Surface.ROTATION_90 || displayRotation == Surface.ROTATION_270) {
+            return true
+        }
+
+        val rootWidth = _binding?.root?.width ?: 0
+        val rootHeight = _binding?.root?.height ?: 0
+        return if (rootWidth > 0 && rootHeight > 0) {
+            rootWidth > rootHeight
+        } else {
+            resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        }
+    }
+
+    private fun setupOrientationHudListener() {
+        val context = context ?: return
+        orientationListener = object : OrientationEventListener(context) {
+            override fun onOrientationChanged(orientation: Int) {
+                if (orientation == ORIENTATION_UNKNOWN) return
+                val landscape = orientation in 60..120 || orientation in 240..300
+                if (landscape == isPhysicalLandscape) return
+
+                isPhysicalLandscape = landscape
+                _binding?.root?.post {
+                    applyPreviewAspectRatio()
+                    applyHudLayout()
+                }
+            }
+        }.also { listener ->
+            if (listener.canDetectOrientation()) listener.enable()
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        _binding?.root?.post {
+            applyPreviewAspectRatio()
+            applyHudLayout()
+            if (cameraProvider != null) {
+                scheduleBindCamera(250L)
+            } else {
+                _binding?.root?.postDelayed({ startCamera() }, 250L)
+            }
         }
     }
 
@@ -270,25 +633,32 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
 
         binding.btnLines.setOnClickListener {
             linhasAtivas = !linhasAtivas
-            binding.scanFrame.isVisible = linhasAtivas
-            binding.btnLines.text = if (linhasAtivas) "LINHAS ON" else "LINHAS OFF"
+            binding.landmarkOverlay.isVisible = linhasAtivas
+            if (!linhasAtivas) binding.landmarkOverlay.clear()
+            binding.btnLines.text = if (linhasAtivas) "LINHAS: ON" else "LINHAS: OFF"
         }
 
         binding.btnFlip.setOnClickListener {
             lensFacing = if (lensFacing == CameraSelector.LENS_FACING_FRONT)
                 CameraSelector.LENS_FACING_BACK
             else CameraSelector.LENS_FACING_FRONT
-            bindCamera()
+            scheduleBindCamera(180L)
         }
 
+        // Toque: limpa a frase inteira (a lixeira zera tudo de uma vez).
+        // Toque longo: apaga só a última letra/sinal, para quem quer corrigir.
         binding.btnDeleteLetter.setOnClickListener {
+            librasAnalyzer?.limparFrase()
+        }
+        binding.btnDeleteLetter.setOnLongClickListener {
             librasAnalyzer?.apagarUltima()
+            true
         }
 
         binding.btnHistory.setOnClickListener {
-            HistoryBottomSheet.newInstance(historicoEntries)
+            HistoryBottomSheet.newInstance(historyStore.entries)
                 .also { sheet ->
-                    sheet.onClearConversation = { limparConversa() }
+                    sheet.onClearConversation = { historyStore.limpar() }
                 }
                 .show(childFragmentManager, "history")
         }
@@ -323,32 +693,7 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
             return
         }
 
-        val textoNormal = frase.lowercase(Locale("pt", "BR"))
-        val prefixo = textoNormal.substringAfterLast(' ').trim()
-        val prefixoBusca = normalizarBusca(prefixo)
-        val ultimaCompleta = textoNormal.trim().split(" ").lastOrNull().orEmpty()
-        val contextuais = if (frase.endsWith(" ")) {
-            sugestoesContextuais[normalizarBusca(ultimaCompleta)].orEmpty()
-        } else {
-            emptyList()
-        }
-
-        val sugestoes = (contextuais + palavrasSugeridas)
-            .distinct()
-            .mapNotNull { palavra ->
-                val busca = normalizarBusca(palavra)
-                val score = when {
-                    prefixoBusca.isBlank() && palavra in contextuais -> 100
-                    prefixoBusca.length < 2 -> -1
-                    busca.startsWith(prefixoBusca) -> 80 - (busca.length - prefixoBusca.length)
-                    busca.contains(prefixoBusca) -> 35 - busca.indexOf(prefixoBusca)
-                    else -> -1
-                }
-                if (score < 0 || busca == prefixoBusca) null else palavra to score
-            }
-            .sortedWith(compareByDescending<Pair<String, Int>> { it.second }.thenBy { it.first.length })
-            .map { it.first }
-            .take(3)
+        val sugestoes = WordSuggestionEngine.sugerir(frase)
 
         val botoes = listOf(binding.btnSuggestion1, binding.btnSuggestion2, binding.btnSuggestion3)
         botoes.forEachIndexed { index, botao ->
@@ -358,11 +703,6 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
             botao.isVisible = palavra != null
         }
         binding.suggestionsRow.isVisible = sugestoes.isNotEmpty()
-    }
-
-    private fun normalizarBusca(texto: String): String {
-        return Normalizer.normalize(texto.trim().lowercase(Locale("pt", "BR")), Normalizer.Form.NFD)
-            .replace("\\p{Mn}+".toRegex(), "")
     }
 
     private fun hideSuggestions() {
@@ -401,6 +741,11 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
     }
 
     private fun openReplyPanel(focus: Boolean = false) {
+        if (isLandscapeHudCompact()) {
+            binding.replyPanel.isVisible = false
+            Toast.makeText(requireContext(), "Resposta ocultada no HUD compacto", Toast.LENGTH_SHORT).show()
+            return
+        }
         binding.replyPanel.isVisible = true
         val respostaAtual = binding.tvReply.text?.toString().orEmpty()
         if (binding.etReply.text.isNullOrBlank() && respostaAtual.isNotBlank()) {
@@ -436,12 +781,12 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         }
         binding.tvReply.text = texto
         binding.replyBubble.isVisible = true
-        registrarMensagemResposta(texto)
+        historyStore.registrarMensagemResposta(texto)
         return true
     }
 
     private fun clearReply() {
-        removerRespostaAtual()
+        historyStore.removerRespostaAtual()
         binding.etReply.setText("")
         binding.tvReply.text = ""
         binding.replyBubble.isVisible = false
@@ -465,17 +810,24 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
     private fun onLetraDetectada(letra: String, confianca: Float) {
         activity?.runOnUiThread {
             if (_binding == null) return@runOnUiThread
+            if (isLandscapeHudCompact()) {
+                binding.chipResult.visibility = View.GONE
+                binding.progressConfidence.visibility = View.GONE
+                return@runOnUiThread
+            }
             if (letra != "-") {
                 val porcentagem = (confianca * 100).toInt().coerceIn(0, 100)
                 binding.chipResult.text = "$letra   $porcentagem% conf"
                 binding.chipResult.visibility = View.VISIBLE
                 binding.progressConfidence.visibility = View.VISIBLE
                 binding.progressConfidence.progress = porcentagem
+
                 binding.progressConfidence.progressTintList =
                     ColorStateList.valueOf(confidenceColor(confianca))
                 binding.progressConfidence.progressBackgroundTintList =
                     ColorStateList.valueOf(0x33242424)
             } else {
+                ultimaLetraChip = ""
                 binding.chipResult.visibility = View.INVISIBLE
                 binding.progressConfidence.visibility = View.INVISIBLE
                 binding.progressConfidence.progress = 0
@@ -489,12 +841,17 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
             confianca >= 0.92f -> ContextCompat.getColor(ctx, R.color.gold_light)
             confianca >= 0.84f -> ContextCompat.getColor(ctx, R.color.gold_primary)
             else -> 0xFF8E6A26.toInt()
+
         }
     }
 
     private fun onFeedback(mensagem: String, nivel: Int) {
         activity?.runOnUiThread {
             if (_binding == null) return@runOnUiThread
+            if (isLandscapeHudCompact()) {
+                binding.tvFeedback.visibility = View.GONE
+                return@runOnUiThread
+            }
             if (mensagem.isBlank()) {
                 binding.tvFeedback.visibility = View.INVISIBLE
                 binding.scanFrame.setFeedbackLevel(ScanFrameView.FEEDBACK_NEUTRO)
@@ -519,203 +876,63 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
     private fun onFraseAtualizada(frase: String) {
         activity?.runOnUiThread {
             if (_binding == null) return@runOnUiThread
-            binding.tvPhrase.text = frase
+            fraseBase = frase
+            if (isLandscapeHudCompact()) {
+                binding.phraseBubble.isVisible = false
+                hideSuggestions()
+                fraseAnterior = frase
+                return@runOnUiThread
+            }
+            binding.tvPhrase.text = fraseExibida()
             binding.phraseBubble.isVisible = frase.isNotBlank()
             updateWordSuggestions(frase)
 
-            // TTS: fala a última letra adicionada
+            // TTS: fala o que acabou de entrar (regra e casos em PhraseOutput).
+            val fala = PhraseOutput.trechoParaFalar(frase, fraseAnterior)
             if (frase.length > fraseAnterior.length) {
-                val trechoNovo = frase.removePrefix(fraseAnterior).trim()
-                val fala = if (frase.endsWith(" ")) {
-                    frase.trim().substringAfterLast(' ')
-                } else {
-                    trechoNovo.ifBlank { frase.lastOrNull()?.toString().orEmpty() }
-                }
                 if (fala.isNotBlank()) {
                     tts?.speak(fala, TextToSpeech.QUEUE_FLUSH, null, null)
                 }
                 vibrateConfirmation()
             }
 
-            registrarMensagemLibras(frase)
+            historyStore.registrarMensagemLibras(frase)
             fraseAnterior = frase
         }
     }
 
-    /**
-     * HISTÓRICO SIMPLIFICADO:
-     * - Divide a frase em palavras por espaço
-     * - A última palavra (incompleta ou não) é sempre mantida/atualizada
-     *   na última entrada do histórico — nunca duplica
-     * - Palavras anteriores (já com espaço depois) ficam fixas
-     */
-    private fun salvarPalavrasNoHistorico(fraseNova: String) {
-        if (fraseNova.isEmpty()) return
+    private fun fraseExibida(): String = PhraseOutput.exibicao(fraseBase, interrogativoAtivo)
 
-        val tokens = fraseNova.trim().split(" ").filter { it.isNotEmpty() }
-        if (tokens.isEmpty()) return
-
-        val terminalComEspaco = fraseNova.endsWith(" ")
-
-        if (terminalComEspaco) {
-            // Todas as palavras estão completas — garante que cada uma existe
-            // no histórico exatamente uma vez (sem duplicar)
-            tokens.forEach { token ->
-                val jaExiste = historicoEntries.any { it.word == token }
-                if (!jaExiste) historicoEntries.add(HistoryEntry(token))
+    private fun onInterrogativoAtualizado(ativo: Boolean) {
+        activity?.runOnUiThread {
+            if (_binding == null) return@runOnUiThread
+            if (interrogativoAtivo == ativo) return@runOnUiThread
+            interrogativoAtivo = ativo
+            if (!isLandscapeHudCompact()) {
+                binding.tvPhrase.text = fraseExibida()
             }
-        } else {
-            // A última palavra ainda está sendo digitada
-            val palavrasCompletas = tokens.dropLast(1)
-            val ultimaPalavra = tokens.last()
-
-            // Garante palavras completas no histórico
-            palavrasCompletas.forEach { token ->
-                val jaExiste = historicoEntries.any { it.word == token }
-                if (!jaExiste) historicoEntries.add(HistoryEntry(token))
-            }
-
-            // Atualiza ou cria a entrada da última palavra (em construção)
-            val ultimoIdx = historicoEntries.indexOfLast { entry ->
-                ultimaPalavra.startsWith(entry.word) || entry.word.startsWith(ultimaPalavra)
-            }
-            if (ultimoIdx >= 0) {
-                // Substitui no lugar — mantém o timestamp original
-                historicoEntries[ultimoIdx] = HistoryEntry(ultimaPalavra, historicoEntries[ultimoIdx].timestamp)
-            } else {
-                historicoEntries.add(HistoryEntry(ultimaPalavra))
-            }
-        }
-    }
-
-    private fun registrarMensagemLibras(fraseNova: String) {
-        val texto = fraseNova.trim()
-        if (texto.isBlank()) {
-            ultimaMensagemLibras = ""
-            indiceLibrasAtual = -1
-            return
-        }
-        if (texto == ultimaMensagemLibras) return
-
-        if (indiceLibrasAtual in historicoEntries.indices &&
-            historicoEntries[indiceLibrasAtual].source == "LIBRAS") {
-            val anterior = historicoEntries[indiceLibrasAtual]
-            historicoEntries[indiceLibrasAtual] = HistoryEntry(texto, anterior.timestamp, "LIBRAS")
-        } else {
-            historicoEntries.add(HistoryEntry(texto, source = "LIBRAS"))
-            indiceLibrasAtual = historicoEntries.lastIndex
-            indiceRespostaAtual = -1
-        }
-        ultimaMensagemLibras = texto
-        limitarConversa()
-        salvarConversa()
-    }
-
-    private fun registrarMensagemResposta(textoResposta: String) {
-        val texto = textoResposta.trim()
-        if (texto.isBlank()) return
-
-        if (indiceRespostaAtual in historicoEntries.indices &&
-            historicoEntries[indiceRespostaAtual].source == "RESPOSTA") {
-            val anterior = historicoEntries[indiceRespostaAtual]
-            historicoEntries[indiceRespostaAtual] = HistoryEntry(texto, anterior.timestamp, "RESPOSTA")
-        } else {
-            historicoEntries.add(HistoryEntry(texto, source = "RESPOSTA"))
-            indiceRespostaAtual = historicoEntries.lastIndex
-            indiceLibrasAtual = -1
-        }
-        limitarConversa()
-        salvarConversa()
-    }
-
-    private fun removerRespostaAtual() {
-        if (indiceRespostaAtual in historicoEntries.indices &&
-            historicoEntries[indiceRespostaAtual].source == "RESPOSTA") {
-            historicoEntries.removeAt(indiceRespostaAtual)
-        }
-        indiceRespostaAtual = -1
-        salvarConversa()
-    }
-
-    private fun limitarConversa() {
-        while (historicoEntries.size > 80) {
-            historicoEntries.removeAt(0)
-            if (indiceRespostaAtual > 0) {
-                indiceRespostaAtual--
-            } else if (indiceRespostaAtual == 0) {
-                indiceRespostaAtual = -1
-            }
-            if (indiceLibrasAtual > 0) {
-                indiceLibrasAtual--
-            } else if (indiceLibrasAtual == 0) {
-                indiceLibrasAtual = -1
-            }
-        }
-    }
-
-    private fun limparConversa() {
-        historicoEntries.clear()
-        ultimaMensagemLibras = ""
-        indiceLibrasAtual = -1
-        indiceRespostaAtual = -1
-        salvarConversa()
-    }
-
-    private fun salvarConversa() {
-        val json = JSONArray()
-        historicoEntries.forEach { entry ->
-            json.put(JSONObject().apply {
-                put("word", entry.word)
-                put("timestamp", entry.timestamp)
-                put("source", entry.source)
-            })
-        }
-        requireContext()
-            .getSharedPreferences("visuall_conversa", Context.MODE_PRIVATE)
-            .edit()
-            .putString("entries", json.toString())
-            .apply()
-    }
-
-    private fun carregarConversaSalva() {
-        val raw = requireContext()
-            .getSharedPreferences("visuall_conversa", Context.MODE_PRIVATE)
-            .getString("entries", null)
-            ?: return
-
-        try {
-            val json = JSONArray(raw)
-            historicoEntries.clear()
-            for (index in 0 until json.length()) {
-                val item = json.optJSONObject(index) ?: continue
-                val texto = item.optString("word").trim()
-                if (texto.isBlank()) continue
-                historicoEntries.add(
-                    HistoryEntry(
-                        word = texto,
-                        timestamp = item.optLong("timestamp", System.currentTimeMillis()),
-                        source = item.optString("source", "LIBRAS")
-                    )
-                )
-            }
-            indiceLibrasAtual = -1
-            indiceRespostaAtual = -1
-            ultimaMensagemLibras = ""
-            limitarConversa()
-        } catch (e: Exception) {
-            historicoEntries.clear()
-            salvarConversa()
         }
     }
 
     private fun onSemMao() {
         activity?.runOnUiThread {
             if (_binding == null) return@runOnUiThread
-            binding.chipResult.visibility = View.INVISIBLE
-            binding.progressConfidence.visibility = View.INVISIBLE
+            binding.chipResult.visibility = if (isLandscapeHudCompact()) View.GONE else View.INVISIBLE
+            binding.progressConfidence.visibility = if (isLandscapeHudCompact()) View.GONE else View.INVISIBLE
             binding.progressConfidence.progress = 0
             binding.progressClear.isVisible = false
         }
+    }
+
+    // Chamado da thread do analyzer. update()/clear() usam postInvalidate(),
+    // então são seguros fora da UI thread.
+    private fun onLandmarksDetected(
+        hands: List<FloatArray>,
+        pose: FloatArray?,
+        frameAspect: Float
+    ) {
+        if (!linhasAtivas) return
+        _binding?.landmarkOverlay?.update(hands, pose, frameAspect)
     }
 
     private fun onRepeticaoPendente(letra: String?) {
@@ -776,19 +993,18 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         if (!cameraExecutor.isShutdown) cameraExecutor.shutdown()
     }
 
+    // A limpeza da câmera/analyzer (closeAnalyzerSafely) não acontece aqui:
+    // popBackStack()/navigate() disparam onDestroyView() do fragmento, que já
+    // faz essa limpeza. Fazer duas vezes era redundante e o código antigo
+    // ainda arriscava a mesma race condition se a ordem das chamadas mudasse.
     private fun exitLibrasMode() {
-        try {
-            closeAnalyzerSafely()
-        } catch (e: Exception) {
-            e.printStackTrace()
-        } finally {
-            if (isAdded && view != null) {
-                val navController = findNavController()
-                val voltouParaCamera = navController.popBackStack(R.id.nav_camera, false)
-                if (!voltouParaCamera && navController.currentDestination?.id == R.id.nav_libras) {
-                    navController.navigate(R.id.action_libras_to_camera)
-                }
-            }
+        if (!isAdded || view == null) return
+        val navController = findNavController()
+        if (navController.currentDestination?.id != R.id.nav_libras) return
+
+        val voltouParaCamera = navController.popBackStack(R.id.nav_camera, false)
+        if (!voltouParaCamera && navController.currentDestination?.id == R.id.nav_libras) {
+            navController.navigate(R.id.action_libras_to_camera)
         }
     }
 
@@ -798,6 +1014,9 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
 
     override fun onDestroyView() {
         super.onDestroyView()
+        orientationListener?.disable()
+        orientationListener = null
+        landscapeHud = null
         try {
             closeAnalyzerSafely()
         } catch (e: Exception) {
