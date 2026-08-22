@@ -495,17 +495,27 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         setPortraitHudVisible(true)
     }
 
+    // As views marcadas com `?.` só existem em uma das variantes do layout, e
+    // aí o ViewBinding as declara anuláveis: tv_live/action_row/controls_row
+    // ficaram só no layout-land (o desenho retrato trocou o antigo "AO VIVO"
+    // pelo botão LINHAS no topo e agrupou feedback+REPETIR+apagar no
+    // feedback_row), enquanto feedback_row só existe no retrato.
     private fun setPortraitHudVisible(visible: Boolean) {
         val visibility = if (visible) View.VISIBLE else View.GONE
         binding.gradTop.visibility = visibility
         binding.gradBottom.visibility = visibility
         binding.btnExitLibras.visibility = visibility
-        binding.tvLive.visibility = visibility
+        binding.tvLive?.visibility = visibility
+        binding.btnLines.visibility = visibility
         binding.tvModeLabel.visibility = visibility
+        binding.btnHistory.visibility = visibility
         binding.scanFrame.visibility = visibility
-        binding.actionRow.visibility = visibility
+        binding.actionRow?.visibility = visibility
+        binding.feedbackRow?.visibility = visibility
         binding.modesRow.visibility = visibility
-        binding.controlsRow.visibility = visibility
+        binding.btnReply.visibility = visibility
+        binding.btnFlip.visibility = visibility
+        binding.controlsRow?.visibility = visibility
         binding.chipResult.visibility = if (visible) View.INVISIBLE else View.GONE
         binding.progressConfidence.visibility = if (visible) View.INVISIBLE else View.GONE
         binding.tvFeedback.visibility = if (visible) View.INVISIBLE else View.GONE
