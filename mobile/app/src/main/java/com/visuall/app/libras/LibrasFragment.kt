@@ -21,7 +21,6 @@ import android.util.Log
 import android.util.Range
 import android.view.Surface
 import android.view.LayoutInflater
-import android.view.OrientationEventListener
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
@@ -76,8 +75,6 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
     private var librasAnalyzer: LibrasAnalyzer? = null
     private var cameraProvider: ProcessCameraProvider? = null
     private var tts: TextToSpeech? = null
-    private var isPhysicalLandscape = false
-    private var orientationListener: OrientationEventListener? = null
     private var landscapeHud: View? = null
     private var bindRetryPosted = false
     private var cameraStartRequested = false
@@ -158,7 +155,6 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         }
         setupButtons()
         updateModeButtons()
-        setupOrientationHudListener()
     }
 
     // ── Inicia provider uma única vez ──────────────────────────────────────
@@ -405,22 +401,14 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         Log.i("LibrasFragment", "Alfabeto dos modelos: $doModelo")
     }
 
-    // Fallback só usado quando a preview ainda não tem Display anexado
-    // (_binding?.previewView?.display == null). Context.getDisplay() (API 30+)
-    // substitui o WindowManager.getDefaultDisplay() deprecated; abaixo de 30
-    // não tem substituto, então o uso do antigo fica isolado e suprimido aqui.
-    @Suppress("DEPRECATION")
-    private fun fallbackDisplay(): android.view.Display? {
-        val act = activity ?: return null
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) act.display
-        else act.windowManager.defaultDisplay
-    }
-
-    private fun currentTargetRotation(): Int {
-        return _binding?.previewView?.display?.rotation
-            ?: fallbackDisplay()?.rotation
-            ?: Surface.ROTATION_0
-    }
+    // Rotacao FIXA, de proposito. display.rotation e recalculado a cada giro
+    // fisico do aparelho e, entregue ao CameraX, girava tanto a preview quanto
+    // os frames do ImageAnalysis -- enquanto as molduras de enquadramento das
+    // maos, que seguem a Activity (travada em retrato), ficavam paradas. Fora o
+    // desalinhamento visual, a rotacao dos frames muda o referencial dos
+    // landmarks que alimentam o reconhecimento. Como a janela e sempre retrato,
+    // ROTATION_0 e a resposta certa sempre.
+    private fun currentTargetRotation(): Int = Surface.ROTATION_0
 
     // Consulta as faixas de FPS que a câmera realmente suporta (Camera2) e
     // escolhe a melhor opção em vez de forçar 60fps às cegas. Retorna null se
@@ -554,40 +542,18 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         landscapeHud = null
     }
 
+    // O app e travado em retrato no manifesto, entao isto so responde
+    // "sim" em janela realmente deitada -- multi-janela / desktop mode. NAO
+    // consulta mais nem o sensor de orientacao nem display.rotation: os dois
+    // seguem a rotacao FISICA do aparelho mesmo com a Activity travada, e era
+    // por eles que o HUD de paisagem entrava com a tela ainda em retrato.
     private fun isLandscapeByBounds(): Boolean {
-        if (isPhysicalLandscape) return true
-
-        val displayRotation = _binding?.previewView?.display?.rotation
-            ?: fallbackDisplay()?.rotation
-        if (displayRotation == Surface.ROTATION_90 || displayRotation == Surface.ROTATION_270) {
-            return true
-        }
-
         val rootWidth = _binding?.root?.width ?: 0
         val rootHeight = _binding?.root?.height ?: 0
         return if (rootWidth > 0 && rootHeight > 0) {
             rootWidth > rootHeight
         } else {
             resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-        }
-    }
-
-    private fun setupOrientationHudListener() {
-        val context = context ?: return
-        orientationListener = object : OrientationEventListener(context) {
-            override fun onOrientationChanged(orientation: Int) {
-                if (orientation == ORIENTATION_UNKNOWN) return
-                val landscape = orientation in 60..120 || orientation in 240..300
-                if (landscape == isPhysicalLandscape) return
-
-                isPhysicalLandscape = landscape
-                _binding?.root?.post {
-                    applyPreviewAspectRatio()
-                    applyHudLayout()
-                }
-            }
-        }.also { listener ->
-            if (listener.canDetectOrientation()) listener.enable()
         }
     }
 
@@ -1046,8 +1012,6 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
 
     override fun onDestroyView() {
         super.onDestroyView()
-        orientationListener?.disable()
-        orientationListener = null
         landscapeHud = null
         try {
             closeAnalyzerSafely()

@@ -16,7 +16,6 @@ import android.util.Log
 import android.view.Surface
 import android.view.LayoutInflater
 import android.view.MotionEvent
-import android.view.OrientationEventListener
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
@@ -72,8 +71,6 @@ class CameraFragment : Fragment() {
     private var flashMode   = ImageCapture.FLASH_MODE_AUTO
     private var isVideoMode = false
     private var isRecording = false
-    private var isPhysicalLandscape = false
-    private var orientationListener: OrientationEventListener? = null
     private var landscapeHud: View? = null
     private var bindRetryPosted = false
     private var cameraStartRequested = false
@@ -106,7 +103,6 @@ class CameraFragment : Fragment() {
             applyHudLayout()
             applyAspectRatioToPreview()
         }
-        setupOrientationHudListener()
         startCamera()
         setupButtons()
         loadLastThumbnail()
@@ -217,8 +213,8 @@ class CameraFragment : Fragment() {
 
     // ── Aspect Ratio: altura derivada da largura (match_parent) ────────────
     private fun applyAspectRatioToPreview() {
-        // Chegam aqui runnables postados na view e o callback do sensor de
-        // orientação, que podem disparar depois do onDestroyView -- aí o
+        // Chegam aqui runnables postados na view e o retry de bind postado na
+        // preview, que podem disparar depois do onDestroyView -- aí o
         // `binding` (que é `_binding!!`) estouraria.
         val currentBinding = _binding ?: return
         // Usa a resolução real entregue pela câmera (não uma suposição fixa
@@ -349,34 +345,12 @@ class CameraFragment : Fragment() {
         landscapeHud = null
     }
 
-    private fun setupOrientationHudListener() {
-        val context = context ?: return
-        orientationListener = object : OrientationEventListener(context) {
-            override fun onOrientationChanged(orientation: Int) {
-                if (orientation == ORIENTATION_UNKNOWN) return
-                val landscape = orientation in 60..120 || orientation in 240..300
-                if (landscape == isPhysicalLandscape) return
-
-                isPhysicalLandscape = landscape
-                _binding?.root?.post {
-                    applyHudLayout()
-                    applyAspectRatioToPreview()
-                }
-            }
-        }.also { listener ->
-            if (listener.canDetectOrientation()) listener.enable()
-        }
-    }
-
+    // O app e travado em retrato no manifesto, entao isto so responde
+    // "sim" em janela realmente deitada -- multi-janela / desktop mode. NAO
+    // consulta mais nem o sensor de orientacao nem display.rotation: os dois
+    // seguem a rotacao FISICA do aparelho mesmo com a Activity travada, e era
+    // por eles que o HUD de paisagem entrava com a tela ainda em retrato.
     private fun isLandscapeByBounds(): Boolean {
-        if (isPhysicalLandscape) return true
-
-        val displayRotation = _binding?.previewView?.display?.rotation
-            ?: activity?.windowManager?.defaultDisplay?.rotation
-        if (displayRotation == Surface.ROTATION_90 || displayRotation == Surface.ROTATION_270) {
-            return true
-        }
-
         val rootWidth = _binding?.root?.width ?: 0
         val rootHeight = _binding?.root?.height ?: 0
         return if (rootWidth > 0 && rootHeight > 0) {
@@ -401,11 +375,12 @@ class CameraFragment : Fragment() {
         }
     }
 
-    private fun currentTargetRotation(): Int {
-        return _binding?.previewView?.display?.rotation
-            ?: activity?.windowManager?.defaultDisplay?.rotation
-            ?: Surface.ROTATION_0
-    }
+    // Rotacao FIXA, de proposito. display.rotation e recalculado a cada giro
+    // fisico do aparelho e, entregue ao CameraX, girava a imagem capturada
+    // enquanto os guias na tela (que seguem a Activity, travada em retrato)
+    // ficavam parados -- a area capturada deixava de bater com a moldura.
+    // Como a janela e sempre retrato, ROTATION_0 e a resposta certa sempre.
+    private fun currentTargetRotation(): Int = Surface.ROTATION_0
 
     // ── Zoom ───────────────────────────────────────────────────────────────
     private fun setupZoom() {
@@ -659,8 +634,6 @@ class CameraFragment : Fragment() {
 
     override fun onDestroyView() {
         super.onDestroyView()
-        orientationListener?.disable()
-        orientationListener = null
         landscapeHud = null
         timerHandler.removeCallbacks(timerRunnable)
         releaseCamera()
