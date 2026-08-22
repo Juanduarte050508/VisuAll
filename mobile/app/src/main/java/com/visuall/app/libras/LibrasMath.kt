@@ -42,16 +42,52 @@ internal object LibrasMath {
         return mirrored
     }
 
+    // Régua da mão: distância do pulso (0) à base do dedo médio (9). É o
+    // segmento mais estável da mão — não encolhe quando os dedos dobram, só
+    // quando a mão se afasta da câmera — então serve pra converter uma medida
+    // em unidades de imagem numa fração do tamanho da mão.
+    //
+    // Devolve 0 quando a mão veio degenerada (os dois pontos no mesmo lugar):
+    // quem chama trata isso como "não dá pra medir", em vez de dividir por
+    // quase zero e transformar qualquer ruído num gesto.
+    fun escalaDaMao(lms: List<Pair<Float, Float>>): Float {
+        val dx = lms[9].first  - lms[0].first
+        val dy = lms[9].second - lms[0].second
+        val escala = sqrt(dx * dx + dy * dy)
+        return if (escala > ESCALA_MINIMA_MAO) escala else 0f
+    }
+
+    // Abaixo disso a mão veio degenerada (pulso e base do médio no mesmo
+    // ponto) e não há régua confiável — mesmo papel do ESCALA_MINIMA_OMBROS
+    // no corpo.
+    const val ESCALA_MINIMA_MAO = 0.0001f
+
+    // Quanto cada dedo precisa subir acima da própria base, e quanto o polegar
+    // precisa se afastar do pulso — os dois EM FRAÇÃO DO TAMANHO DA MÃO.
+    //
+    // Eram 0.06 e 0.12 em unidades de imagem, o que só valia na distância em
+    // que foram calibrados: de perto a mão ocupa muito do quadro e passava; de
+    // longe a MESMA mão aberta encolhe, as diferenças caem abaixo dos limiares
+    // fixos e o gesto neutro deixava de ser reconhecido como mão aberta — daí
+    // ele caía no classificador de letras e virava um falso positivo ("F").
+    // Os valores relativos foram escolhidos pra reproduzir os antigos na
+    // distância de calibração (mão com ~0.30 de altura no quadro).
+    const val FRACAO_DEDO_ESTICADO = 0.20f
+    const val FRACAO_POLEGAR_AFASTADO = 0.40f
+
     // Detecta os 4 dedos (indicador a mindinho) esticados + polegar afastado
     // — usado tanto pelo gesto de "limpar" no alfabeto quanto pelo de "mão
-    // aberta" no modo corpo.
+    // aberta" no modo corpo. Invariante à distância da câmera: todos os
+    // limiares são medidos em fração da própria mão (ver escalaDaMao).
     fun detectarDedosEsticados(lms: List<Pair<Float, Float>>): Boolean {
-        val margem = 0.06f
+        val escala = escalaDaMao(lms)
+        if (escala <= 0f) return false
+        val margem = FRACAO_DEDO_ESTICADO * escala
         return lms[8].second  < lms[5].second  - margem &&
                lms[12].second < lms[9].second  - margem &&
                lms[16].second < lms[13].second - margem &&
                lms[20].second < lms[17].second - margem &&
-               abs(lms[4].first - lms[0].first) > 0.12f
+               abs(lms[4].first - lms[0].first) > FRACAO_POLEGAR_AFASTADO * escala
     }
 
     fun std(values: List<Float>): Float {

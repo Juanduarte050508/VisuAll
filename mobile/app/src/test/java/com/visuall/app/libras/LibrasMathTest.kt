@@ -56,6 +56,14 @@ class LibrasMathTest {
         return lms
     }
 
+    // A MESMA mão do fixture, encolhida em torno do próprio pulso: é o que a
+    // câmera vê quando a pessoa se afasta. A forma é idêntica, só o tamanho
+    // aparente muda.
+    private fun afastada(lms: List<Pair<Float, Float>>, fator: Float): List<Pair<Float, Float>> {
+        val (bx, by) = lms[0]
+        return lms.map { (x, y) -> (bx + (x - bx) * fator) to (by + (y - by) * fator) }
+    }
+
     @Test
     fun `detectarDedosEsticados reconhece mao aberta`() {
         assertTrue(LibrasMath.detectarDedosEsticados(maoComDedos(esticados = true)))
@@ -64,6 +72,51 @@ class LibrasMathTest {
     @Test
     fun `detectarDedosEsticados rejeita mao fechada`() {
         assertFalse(LibrasMath.detectarDedosEsticados(maoComDedos(esticados = false)))
+    }
+
+    @Test
+    fun `detectarDedosEsticados independe da distancia da camera`() {
+        // O falso positivo relatado em teste de campo: de perto a mão aberta
+        // era reconhecida como gesto neutro, de longe não — e aí ela caía no
+        // classificador de letras e virava "F". Com limiares em unidades de
+        // imagem, a MESMA mão deixava de passar só por ocupar menos do quadro.
+        val aberta = maoComDedos(esticados = true)
+        listOf(1f, 0.6f, 0.35f, 0.15f).forEach { fator ->
+            assertTrue(
+                "mao aberta a $fator do tamanho original deveria ser reconhecida",
+                LibrasMath.detectarDedosEsticados(afastada(aberta, fator))
+            )
+        }
+    }
+
+    @Test
+    fun `detectarDedosEsticados continua rejeitando mao fechada a qualquer distancia`() {
+        // A outra metade da invariância: normalizar pela escala não pode
+        // transformar uma mão fechada distante em mão aberta.
+        val fechada = maoComDedos(esticados = false)
+        listOf(1f, 0.6f, 0.35f, 0.15f).forEach { fator ->
+            assertFalse(
+                "mao fechada a $fator do tamanho original nao deveria passar",
+                LibrasMath.detectarDedosEsticados(afastada(fechada, fator))
+            )
+        }
+    }
+
+    @Test
+    fun `detectarDedosEsticados rejeita mao degenerada`() {
+        // Sem régua (pulso e base do médio no mesmo ponto) não dá pra medir
+        // nada — e dividir por quase zero faria qualquer ruído virar gesto.
+        val degenerada = MutableList(21) { 0.5f to 0.5f }
+        assertFalse(LibrasMath.detectarDedosEsticados(degenerada))
+        assertEquals(0f, LibrasMath.escalaDaMao(degenerada), 1e-6f)
+    }
+
+    @Test
+    fun `escalaDaMao mede o pulso ate a base do dedo medio`() {
+        val lms = MutableList(21) { 0f to 0f }
+        lms[0] = 0.5f to 0.9f
+        lms[9] = 0.5f to 0.6f
+        assertEquals(0.3f, LibrasMath.escalaDaMao(lms), 1e-5f)
     }
 
     @Test
