@@ -110,6 +110,15 @@ class LibrasAnalyzer(
         // validar em celular real; se ainda sair J fácil, subir este valor
         // antes de mexer em LIMIAR_MOVIMENTO de novo.
         const val MOVIMENTO_SUSTENTADO_MS = 130L
+        // Por quanto tempo, DEPOIS que o movimento cai, a janela do gesto que
+        // acabou continua sendo classificada como dinâmica (estado ENCERRANDO
+        // do MovementGate). Precisa ser maior que ESTAB_MIN_DINAMICO_MS: é
+        // dentro dessa janela que a letra tem que se manter estável pra entrar
+        // na frase. Com o portão fechando no mesmo quadro em que o movimento
+        // parava, o gesto terminava antes de a letra ser aceita e a letra se
+        // perdia — o sintoma relatado em teste era o app "continuar analisando"
+        // depois do fim do movimento e não capturar a letra.
+        const val MOVIMENTO_ENCERRAMENTO_MS = 400L
         const val TEMPO_PRA_LIMPAR       = 3_000L
         // Tempo mínimo com a MESMA letra reconhecida antes de comitar na
         // frase — em milissegundos, não em frames, pelo mesmo motivo do

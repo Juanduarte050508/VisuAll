@@ -56,6 +56,11 @@ internal class LetraEngine(
     // em tempo e não em contagem de frames) está no MovementGate.
     private val movementGate = MovementGate()
 
+    // A janela de quadros do gesto, guardada no último quadro em que o
+    // movimento ainda estava sustentado. É ela que é reclassificada durante o
+    // ENCERRANDO — ver escolherClassificacao. null = não há gesto recente.
+    private var janelaCongelada: List<FloatArray>? = null
+
     private data class ModeloIndividual(
         val label: String,
         val session: OrtSession
@@ -106,10 +111,12 @@ internal class LetraEngine(
 
     fun resetMovimentoSustentado() {
         movementGate.reset()
+        janelaCongelada = null
     }
 
     fun limparBuffer() {
         bufferLm.clear()
+        janelaCongelada = null
     }
 
     // Pipeline completo de um frame com mão detectada: normaliza, alimenta a
@@ -195,17 +202,65 @@ internal class LetraEngine(
     private fun escolherClassificacao(dados: FloatArray, movimento: Float): Prediction {
         // A histerese de movimento (por que ela existe e como se comporta) vive
         // no MovementGate, que é testável porque recebe o instante.
-        val movimentoConfiavel = movementGate.avaliar(movimento, System.currentTimeMillis())
-
-        if (movimentoConfiavel && bufferLm.size >= LibrasAnalyzer.JANELA_MLP) {
-            return classificarDinamico()
+        when (movementGate.avaliar(movimento, System.currentTimeMillis())) {
+            EstadoMovimento.SUSTENTADO -> {
+                if (bufferLm.size >= LibrasAnalyzer.JANELA_MLP) {
+                    val janela = bufferLm.toList().takeLast(LibrasAnalyzer.JANELA_MLP)
+                    // Guardada a cada quadro: quando o movimento parar, esta é
+                    // a última janela feita SÓ de quadros do gesto.
+                    janelaCongelada = janela
+                    return classificarDinamico(janela)
+                }
+            }
+            EstadoMovimento.ENCERRANDO -> {
+                // O movimento acabou. Continuar lendo bufferLm aqui misturaria
+                // a mão voltando ao repouso dentro da janela do gesto — que é
+                // exatamente o que fazia a letra dinâmica se perder no fim do
+                // movimento. Reclassificamos a janela congelada, sempre a
+                // mesma, até a letra estabilizar e entrar na frase.
+                janelaCongelada?.let { return classificarDinamico(it) }
+            }
+            EstadoMovimento.PARADO -> {
+                if (janelaCongelada != null) {
+                    janelaCongelada = null
+                    // O rabicho do gesto que acabou não pode virar o começo da
+                    // janela do próximo: a janela recomeça vazia.
+                    bufferLm.clear()
+                }
+            }
         }
         // Calibração pessoal entra apenas como reforço quando o modelo não
         // reconheceu nada (ver aplicarCalibracaoPessoal).
         return aplicarCalibracaoPessoal(dados, classificarEstatico(dados))
     }
 
-    private fun classificarEstatico(dados: FloatArray): Prediction {
+    // Uma letra do alfabeto é a MESMA forma com qualquer das duas mãos —
+    // muda só o lado. Os modelos, porém, foram treinados a partir de gravações
+    // de uma mão só e sem espelhamento de dados (não há aumento por flip no
+    // pipeline de treino), então a mão oposta cai numa região do espaço de
+    // features que eles nunca viram: era isso que fazia o "M" só sair com a
+    // mão esquerda.
+    //
+    // A correção definitiva é retreinar com as amostras espelhadas. Enquanto
+    // isso, resolvemos na inferência: se a orientação como veio não gerou
+    // resposta, tentamos a espelhada. O espelho entra só quando o modelo já
+    // disse "não sei", e ainda precisa passar pelos MESMOS portões de
+    // confiança e margem — então não afrouxa nada, só cobre o lado que faltava.
+    // (É o mesmo recurso que a calibração pessoal já usava em melhorCalibracao.)
+    private fun comFallbackEspelhado(
+        entrada: FloatArray,
+        classificar: (FloatArray) -> Prediction
+    ): Prediction {
+        val direto = classificar(entrada)
+        if (direto.letra != "-") return direto
+        val espelhado = classificar(LibrasMath.mirrorLandmarks(entrada))
+        return if (espelhado.letra != "-") espelhado else direto
+    }
+
+    private fun classificarEstatico(dados: FloatArray): Prediction =
+        comFallbackEspelhado(dados, ::classificarEstaticoOrientado)
+
+    private fun classificarEstaticoOrientado(dados: FloatArray): Prediction {
         if (modelosEstaticosIndividuais.isNotEmpty()) {
             val individual = classificarIndividual(
                 entrada = dados,
@@ -241,12 +296,18 @@ internal class LetraEngine(
         return probs
     }
 
-    private fun classificarDinamico(): Prediction {
+    private fun classificarDinamico(janela: List<FloatArray>): Prediction {
         val entrada = FloatArray(LibrasAnalyzer.FEATURES_DINAMICO)
-        bufferLm.toList().takeLast(LibrasAnalyzer.JANELA_MLP).forEachIndexed { i, frame ->
+        janela.forEachIndexed { i, frame ->
             frame.copyInto(entrada, i * LibrasAnalyzer.FEATURES_ESTATICO)
         }
+        // mirrorLandmarks nega as posições pares, que na sequência concatenada
+        // continuam sendo exatamente os x de cada quadro — espelhar os 420
+        // valores de uma vez espelha a sequência inteira.
+        return comFallbackEspelhado(entrada, ::classificarDinamicoOrientado)
+    }
 
+    private fun classificarDinamicoOrientado(entrada: FloatArray): Prediction {
         if (modelosDinamicosIndividuais.isNotEmpty()) {
             val individual = classificarIndividual(
                 entrada = entrada,

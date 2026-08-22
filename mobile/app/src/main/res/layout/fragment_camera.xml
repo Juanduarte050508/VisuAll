@@ -31,8 +31,18 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
-    <!-- Contorno sutil delimitando a área real de captura -->
+    <!--
+        Contorno sutil delimitando a área real de captura.
+
+        O android:id NÃO é decorativo aqui: o CameraFragment ajusta a
+        proporção da preview com ConstraintSet.clone(root), e o clone estoura
+        com "All children of ConstraintLayout must have ids to use
+        ConstraintSet" se QUALQUER filho direto deste ConstraintLayout estiver
+        sem id. Como isso roda no onViewCreated, a falta do id derrubava o app
+        na abertura. Toda view nova solta aqui precisa de id.
+    -->
     <View
+        android:id="@+id/viewfinder_border"
         android:layout_width="0dp"
         android:layout_height="0dp"
         android:background="@drawable/bg_viewfinder_border"

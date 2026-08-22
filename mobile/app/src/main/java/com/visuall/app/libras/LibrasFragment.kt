@@ -1,9 +1,11 @@
 package com.visuall.app.libras
 
+import android.Manifest
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.content.res.ColorStateList
 import android.os.Build
@@ -19,7 +21,6 @@ import android.util.Log
 import android.util.Range
 import android.view.Surface
 import android.view.LayoutInflater
-import android.view.OrientationEventListener
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
@@ -74,8 +75,6 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
     private var librasAnalyzer: LibrasAnalyzer? = null
     private var cameraProvider: ProcessCameraProvider? = null
     private var tts: TextToSpeech? = null
-    private var isPhysicalLandscape = false
-    private var orientationListener: OrientationEventListener? = null
     private var landscapeHud: View? = null
     private var bindRetryPosted = false
     private var cameraStartRequested = false
@@ -156,20 +155,38 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         }
         setupButtons()
         updateModeButtons()
-        setupOrientationHudListener()
     }
 
     // ── Inicia provider uma única vez ──────────────────────────────────────
+    private fun hasCameraPermission(): Boolean {
+        val context = context ?: return false
+        return ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+            PackageManager.PERMISSION_GRANTED
+    }
+
     private fun startCamera() {
+        val context = context ?: return
+        // Ver a explicação longa no CameraFragment.startCamera: sem permissão
+        // o provider falha e o future.get() abaixo estoura na main thread,
+        // derrubando o app. O onResume tenta de novo depois.
+        if (!hasCameraPermission()) return
         if (cameraStartRequested) return
         cameraStartRequested = true
-        val future = ProcessCameraProvider.getInstance(requireContext())
+        val future = ProcessCameraProvider.getInstance(context)
         future.addListener({
-            if (!isAdded || _binding == null) return@addListener
+            // Zerar antes de qualquer return, senão a flag trava novas
+            // tentativas pra sempre.
             cameraStartRequested = false
-            cameraProvider = future.get()
+            if (!isAdded || _binding == null) return@addListener
+            cameraProvider = try {
+                future.get()
+            } catch (e: Exception) {
+                Log.e("LibrasFragment", "CameraX nao inicializou no modo Libras", e)
+                Toast.makeText(context, "Nao consegui abrir a camera de Libras", Toast.LENGTH_SHORT).show()
+                return@addListener
+            }
             scheduleBindCamera()
-        }, ContextCompat.getMainExecutor(requireContext()))
+        }, ContextCompat.getMainExecutor(context))
     }
 
     private fun scheduleBindCamera(delayMs: Long = 0L) {
@@ -214,6 +231,7 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
     private fun bindCamera() {
         val provider = cameraProvider ?: return
         if (!isAdded || _binding == null) return
+        if (!hasCameraPermission()) return
         if (bindInProgress) {
             pendingBind = true
             return
@@ -383,22 +401,14 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         Log.i("LibrasFragment", "Alfabeto dos modelos: $doModelo")
     }
 
-    // Fallback só usado quando a preview ainda não tem Display anexado
-    // (_binding?.previewView?.display == null). Context.getDisplay() (API 30+)
-    // substitui o WindowManager.getDefaultDisplay() deprecated; abaixo de 30
-    // não tem substituto, então o uso do antigo fica isolado e suprimido aqui.
-    @Suppress("DEPRECATION")
-    private fun fallbackDisplay(): android.view.Display? {
-        val act = activity ?: return null
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) act.display
-        else act.windowManager.defaultDisplay
-    }
-
-    private fun currentTargetRotation(): Int {
-        return _binding?.previewView?.display?.rotation
-            ?: fallbackDisplay()?.rotation
-            ?: Surface.ROTATION_0
-    }
+    // Rotacao FIXA, de proposito. display.rotation e recalculado a cada giro
+    // fisico do aparelho e, entregue ao CameraX, girava tanto a preview quanto
+    // os frames do ImageAnalysis -- enquanto as molduras de enquadramento das
+    // maos, que seguem a Activity (travada em retrato), ficavam paradas. Fora o
+    // desalinhamento visual, a rotacao dos frames muda o referencial dos
+    // landmarks que alimentam o reconhecimento. Como a janela e sempre retrato,
+    // ROTATION_0 e a resposta certa sempre.
+    private fun currentTargetRotation(): Int = Surface.ROTATION_0
 
     // Consulta as faixas de FPS que a câmera realmente suporta (Camera2) e
     // escolhe a melhor opção em vez de forçar 60fps às cegas. Retorna null se
@@ -473,17 +483,27 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         setPortraitHudVisible(true)
     }
 
+    // As views marcadas com `?.` só existem em uma das variantes do layout, e
+    // aí o ViewBinding as declara anuláveis: tv_live/action_row/controls_row
+    // ficaram só no layout-land (o desenho retrato trocou o antigo "AO VIVO"
+    // pelo botão LINHAS no topo e agrupou feedback+REPETIR+apagar no
+    // feedback_row), enquanto feedback_row só existe no retrato.
     private fun setPortraitHudVisible(visible: Boolean) {
         val visibility = if (visible) View.VISIBLE else View.GONE
         binding.gradTop.visibility = visibility
         binding.gradBottom.visibility = visibility
         binding.btnExitLibras.visibility = visibility
-        binding.tvLive.visibility = visibility
+        binding.tvLive?.visibility = visibility
+        binding.btnLines.visibility = visibility
         binding.tvModeLabel.visibility = visibility
+        binding.btnHistory.visibility = visibility
         binding.scanFrame.visibility = visibility
-        binding.actionRow.visibility = visibility
+        binding.actionRow?.visibility = visibility
+        binding.feedbackRow?.visibility = visibility
         binding.modesRow.visibility = visibility
-        binding.controlsRow.visibility = visibility
+        binding.btnReply.visibility = visibility
+        binding.btnFlip.visibility = visibility
+        binding.controlsRow?.visibility = visibility
         binding.chipResult.visibility = if (visible) View.INVISIBLE else View.GONE
         binding.progressConfidence.visibility = if (visible) View.INVISIBLE else View.GONE
         binding.tvFeedback.visibility = if (visible) View.INVISIBLE else View.GONE
@@ -522,40 +542,18 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         landscapeHud = null
     }
 
+    // O app e travado em retrato no manifesto, entao isto so responde
+    // "sim" em janela realmente deitada -- multi-janela / desktop mode. NAO
+    // consulta mais nem o sensor de orientacao nem display.rotation: os dois
+    // seguem a rotacao FISICA do aparelho mesmo com a Activity travada, e era
+    // por eles que o HUD de paisagem entrava com a tela ainda em retrato.
     private fun isLandscapeByBounds(): Boolean {
-        if (isPhysicalLandscape) return true
-
-        val displayRotation = _binding?.previewView?.display?.rotation
-            ?: fallbackDisplay()?.rotation
-        if (displayRotation == Surface.ROTATION_90 || displayRotation == Surface.ROTATION_270) {
-            return true
-        }
-
         val rootWidth = _binding?.root?.width ?: 0
         val rootHeight = _binding?.root?.height ?: 0
         return if (rootWidth > 0 && rootHeight > 0) {
             rootWidth > rootHeight
         } else {
             resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-        }
-    }
-
-    private fun setupOrientationHudListener() {
-        val context = context ?: return
-        orientationListener = object : OrientationEventListener(context) {
-            override fun onOrientationChanged(orientation: Int) {
-                if (orientation == ORIENTATION_UNKNOWN) return
-                val landscape = orientation in 60..120 || orientation in 240..300
-                if (landscape == isPhysicalLandscape) return
-
-                isPhysicalLandscape = landscape
-                _binding?.root?.post {
-                    applyPreviewAspectRatio()
-                    applyHudLayout()
-                }
-            }
-        }.also { listener ->
-            if (listener.canDetectOrientation()) listener.enable()
         }
     }
 
@@ -969,6 +967,34 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         }
     }
 
+    // Desvincula a câmera ANTES de fechar o analyzer, e fecha o analyzer no
+    // mesmo executor (single-thread) que entrega os frames em analyze().
+    // Isso garante que nenhum frame ainda esteja em processamento quando os
+    // recursos nativos (ONNX Runtime, MediaPipe, TFLite) forem liberados —
+    // fechar esses recursos enquanto analyze() roda em paralelo em outra
+    // thread é undefined behavior e foi a causa raiz dos crashes nativos
+    // intermitentes ao sair do modo Libras (mais frequentes em x86_64).
+    private fun closeAnalyzerSafely() {
+        cameraProvider?.unbindAll()
+        cameraProvider = null
+
+        val analyzerToClose = librasAnalyzer
+        librasAnalyzer = null
+
+        if (analyzerToClose != null) {
+            if (!cameraExecutor.isShutdown) {
+                cameraExecutor.execute { analyzerToClose.close() }
+            } else {
+                analyzerToClose.close()
+            }
+        }
+        if (!cameraExecutor.isShutdown) cameraExecutor.shutdown()
+    }
+
+    // A limpeza da câmera/analyzer (closeAnalyzerSafely) não acontece aqui:
+    // popBackStack()/navigate() disparam onDestroyView() do fragmento, que já
+    // faz essa limpeza. Fazer duas vezes era redundante e o código antigo
+    // ainda arriscava a mesma race condition se a ordem das chamadas mudasse.
     private fun exitLibrasMode() {
         if (!isAdded || view == null) return
         val navController = findNavController()
@@ -986,15 +1012,9 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
 
     override fun onDestroyView() {
         super.onDestroyView()
-        orientationListener?.disable()
-        orientationListener = null
         landscapeHud = null
         try {
-            librasAnalyzer?.close()
-            librasAnalyzer = null
-            cameraProvider?.unbindAll()
-            cameraProvider = null
-            if (!cameraExecutor.isShutdown) cameraExecutor.shutdown()
+            closeAnalyzerSafely()
         } catch (e: Exception) {
             e.printStackTrace()
         }
