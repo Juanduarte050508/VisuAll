@@ -35,7 +35,11 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
-        resetToCamera()
+        // Nada de resetToCamera() aqui: o activity_main.xml já declara
+        // app:navGraph, então o gráfico é montado (e o CameraFragment criado)
+        // durante o setContentView acima. Chamar setGraph de novo montava o
+        // gráfico uma segunda vez e criava um SEGUNDO CameraFragment, com as
+        // duas instâncias disputando a câmera.
         checkPermissions()
     }
 
@@ -45,10 +49,12 @@ class MainActivity : AppCompatActivity() {
         resetToCamera()
     }
 
+    // Só no relançamento pelo ícone (onNewIntent): volta pra câmera desfazendo
+    // a pilha, em vez de reconstruir o gráfico do zero.
     private fun resetToCamera() {
         val navHost = supportFragmentManager
             .findFragmentById(R.id.nav_host_fragment) as? NavHostFragment ?: return
-        navHost.navController.setGraph(R.navigation.nav_graph)
+        runCatching { navHost.navController.popBackStack(R.id.nav_camera, false) }
     }
 
     private fun checkPermissions() {

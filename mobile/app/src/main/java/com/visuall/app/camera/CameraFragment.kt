@@ -1,7 +1,9 @@
 package com.visuall.app.camera
 
+import android.Manifest
 import android.content.ContentValues
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -10,6 +12,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
+import android.util.Log
 import android.view.Surface
 import android.view.LayoutInflater
 import android.view.MotionEvent
@@ -110,15 +113,39 @@ class CameraFragment : Fragment() {
     }
 
     // ── Câmera ─────────────────────────────────────────────────────────────
+    private fun hasCameraPermission(): Boolean {
+        val context = context ?: return false
+        return ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+            PackageManager.PERMISSION_GRANTED
+    }
+
     private fun startCamera() {
         val context = context ?: return
+        // Numa instalação nova, este fragment é criado DENTRO do setContentView
+        // da MainActivity, ou seja, antes de o usuário sequer ver o diálogo de
+        // permissão. Inicializar o CameraX aí faz o provider falhar e o
+        // future.get() abaixo estourar na main thread -- que é exatamente o
+        // motivo de o app fechar sozinho ao ser instalado do zero (no
+        // dispositivo do dev não aparecia, porque a permissão já estava
+        // concedida de execuções anteriores). Sem permissão a gente
+        // simplesmente não começa: o onResume tenta de novo assim que o
+        // usuário responde o diálogo.
+        if (!hasCameraPermission()) return
         if (cameraStartRequested) return
         cameraStartRequested = true
         val future = ProcessCameraProvider.getInstance(context)
         future.addListener({
-            if (_binding == null || !isAdded) return@addListener
+            // Zerar a flag ANTES de qualquer return: se sair sem zerar, toda
+            // tentativa posterior de abrir a câmera fica bloqueada pra sempre.
             cameraStartRequested = false
-            cameraProvider = future.get()
+            if (_binding == null || !isAdded) return@addListener
+            cameraProvider = try {
+                future.get()
+            } catch (e: Exception) {
+                Log.e("CameraFragment", "CameraX nao inicializou", e)
+                Toast.makeText(context, "Nao consegui abrir a camera", Toast.LENGTH_SHORT).show()
+                return@addListener
+            }
             bindCamera()
         }, ContextCompat.getMainExecutor(context))
     }
@@ -126,6 +153,9 @@ class CameraFragment : Fragment() {
     private fun bindCamera() {
         val currentBinding = _binding ?: return
         if (!isAdded || view == null) return
+        // Mesmo motivo do startCamera: sem permissão o bind sempre falha e o
+        // único efeito seria um Toast de erro a cada tentativa.
+        if (!hasCameraPermission()) return
         val provider = cameraProvider ?: return
         if (!currentBinding.previewView.isAttachedToWindow ||
             currentBinding.previewView.width == 0 ||
@@ -187,6 +217,10 @@ class CameraFragment : Fragment() {
 
     // ── Aspect Ratio: altura derivada da largura (match_parent) ────────────
     private fun applyAspectRatioToPreview() {
+        // Chegam aqui runnables postados na view e o callback do sensor de
+        // orientação, que podem disparar depois do onDestroyView -- aí o
+        // `binding` (que é `_binding!!`) estouraria.
+        val currentBinding = _binding ?: return
         // Usa a resolução real entregue pela câmera (não uma suposição fixa
         // de "3:4"/"9:16"): o sensor raramente entrega exatamente esse
         // valor, e a caixa da preview precisa bater com o que é capturado
@@ -202,12 +236,24 @@ class CameraFragment : Fragment() {
         } else {
             "H,9:16"
         }
-        val cs = ConstraintSet()
-        cs.clone(binding.root)
-        cs.setDimensionRatio(R.id.preview_view, ratio)
-        cs.applyTo(binding.root)
-        
-        _binding?.btnAspectRatio?.text = if (is4to3) "4:3" else "16:9"
+        // ConstraintSet.clone() exige que TODO filho direto do root tenha id e
+        // lança RuntimeException se algum não tiver. Foi assim que o app passou
+        // a fechar sozinho na abertura: o novo desenho da câmera trouxe uma
+        // View de contorno sem id (hoje @id/viewfinder_border), e este método
+        // roda no onViewCreated. O id já está lá, mas ajustar a proporção da
+        // preview é cosmético demais pra poder derrubar o app de novo se uma
+        // view nova entrar sem id -- então a falha fica só no log.
+        try {
+            val cs = ConstraintSet()
+            cs.clone(currentBinding.root)
+            cs.setDimensionRatio(R.id.preview_view, ratio)
+            cs.applyTo(currentBinding.root)
+        } catch (e: RuntimeException) {
+            Log.e("CameraFragment", "Nao consegui ajustar a proporcao da preview " +
+                "(alguma view do fragment_camera.xml esta sem android:id?)", e)
+        }
+
+        currentBinding.btnAspectRatio.text = if (is4to3) "4:3" else "16:9"
     }
 
     private fun cameraSelectorForAvailableLens(preferredLensFacing: Int): CameraSelector {
@@ -236,6 +282,9 @@ class CameraFragment : Fragment() {
     }
 
     private fun applyHudLayout() {
+        // Mesma proteção do applyAspectRatioToPreview: daqui pra baixo tudo
+        // usa `binding`, e este método é chamado de runnables postados.
+        if (_binding == null) return
         if (!isLandscapeByBounds()) {
             applyPortraitHudLayout()
             return
@@ -549,20 +598,30 @@ class CameraFragment : Fragment() {
         } catch (e: Exception) { e.printStackTrace() }
     }
 
+    // A miniatura da galeria é enfeite: se não der pra ler, o botão só fica
+    // com o ícone padrão. O que NÃO pode acontecer é derrubar o app -- e era
+    // isso que acontecia, porque este método roda no onViewCreated (antes de
+    // qualquer permissão de mídia ter sido concedida; o app nem chega a pedir
+    // READ_MEDIA_IMAGES) e a query no MediaStore sem permissão lança
+    // SecurityException em Android 9 e em vários aparelhos mais novos.
     private fun loadLastThumbnail() {
-        val cursor = requireContext().contentResolver.query(
-            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-            arrayOf(MediaStore.Images.Media._ID),
-            null, null,
-            "${MediaStore.Images.Media.DATE_ADDED} DESC"
-        )
-        cursor?.use { c ->
-            if (c.moveToFirst()) {
-                val id  = c.getLong(c.getColumnIndexOrThrow(MediaStore.Images.Media._ID))
-                val uri = Uri.withAppendedPath(
-                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id.toString())
-                updateThumbnail(uri)
+        val context = context ?: return
+        try {
+            context.contentResolver.query(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                arrayOf(MediaStore.Images.Media._ID),
+                null, null,
+                "${MediaStore.Images.Media.DATE_ADDED} DESC"
+            )?.use { c ->
+                if (c.moveToFirst()) {
+                    val id  = c.getLong(c.getColumnIndexOrThrow(MediaStore.Images.Media._ID))
+                    val uri = Uri.withAppendedPath(
+                        MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id.toString())
+                    updateThumbnail(uri)
+                }
             }
+        } catch (e: Exception) {
+            Log.w("CameraFragment", "Nao consegui ler a ultima foto da galeria", e)
         }
     }
 
