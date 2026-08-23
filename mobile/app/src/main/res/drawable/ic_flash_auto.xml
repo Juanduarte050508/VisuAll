@@ -1,7 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Flash automático: raio + a letra A.
+
+     Antes este ícone era o MESMO raio do ic_flash_on, mudando só a cor, e não
+     tinha o A. Com isso o estado AUTO (que é o inicial) se lia como "flash
+     desligado", e no escuro o automático disparava sem o usuário esperar. O A
+     é a convenção de câmera pra esse estado e resolve a ambiguidade. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp" android:height="24dp"
     android:viewportWidth="24" android:viewportHeight="24">
+
+    <group
+        android:pivotX="12" android:pivotY="12"
+        android:scaleX="0.72" android:scaleY="0.72"
+        android:translateX="-3.4">
+        <path android:fillColor="@color/text_primary"
+            android:pathData="M7,2v11h3v9l7-12h-4l4-8z"/>
+    </group>
+
     <path android:fillColor="@color/text_primary"
-        android:pathData="M7,2v11h3v9l7-12h-4l4-8z"/>
+        android:fillType="evenOdd"
+        android:pathData="M17,11.6 L13.9,20 h1.5 l0.55,-1.6 h2.1 L18.6,20 h1.5 z M16.4,17 l0.6,-1.9 l0.6,1.9 z"/>
+
 </vector>

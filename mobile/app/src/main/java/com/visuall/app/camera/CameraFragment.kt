@@ -662,13 +662,10 @@ class CameraFragment : Fragment() {
                 ImageCapture.FLASH_MODE_ON   -> ImageCapture.FLASH_MODE_OFF
                 else                          -> ImageCapture.FLASH_MODE_AUTO
             }
-            binding.btnFlash.setImageResource(when (flashMode) {
-                ImageCapture.FLASH_MODE_ON  -> R.drawable.ic_flash_on
-                ImageCapture.FLASH_MODE_OFF -> R.drawable.ic_flash_off
-                else                         -> R.drawable.ic_flash_auto
-            })
             imageCapture?.flashMode = flashMode
+            atualizarIconeFlash()
         }
+        atualizarIconeFlash()
 
         binding.btnGallery.setOnClickListener { openGallery() }
     }
@@ -714,6 +711,24 @@ class CameraFragment : Fragment() {
 
         // Vídeo e foto usam use cases diferentes, então precisam de rebind.
         bindCamera()
+    }
+
+    // Ícone e leitura do flash sempre saem do MESMO lugar, junto.
+    //
+    // Antes o ícone era trocado só dentro do clique, e AUTO e ON usavam o
+    // mesmo raio mudando de cor -- então dava pra estar em AUTO achando que
+    // estava desligado, e o flash disparar no escuro. Como este é um app de
+    // acessibilidade, a descrição também muda: quem usa leitor de tela precisa
+    // do estado, não de um "Flash" genérico.
+    private fun atualizarIconeFlash() {
+        val b = _binding ?: return
+        val (icone, descricao) = when (flashMode) {
+            ImageCapture.FLASH_MODE_ON -> R.drawable.ic_flash_on to "Flash ligado"
+            ImageCapture.FLASH_MODE_OFF -> R.drawable.ic_flash_off to "Flash desligado"
+            else -> R.drawable.ic_flash_auto to "Flash automático"
+        }
+        b.btnFlash.setImageResource(icone)
+        b.btnFlash.contentDescription = descricao
     }
 
     private fun alternarGrade() {
