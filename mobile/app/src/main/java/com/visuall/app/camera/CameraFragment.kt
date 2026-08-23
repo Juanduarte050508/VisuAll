@@ -288,12 +288,54 @@ class CameraFragment : Fragment() {
         try {
             val cs = ConstraintSet()
             cs.clone(currentBinding.root)
-            cs.setDimensionRatio(R.id.preview_view, ratio)
+            if (is4to3) {
+                // 4:3 vive numa faixa entre a barra do topo e a fileira de
+                // modos, com a proporção real da câmera.
+                cs.setDimensionRatio(R.id.preview_view, ratio)
+                cs.connect(R.id.preview_view, ConstraintSet.TOP,
+                    R.id.top_chips, ConstraintSet.BOTTOM, dp(12))
+                cs.connect(R.id.preview_view, ConstraintSet.BOTTOM,
+                    R.id.modes_row, ConstraintSet.TOP, dp(12))
+                // Sobreposições presas à própria faixa da preview.
+                cs.connect(R.id.tv_mode_badge, ConstraintSet.TOP,
+                    R.id.preview_view, ConstraintSet.TOP, dp(10))
+                cs.connect(R.id.tv_timer, ConstraintSet.TOP,
+                    R.id.preview_view, ConstraintSet.TOP, dp(10))
+                cs.connect(R.id.zoom_bar, ConstraintSet.BOTTOM,
+                    R.id.preview_view, ConstraintSet.BOTTOM, dp(14))
+            } else {
+                // 16:9 ocupa a tela inteira e os controles passam a flutuar
+                // por cima da imagem. Sem razão de aspecto: quem decide o
+                // enquadramento é o scaleType fillCenter da PreviewView, que
+                // preenche a tela cortando o excedente.
+                cs.setDimensionRatio(R.id.preview_view, null)
+                cs.connect(R.id.preview_view, ConstraintSet.TOP,
+                    ConstraintSet.PARENT_ID, ConstraintSet.TOP, 0)
+                cs.connect(R.id.preview_view, ConstraintSet.BOTTOM,
+                    ConstraintSet.PARENT_ID, ConstraintSet.BOTTOM, 0)
+                // Em tela cheia "topo da preview" passa a ser o topo do
+                // aparelho, onde já estão o flash e os chips -- então estas
+                // três se ancoram nos controles, não na preview, pra não
+                // colidirem com eles nem com a barra de status.
+                cs.connect(R.id.tv_mode_badge, ConstraintSet.TOP,
+                    R.id.top_chips, ConstraintSet.BOTTOM, dp(14))
+                cs.connect(R.id.tv_timer, ConstraintSet.TOP,
+                    R.id.top_chips, ConstraintSet.BOTTOM, dp(14))
+                cs.connect(R.id.zoom_bar, ConstraintSet.BOTTOM,
+                    R.id.modes_row, ConstraintSet.TOP, dp(14))
+            }
             cs.applyTo(currentBinding.root)
         } catch (e: RuntimeException) {
             Log.e("CameraFragment", "Nao consegui ajustar a proporcao da preview " +
                 "(alguma view do fragment_camera.xml esta sem android:id?)", e)
         }
+
+        // A moldura delimita a área de captura dentro da faixa; em tela cheia
+        // ela viraria um contorno dourado na borda do aparelho, sem função.
+        currentBinding.viewfinderBorder.visibility = if (is4to3) View.VISIBLE else View.GONE
+        val veu = if (is4to3) View.GONE else View.VISIBLE
+        currentBinding.scrimTop.visibility = veu
+        currentBinding.scrimBottom.visibility = veu
 
         currentBinding.btnAspectRatio.text = if (is4to3) "4:3" else "16:9"
     }

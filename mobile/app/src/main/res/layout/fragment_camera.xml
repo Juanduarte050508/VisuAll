@@ -16,6 +16,69 @@
         precisa de android:id.
     -->
 
+    <!-- ── Preview ─────────────────────────────────────────────────────────
+
+         A preview vem PRIMEIRO de propósito: em 16:9 ela ocupa a tela toda
+         (ver applyAspectRatioToPreview) e tudo o que é declarado depois
+         desenha por cima dela. Se ela viesse depois da barra do topo, como
+         antes, cobriria os controles em tela cheia.
+    -->
+
+    <androidx.camera.view.PreviewView
+        android:id="@+id/preview_view"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:layout_marginTop="12dp"
+        android:layout_marginBottom="12dp"
+        app:layout_constraintBottom_toTopOf="@+id/modes_row"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/top_chips"
+        app:scaleType="fillCenter" />
+
+    <View
+        android:id="@+id/viewfinder_border"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:background="@drawable/bg_viewfinder_border"
+        app:layout_constraintBottom_toBottomOf="@id/preview_view"
+        app:layout_constraintEnd_toEndOf="@id/preview_view"
+        app:layout_constraintStart_toStartOf="@id/preview_view"
+        app:layout_constraintTop_toTopOf="@id/preview_view" />
+
+    <com.visuall.app.ui.GridOverlayView
+        android:id="@+id/grid_overlay"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="@id/preview_view"
+        app:layout_constraintEnd_toEndOf="@id/preview_view"
+        app:layout_constraintStart_toStartOf="@id/preview_view"
+        app:layout_constraintTop_toTopOf="@id/preview_view" />
+
+    <!-- Véus de contraste. Só existem em 16:9: em 4:3 os controles ficam sobre
+         o fundo preto e não precisam de ajuda; em tela cheia eles caem sobre a
+         imagem, que pode ser clara. -->
+    <View
+        android:id="@+id/scrim_top"
+        android:layout_width="0dp"
+        android:layout_height="120dp"
+        android:background="@drawable/vf_grad_top"
+        android:visibility="gone"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <View
+        android:id="@+id/scrim_bottom"
+        android:layout_width="0dp"
+        android:layout_height="220dp"
+        android:background="@drawable/vf_grad_bottom"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent" />
+
     <!-- ── Barra do topo ───────────────────────────────────────────────── -->
 
     <ImageView
@@ -103,40 +166,6 @@
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintTop_toTopOf="parent"
         app:tint="@color/text_on_gold" />
-
-    <!-- ── Preview ─────────────────────────────────────────────────────── -->
-
-    <androidx.camera.view.PreviewView
-        android:id="@+id/preview_view"
-        android:layout_width="0dp"
-        android:layout_height="0dp"
-        android:layout_marginTop="12dp"
-        android:layout_marginBottom="12dp"
-        app:layout_constraintBottom_toTopOf="@id/modes_row"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/top_chips"
-        app:scaleType="fillCenter" />
-
-    <View
-        android:id="@+id/viewfinder_border"
-        android:layout_width="0dp"
-        android:layout_height="0dp"
-        android:background="@drawable/bg_viewfinder_border"
-        app:layout_constraintBottom_toBottomOf="@id/preview_view"
-        app:layout_constraintEnd_toEndOf="@id/preview_view"
-        app:layout_constraintStart_toStartOf="@id/preview_view"
-        app:layout_constraintTop_toTopOf="@id/preview_view" />
-
-    <com.visuall.app.ui.GridOverlayView
-        android:id="@+id/grid_overlay"
-        android:layout_width="0dp"
-        android:layout_height="0dp"
-        android:visibility="gone"
-        app:layout_constraintBottom_toBottomOf="@id/preview_view"
-        app:layout_constraintEnd_toEndOf="@id/preview_view"
-        app:layout_constraintStart_toStartOf="@id/preview_view"
-        app:layout_constraintTop_toTopOf="@id/preview_view" />
 
     <TextView
         android:id="@+id/tv_mode_badge"
