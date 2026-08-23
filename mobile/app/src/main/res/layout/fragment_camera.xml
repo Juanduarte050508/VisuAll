@@ -211,12 +211,17 @@
             android:textSize="12sp"
             android:textStyle="bold" />
 
+        <!-- Tintas explícitas: sem elas o SeekBar herda o accent do Material,
+             que é verde-água e destoa do tema dourado do app. -->
         <SeekBar
             android:id="@+id/seek_ev"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:contentDescription="Compensação de exposição" />
+            android:contentDescription="Compensação de exposição"
+            android:progressBackgroundTint="@color/text_dim"
+            android:progressTint="@color/gold_primary"
+            android:thumbTint="@color/gold_primary" />
 
     </LinearLayout>
 

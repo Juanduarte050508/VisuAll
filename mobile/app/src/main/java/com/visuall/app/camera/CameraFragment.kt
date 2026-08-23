@@ -436,11 +436,19 @@ class CameraFragment : Fragment() {
 
     // ── Zoom, ultra-wide e exposição ───────────────────────────────────────
 
-    // Distância focal mínima de uma câmera, ou null se ela não declarar.
-    private fun focalDe(manager: CameraManager, id: String): Float? = try {
-        manager.getCameraCharacteristics(id)
-            .get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
-            ?.minOrNull()
+    // Abertura angular de uma câmera, como largura-do-sensor / distância-focal.
+    //
+    // Este quociente é proporcional à tangente de metade do campo de visão, e
+    // é ele -- não a distância focal sozinha -- que diz quanto a câmera "pega"
+    // de cena. Comparar só focais leva a erro grosseiro entre câmeras de
+    // sensores diferentes: no A52 a ultra-wide tem focal 3x menor que a
+    // principal, mas o sensor dela também é bem menor, então o campo real é
+    // pouco menos que o dobro, não o triplo.
+    private fun aberturaDe(manager: CameraManager, id: String): Float? = try {
+        val cc = manager.getCameraCharacteristics(id)
+        val focal = cc.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.minOrNull()
+        val largura = cc.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)?.width
+        if (focal != null && largura != null && focal > 0f) largura / focal else null
     } catch (e: Exception) {
         null
     }
@@ -448,20 +456,21 @@ class CameraFragment : Fragment() {
     // Procura uma grande-angular entre as câmeras traseiras.
     //
     // O critério é comparativo, não um número mágico: a ultra-wide é a câmera
-    // traseira com distância focal MENOR que a da principal (a que o CameraX
-    // acabou de abrir). Exijo uma folga de 20% pra não confundir com variações
-    // entre sensores parecidos, e exijo também que o CameraX consiga enxergar
-    // aquela câmera -- se ela não estiver em availableCameraInfos, não há como
-    // vincular nela e o chip não deve existir.
+    // traseira com o MAIOR campo de visão, e ele precisa ser pelo menos 20%
+    // maior que o da principal (a que o CameraX acabou de abrir) pra não
+    // confundir com variação entre sensores parecidos. Exijo também que o
+    // CameraX enxergue aquela câmera -- se ela não estiver em
+    // availableCameraInfos não há como vincular nela, e aí o chip não deve
+    // existir em vez de existir sem funcionar.
     //
-    // O rótulo do chip sai da medição (focal da ultra / focal da principal), e
-    // não de um "0.6x" fixo: cada aparelho tem a sua proporção.
+    // O rótulo sai da medição, não de um "0.6x" fixo: é a razão entre os
+    // campos de visão, que é exatamente o "quantas vezes" da câmera.
     private fun descobrirUltraWide(provider: ProcessCameraProvider, atual: CameraInfo) {
         if (idUltraWide != null) return
         val manager = context?.getSystemService(Context.CAMERA_SERVICE) as? CameraManager ?: return
         try {
             val idPrincipal = Camera2CameraInfo.from(atual).cameraId
-            val focalPrincipal = focalDe(manager, idPrincipal) ?: return
+            val aberturaPrincipal = aberturaDe(manager, idPrincipal) ?: return
 
             val visiveisAoCameraX = provider.availableCameraInfos.mapNotNull { info ->
                 runCatching { Camera2CameraInfo.from(info).cameraId }.getOrNull()
@@ -474,16 +483,16 @@ class CameraFragment : Fragment() {
                             .get(CameraCharacteristics.LENS_FACING) ==
                         CameraCharacteristics.LENS_FACING_BACK
                 }
-                .mapNotNull { id -> focalDe(manager, id)?.let { id to it } }
-                .filter { (_, focal) -> focal < focalPrincipal * 0.8f }
-                .minByOrNull { (_, focal) -> focal }
+                .mapNotNull { id -> aberturaDe(manager, id)?.let { id to it } }
+                .filter { (_, abertura) -> abertura > aberturaPrincipal * 1.2f }
+                .maxByOrNull { (_, abertura) -> abertura }
 
             if (candidata == null) {
                 Log.i("CameraFragment", "Sem ultra-wide utilizavel; chip de grande-angular fica oculto")
                 return
             }
             idUltraWide = candidata.first
-            rotuloUltraWide = "%.1fx".format(Locale.US, candidata.second / focalPrincipal)
+            rotuloUltraWide = "%.1fx".format(Locale.US, aberturaPrincipal / candidata.second)
             Log.i("CameraFragment", "Ultra-wide: camera ${candidata.first} ($rotuloUltraWide)")
         } catch (e: Exception) {
             Log.w("CameraFragment", "Falha ao procurar a camera grande-angular", e)
@@ -506,7 +515,10 @@ class CameraFragment : Fragment() {
 
         val maxZoom = cam.cameraInfo.zoomState.value?.maxZoomRatio ?: 1f
         b.chipZoomWide.text = rotuloUltraWide
-        b.chipZoomWide.visibility = if (idUltraWide != null) View.VISIBLE else View.GONE
+        // A grande-angular é uma câmera traseira: na frontal o chip não teria
+        // o que fazer, então some em vez de ficar lá sem efeito.
+        val temWide = idUltraWide != null && lensFacing == CameraSelector.LENS_FACING_BACK
+        b.chipZoomWide.visibility = if (temWide) View.VISIBLE else View.GONE
         b.chipZoom2.visibility = if (maxZoom >= 2f) View.VISIBLE else View.GONE
         b.chipZoom5.visibility = if (maxZoom >= 5f) View.VISIBLE else View.GONE
 

@@ -1,14 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Obturador em repouso: dourado cheio com anel mais claro, como no desenho
+     de referência. O estado pressionado (ic_shutter_pressed) escurece o
+     dourado; se os dois fossem iguais, o toque não teria retorno visual. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item>
         <shape android:shape="oval">
-            <stroke android:width="3dp" android:color="@color/text_primary"/>
+            <stroke android:width="3dp" android:color="@color/gold_light"/>
             <solid android:color="#00000000"/>
         </shape>
     </item>
     <item android:top="7dp" android:bottom="7dp" android:left="7dp" android:right="7dp">
         <shape android:shape="oval">
-            <solid android:color="@color/text_primary"/>
+            <solid android:color="@color/gold_primary"/>
         </shape>
     </item>
 </layer-list>
