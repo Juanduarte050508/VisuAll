@@ -63,18 +63,27 @@ def normaliza_corpo(frame):
     Centraliza x,y no meio dos ombros e divide pela distancia 3D entre eles
     (o dz ENTRA na conta). O z fica cru, como sai do MediaPipe.
     """
-    saida = frame.copy()
+    # float32 em TODA operacao, de proposito. O Kotlin faz esta conta inteira
+    # em Float, entao e assim que o gemeo tem que calcular. E nao e so
+    # fidelidade: com um float comum do Python no lugar (2.0, ou float(...)),
+    # o resultado passa a depender da VERSAO do numpy -- no numpy 1.x um
+    # escalar np.float32 dividido por float do Python sobe pra float64, e no
+    # numpy 2 (NEP 50) fica em float32. As duas contas diferem por alguns ULP,
+    # o bastante pra mudar a 6a casa decimal e quebrar o contrato em
+    # tests/fixtures/landmark_contract.json dependendo da maquina.
+    saida = np.asarray(frame, dtype=np.float32).copy()
     le, ld = OMBRO_ESQ * 3, OMBRO_DIR * 3
-    centro_x = (frame[le] + frame[ld]) / 2.0
-    centro_y = (frame[le + 1] + frame[ld + 1]) / 2.0
-    dx = frame[le] - frame[ld]
-    dy = frame[le + 1] - frame[ld + 1]
-    dz = frame[le + 2] - frame[ld + 2]
-    escala = float(np.sqrt(dx * dx + dy * dy + dz * dz))
+    dois = np.float32(2.0)
+    centro_x = (saida[le] + saida[ld]) / dois
+    centro_y = (saida[le + 1] + saida[ld + 1]) / dois
+    dx = saida[le] - saida[ld]
+    dy = saida[le + 1] - saida[ld + 1]
+    dz = saida[le + 2] - saida[ld + 2]
+    escala = np.float32(np.sqrt(dx * dx + dy * dy + dz * dz))
     # Pose degenerada (pessoa de lado, ombro fora do quadro) daria uma escala
     # quase zero e explodiria as features -- aí não normaliza.
     if escala <= ESCALA_MINIMA_OMBROS:
-        escala = 1.0
+        escala = np.float32(1.0)
     for ponto in range(N_PONTOS):
         base = ponto * 3
         saida[base] = (saida[base] - centro_x) / escala

@@ -13,6 +13,20 @@ Formato: **Constante(s)** — valor atual — decisão e por quê — status.
 
 ## Não lançado
 
+- **`normaliza_corpo` fixado em float32 em toda operação** — a função misturava
+  `np.float32` com float comum do Python (`/ 2.0`, `float(np.sqrt(...))`), e o
+  resultado disso **depende da versão do numpy**: no 1.x um escalar `np.float32`
+  dividido por float do Python sobe para float64; no 2.x (NEP 50) fica em
+  float32. As duas contas diferem por alguns ULP — o bastante para mudar a 6ª
+  casa decimal. Na prática: a mesma gravação, treinada em duas máquinas com
+  numpy diferente, gerava features levemente diferentes, em silêncio. Apareceu
+  porque a CI (numpy 2) e uma máquina de desenvolvimento (numpy 1.24) passaram a
+  discordar sobre o contrato de landmarks. Agora todas as operações são float32
+  explícito, que é o que o Kotlin faz (`Float` em tudo) e o que torna a conta
+  reprodutível em qualquer máquina. As fixtures, regeradas com a versão
+  corrigida, voltaram a bater com as originais valor por valor. Status:
+  **corrigido**.
+
 - **`onnxruntime` entrou no `requirements.txt`, e a verificação pós-export
   voltou para a CI** — o `Treinar.bat` já exigia `import onnxruntime` na
   checagem de dependências (linha 35) e, ao falhar, rodava
@@ -40,15 +54,13 @@ Formato: **Constante(s)** — valor atual — decisão e por quê — status.
 - **Ferramenta de treino passou a ser `treino/`; `treinamento/` foi removida** —
   o repositório ficou com duas ferramentas de treino em paralelo e era questão
   de tempo até alguém treinar por uma e conferir pela outra. Ficou a `treino/`.
-  A troca mexe no contrato de `tests/fixtures/landmark_contract.json`: as
-  fixtures eram geradas por `treinar_visuall.py`, que calculava a escala dos
-  ombros com `np.linalg.norm` (acumula em float64) e normalizava vetorizado.
-  O `normaliza_corpo` da `treino/` faz `sqrt(dx*dx + dy*dy + dz*dz)` em float32
-  e percorre ponto a ponto — que é **exatamente** o que `LibrasMath.kt` faz
-  (linhas 107-127). Regerar as fixtures pela `treino/` mudou 8 valores na 6ª
-  casa decimal (diferença máxima **1.0e-6**, contra a tolerância de **1e-5** dos
-  dois lados do contrato), e o gabarito agora descreve o app com mais fidelidade
-  do que antes, não menos. Os índices do `resample` saíram idênticos.
+  O gerador de `tests/fixtures/landmark_contract.json` passou a chamar o
+  `normaliza_corpo` da `treino/`, que faz `sqrt(dx*dx + dy*dy + dz*dz)` e
+  percorre ponto a ponto — **exatamente** o que `LibrasMath.kt` faz (linhas
+  107-127), enquanto o `treinar_visuall.py` usava `np.linalg.norm` vetorizado.
+  O conteúdo do contrato **não mudou**: os mesmos números, os mesmos índices
+  de `resample`. (Numa primeira tentativa 8 valores oscilaram na 6ª casa; era
+  bug de tipo no `normaliza_corpo`, corrigido na entrada acima.)
   `treinamento/tests/test_landmark_contract.py` virou
   `treino/tests/test_landmark_contract.py`, repontado para os gêmeos
   (`normalize_landmarks`, `normaliza_corpo`, `reamostra`).
