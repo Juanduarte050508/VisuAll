@@ -148,9 +148,15 @@ class LibrasAnalyzer(
         const val BODY_END_FRAMES        = 5
         const val BODY_MIN_FRAMES        = 10
         const val BODY_MAX_FRAMES        = 60
-        // Subido de 0.85 junto com os outros limiares de confiança, mesmo
-        // motivo (reconhecimento fácil demais relatado pelo usuário).
-        const val BODY_CONFIDENCE        = 0.90f
+        // De volta a 0.85, o valor do pipeline Python citado logo acima.
+        // Tinha sido subido pra 0.90 junto com os limiares de mão, mas o modo
+        // corpo não tem portão de margem (ver isReliable em BodyGestureEngine):
+        // aqui a confiança é o único corte, então 0.05 a mais não filtra
+        // dúvida, apaga os sinais mais fracos inteiros. Relatado no aparelho:
+        // AJUDAR, PESSOA e CONVERSAR pararam de sair, enquanto SURDO e
+        // COMPUTADOR continuaram. Se voltar a reconhecer fácil demais, o
+        // caminho é exigir margem como as letras fazem, não subir isto de novo.
+        const val BODY_CONFIDENCE        = 0.85f
         const val BODY_COOLDOWN          = 2_000L
         const val CALIBRATION_MIN_FRAMES = 8
         const val CALIBRATION_MAX_FRAMES = 45
