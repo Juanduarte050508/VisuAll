@@ -47,16 +47,24 @@ class LibrasAnalyzer(
         const val JANELA_MLP             = 10
         // Lado menor da imagem enviada ao MediaPipe. O preview continua na
         // resolução da câmera; este valor só reduz o bitmap analisado.
-        // Estava em 255 (baixado de 360, o valor do Python) para ganhar
-        // velocidade, mas isso não foi validado com teste real de acurácia
-        // em dispositivo — 255 pode prejudicar letras difíceis (mão
-        // pequena/longe do quadro perde detalhe do landmark). 300 é um
-        // meio-termo: ~31% menos área que 360 (ainda ganha velocidade
-        // real), mas ~38% mais área que 255 (perde menos detalhe). Antes de
-        // fixar o valor final, comparar a taxa de acerto das letras
-        // difíceis (E, I, U, F, G, P, Q, T, V, W, Y) nos três valores num
-        // celular real.
-        const val INPUT_SHORT_SIDE       = 300
+        // A análise já chega em 640x480 (ver o ResolutionSelector do
+        // LibrasFragment), então 480 aqui significa NÃO reduzir mais: o
+        // detector recebe o frame como a câmera entregou.
+        //
+        // Passou por 360 (valor do Python), 255 e 300, todos escolhidos por
+        // velocidade e nenhum medido contra acurácia. O risco que estava
+        // escrito aqui desde então -- "mão pequena/longe do quadro perde
+        // detalhe do landmark" -- foi o que apareceu no aparelho: no modo
+        // corpo a pessoa recua pra caber o tronco, a mão passa a ocupar uma
+        // fração pequena do quadro, e em AJUDAR (as duas mãos encostadas,
+        // uma ocluindo a outra) os pontos da mão saíam errados. Landmark
+        // ruim é irrecuperável: nenhum limiar ou modelo conserta depois.
+        //
+        // O custo é real -- 640x480 tem 2.5x a área de 400x300 -- e cai em
+        // cima do MediaPipe, que é o gargalo. Se a latência incomodar no
+        // modo alfabeto (onde a mão está perto e detalhe sobra), o caminho é
+        // reduzir só nesse modo, não voltar a reduzir no corpo.
+        const val INPUT_SHORT_SIDE       = 480
         // O MLP é "superconfiante": cospe ~0.99 quase sempre, então só a
         // confiança filtra muito pouco. A MARGEM (1ª menos 2ª opção) é o
         // critério que realmente separa um sinal claro de um chute.
@@ -469,13 +477,14 @@ class LibrasAnalyzer(
         if (degrees != 0f) matrix.postRotate(degrees)
         if (espelhar) matrix.postScale(-1f, 1f)
         if (matrix.isIdentity) return src
-        // filter=false (nearest-neighbor em vez de bilinear): esta transform
-        // roda em TODO frame, então a suavização do bilinear é custo pago
-        // sempre por uma imagem que já vai ser reduzida e só serve de
-        // entrada pro detector -- não é exibida. MediaPipe detecta bem sem
-        // ela; ainda não validado formalmente contra qualidade de detecção
-        // num celular real (mesmo compromisso não-validado do INPUT_SHORT_SIDE).
-        return Bitmap.createBitmap(src, 0, 0, src.width, src.height, matrix, false)
+        // filter=true (bilinear). Era nearest-neighbor, com a justificativa
+        // de que a imagem só serve de entrada pro detector e não é exibida --
+        // mas é justamente por servir ao detector que ela precisa do filtro:
+        // vizinho-mais-próximo serrilha bordas finas, e borda fina é o que
+        // um dedo é. Com INPUT_SHORT_SIDE em 480 a rotação e o espelho
+        // passam a ser as únicas transforms, então o custo do bilinear aqui
+        // é pequeno e a qualidade da borda é o que o MediaPipe consome.
+        return Bitmap.createBitmap(src, 0, 0, src.width, src.height, matrix, true)
     }
 
     fun setEspelhamento(cameraFrontal: Boolean) {
