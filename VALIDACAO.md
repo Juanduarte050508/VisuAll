@@ -101,7 +101,7 @@ situação atual, com valores que ninguém sabe mais se ajudam.
 
 - **Alfabeto ruim E falso positivo alto** → o problema quase certamente é
   falta de dados de treino, não limiar. Grave mais amostras
-  (`treinamento/README.md`) antes de mexer em qualquer constante.
+  (`treino/README.md`) antes de mexer em qualquer constante.
 - **Alfabeto bom, falso positivo alto** → limiares frouxos. Suba
   `CONFIANCA_MINIMA` / `CONFIANCA_DINAMICA` / `CONFIANCA_INDIVIDUAL` em
   `LibrasAnalyzer.kt`, um por vez.
@@ -109,4 +109,4 @@ situação atual, com valores que ninguém sabe mais se ajudam.
   mesmos valores, um por vez.
 - **Letras com movimento (H/K/X/Z) falhando, estáticas OK** → é o caminho
   do modelo dinâmico. Veja `LIMIAR_MOVIMENTO` e `MOVIMENTO_SUSTENTADO_MS`,
-  e confira quantos clipes dessas letras existem em `treinamento/dados/`.
+  e confira quantos clipes dessas letras existem em `data/raw_videos/`.

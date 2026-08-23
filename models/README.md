@@ -8,7 +8,7 @@ versionados a forca, e cada retreino guardava uma copia nova no historico
 para sempre — o repositorio so crescia.
 
 Se voce clonou o repositorio e esta pasta esta vazia, esta tudo certo: rode
-o treino (`treinamento/Treinar.bat`) e os `.pkl` reaparecem localmente. O que
+o treino (`treino/Treinar.bat`) e os `.pkl` reaparecem localmente. O que
 o app precisa para funcionar esta em `assets/`, e esses sim sao versionados.
 
 | Arquivo (local, nao versionado) | Tamanho | Descricao |
@@ -18,7 +18,7 @@ o app precisa para funcionar esta em `assets/`, e esses sim sao versionados.
 | `dynamic_model.pkl` | ~1.7MB | MLP para letras dinamicas / com movimento (H, J, K, X, Z) |
 | `dynamic_classes.pkl` | <1KB | Mapeamento `idx → letra` do modelo dinamico |
 
-Para treinar ou retreinar, veja `treinamento/README.md`.
+Para treinar ou retreinar, veja `treino/README.md`.
 
 Saidas Android geradas pelos treinos (estas sim versionadas, o app carrega
 direto):
@@ -42,8 +42,10 @@ nao le mais ela** — o fallback foi removido do `LetraEngine.kt` no commit
 `1f33768`. Serve so pra inspecao manual.
 
 O treino verifica sozinho cada modelo exportado (nome e formato da entrada)
-antes de considerar o export valido — ver `verificar_modelo_exportado` em
-`treinamento/treinar_visuall.py`.
+antes de considerar o export valido — ver `valida` em
+`treino/exportar_onnx.py` (letras) e `treino/treinar_corpo.py` (gestos). A
+verificacao das letras roda o modelo de verdade, entao precisa do
+`onnxruntime` instalado; sem ele o treino avisa e segue sem validar.
 
 > **Nota:** modelos legados ou versoes antigas devem ir para uma subpasta
 > `legacy/` (presente no `.gitignore`).

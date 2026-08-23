@@ -7,8 +7,8 @@ import kotlin.math.sqrt
 // reconhecimento (LetraEngine, BodyGestureEngine). Sem dependência de
 // Android/Context, então dá pra testar direto em JVM (ver LibrasMathTest).
 //
-// ATENÇÃO: tudo aqui tem um gêmeo em Python, em treinamento/treinar_visuall.py
-// (normalize_hand_landmarks, normalize_body_frame, resample_sequence). Os dois
+// ATENÇÃO: tudo aqui tem um gêmeo em Python, em treino/ (normalize_landmarks
+// em extrair_negativos.py; normaliza_corpo e reamostra em treinar_corpo.py). Os dois
 // lados PRECISAM produzir exatamente os mesmos números: o Python prepara os
 // dados com que o modelo aprende, e este arquivo prepara os dados que o modelo
 // recebe no celular. Se um mudar sem o outro, nada quebra e nenhum erro

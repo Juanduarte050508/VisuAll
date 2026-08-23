@@ -13,6 +13,28 @@ Formato: **Constante(s)** — valor atual — decisão e por quê — status.
 
 ## Não lançado
 
+- **Ferramenta de treino passou a ser `treino/`; `treinamento/` foi removida** —
+  o repositório ficou com duas ferramentas de treino em paralelo e era questão
+  de tempo até alguém treinar por uma e conferir pela outra. Ficou a `treino/`.
+  A troca mexe no contrato de `tests/fixtures/landmark_contract.json`: as
+  fixtures eram geradas por `treinar_visuall.py`, que calculava a escala dos
+  ombros com `np.linalg.norm` (acumula em float64) e normalizava vetorizado.
+  O `normaliza_corpo` da `treino/` faz `sqrt(dx*dx + dy*dy + dz*dz)` em float32
+  e percorre ponto a ponto — que é **exatamente** o que `LibrasMath.kt` faz
+  (linhas 107-127). Regerar as fixtures pela `treino/` mudou 8 valores na 6ª
+  casa decimal (diferença máxima **1.0e-6**, contra a tolerância de **1e-5** dos
+  dois lados do contrato), e o gabarito agora descreve o app com mais fidelidade
+  do que antes, não menos. Os índices do `resample` saíram idênticos.
+  `treinamento/tests/test_landmark_contract.py` virou
+  `treino/tests/test_landmark_contract.py`, repontado para os gêmeos
+  (`normalize_landmarks`, `normaliza_corpo`, `reamostra`).
+  **Cobertura perdida:** `test_verificacao_modelo.py` foi junto. Ele testava
+  `verificar_onnx_exportado`, que checava o `.onnx` de forma estática (só o
+  pacote `onnx`) e por isso rodava na CI. O `valida` da `treino/` checa melhor
+  — roda o modelo — mas exige `onnxruntime`, que não está no `requirements.txt`.
+  Para recuperar essa verificação na CI, é preciso adicionar essa dependência.
+  Status: **ativo**.
+
 - **`CONFIANCA_INDIVIDUAL_SEM_RIVAL` = 0.99 (novo)** — o portão de margem dos
   modelos individuais não filtrava nada quando existia **um único** modelo
   treinado. Com um só, o segundo colocado é 0, então a margem passa a valer o

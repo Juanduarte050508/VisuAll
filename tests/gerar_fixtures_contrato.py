@@ -1,9 +1,8 @@
 """Gera tests/fixtures/landmark_contract.json.
 
 Esse arquivo e o "contrato": um conjunto congelado de entradas e saidas que
-as DUAS implementacoes da mesma matematica -- a do treino (Python,
-treinamento/treinar_visuall.py) e a do app (Kotlin, LibrasMath.kt) -- tem que
-reproduzir identicamente.
+as DUAS implementacoes da mesma matematica -- a do treino (Python, treino/) e
+a do app (Kotlin, LibrasMath.kt) -- tem que reproduzir identicamente.
 
 So rode isto de novo se voce mudou a matematica DE PROPOSITO nos dois lados.
 Regerar pra "fazer o teste passar" derruba justamente a protecao que ele da:
@@ -19,9 +18,10 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "treinamento"))
+sys.path.insert(0, str(ROOT / "treino"))
 
-import treinar_visuall as core  # noqa: E402
+import treinar_corpo as corpo  # noqa: E402
+from extrair_negativos import normalize_landmarks  # noqa: E402
 
 SAIDA = ROOT / "tests" / "fixtures" / "landmark_contract.json"
 N_POSE, N_HAND = 33, 21
@@ -55,7 +55,7 @@ def casos_mao():
         {
             "nome": nome,
             "entrada": [[round(x, 6), round(y, 6)] for x, y in pontos],
-            "esperado": arredondar(core.normalize_hand_landmarks(pontos)),
+            "esperado": arredondar(normalize_landmarks(pontos)),
         }
         for nome, pontos in casos
     ]
@@ -101,7 +101,7 @@ def casos_corpo():
         {
             "nome": nome,
             "entrada": arredondar(frame.reshape(-1)),
-            "esperado": arredondar(core.normalize_body_frame(frame).reshape(-1)),
+            "esperado": arredondar(corpo.normaliza_corpo(frame.reshape(-1))),
         }
         for nome, frame in casos
     ]

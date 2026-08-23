@@ -10,7 +10,7 @@ import java.io.File
 /**
  * Trava o lado Kotlin no contrato de tests/fixtures/landmark_contract.json.
  *
- * O gêmeo deste arquivo é treinamento/tests/test_landmark_contract.py, que
+ * O gêmeo deste arquivo é treino/tests/test_landmark_contract.py, que
  * roda os MESMOS casos contra a implementação Python usada no treino.
  * Enquanto os dois passarem, o modelo é treinado e usado com os dados
  * preparados exatamente do mesmo jeito.

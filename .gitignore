@@ -11,9 +11,6 @@ __pycache__/
 venv/
 
 # Local training inputs/outputs
-treinamento/dados/
-treinamento/modelos_parciais/
-treinamento/modelos_individuais/
 
 # System
 .env

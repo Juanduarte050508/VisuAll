@@ -83,7 +83,7 @@ class LibrasAnalyzer(
         const val MARGEM_DINAMICA_MINIMA = 0.32f
         // Usado só pelos modelos INDIVIDUAIS (um classificador binário "é
         // esta letra ou não" por letra, treinado pela ferramenta em
-        // treinamento/). Diferente do modelo geral (multiclasse, softmax
+        // treino/). Diferente do modelo geral (multiclasse, softmax
         // sobre TODAS as letras reais), um binário nunca viu "mão se
         // mexendo sem sinalizar nada" como exemplo negativo — só viu outras
         // letras reais. Isso o deixa mais propenso a "confiante" demais

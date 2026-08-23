@@ -109,7 +109,7 @@ what lives where and why there's more than one backend folder:
 |---|---|
 | `linear/backend/app.py` | **Reference implementation — read it, don't expect to run it.** A single Python file with the full pipeline (camera capture → MediaPipe Holistic → MLP/LSTM classification → WebSocket → frontend). This is the spec the Kotlin port is checked against: `SentenceTranslator.kt`, `FaceMarkerEngine.kt`, `LibrasFragment.kt` and `LibrasAnalyzer.kt` all name the function here that they mirror. It **cannot recognise anything as checked out** — see the note under Getting Started. |
 | `linear/frontend/` | The web UI (`index.html`) that `linear/backend/app.py` serves over WebSocket. Same caveat as the backend. |
-| `treinamento/` | **Everything about collecting data and training models.** Record clips from a webcam (`Capturar.bat`), then extract landmarks and train (`Treinar.bat`, or `abrir_treinamento.bat` for the full GUI); models are written straight into `mobile/app/src/main/assets/`. See `treinamento/README.md`. |
+| `treino/` | **Everything about collecting data and training models.** Record photos and clips from a webcam (`Gravar.bat`), then extract landmarks and train (`Treinar.bat` for the hand alphabet, `TreinarCorpo.bat` for body gestures); models are written straight into `mobile/app/src/main/assets/`, and `RestaurarModelo.bat` rolls back to the previous one. Raw recordings live in `data/` and are not versioned. See `treino/README.md`. |
 | `tests/` | Shared fixtures (`fixtures/landmark_contract.json`) pinning the landmark math that the Python training side and the Kotlin app side must both reproduce, plus the script that regenerates them. |
 | `modular/` | **The same backend as `linear/backend/app.py`, split into 10 small modules** (`m01_visuall_config.py` … `m10_visuall_servidor.py`) instead of one file. Entry point is `app_backend_unificado.py`. Behaves identically and reuses `linear/frontend/` — easier to navigate if you're extending the backend. |
 | `models/` | Pre-trained model files ready for inference. See `models/README.md` for what each file is. |
@@ -189,8 +189,8 @@ Then open `linear/frontend/index.html` in your browser and start signing. ✋
 >
 > **None of this affects the Android app or the training tools**, which are what
 > is actively developed. `mobile/` loads its own models from
-> `mobile/app/src/main/assets/`, and `treinamento/` writes them there.
-> Use `treinamento/` to train and `mobile/` to run; read `linear/` and
+> `mobile/app/src/main/assets/`, and `treino/` writes them there.
+> Use `treino/` to train and `mobile/` to run; read `linear/` and
 > `modular/` to understand the algorithm.
 
 Looking for the Android app instead? It doesn't need this backend at all —

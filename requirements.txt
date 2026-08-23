@@ -1,4 +1,4 @@
-# Requer Python 3.10 ou mais novo (o treinamento/_ambiente.bat verifica isso).
+# Requer Python 3.10 ou mais novo (os .bat de treino/ assumem isso).
 # Em 3.9 este conjunto NAO funciona: mediapipe 0.10.13+ e tensorflow 2.16+
 # instalam (existe wheel cp39) mas quebram no import com
 # "TypeError: unhashable type: 'list'". Foi testado -- nao e suposicao.
@@ -34,8 +34,8 @@ scikit-learn>=1.3.0
 websockets>=12.0
 onnx>=1.15.0,<1.17
 skl2onnx>=1.16.0,<1.18
-# Treino do modelo de gestos corporais (treinamento/treinar_visuall.py) e
+# Treino do modelo de gestos corporais (treino/treinar_corpo.py) e
 # app.py/modular ja importavam tensorflow sem ele estar pinado aqui.
 tensorflow>=2.16.0,<2.20; python_version < "3.13"
-# Preview de webcam em treinamento/capturar.py.
+# Preview de webcam em treino/gravar.py.
 Pillow>=10.0.0
