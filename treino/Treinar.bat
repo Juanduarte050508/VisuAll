@@ -77,7 +77,7 @@ if exist "%RAIZ%\dataaw_negativos" (
     echo ============================================================
     echo  [2b] EXEMPLOS DE "NADA" - mao a mostra sem fazer letra
     echo ============================================================
-    python "%RAIZ%	reino\extrair_negativos.py"
+    python "%RAIZ%\treino\extrair_negativos.py"
 )
 
 REM ---------- 3. treina e exporta o que existir ----------

@@ -13,6 +13,30 @@ Formato: **Constante(s)** — valor atual — decisão e por quê — status.
 
 ## Não lançado
 
+- **`onnxruntime` entrou no `requirements.txt`, e a verificação pós-export
+  voltou para a CI** — o `Treinar.bat` já exigia `import onnxruntime` na
+  checagem de dependências (linha 35) e, ao falhar, rodava
+  `pip install -r requirements.txt` — que não listava o pacote. O `.bat`
+  tentava instalar, o `pip` terminava com sucesso sem instalar nada, e o
+  treino seguia imprimindo "onnxruntime nao instalado -- pulando a validacao".
+  Ou seja: a validação do modelo exportado estava desligada na prática desde
+  sempre, sem ninguém ver. Sem teto de versão de propósito — ao contrário de
+  `onnx`/`mediapipe`/`tensorflow`, o `onnxruntime` declara `protobuf` sem
+  faixa nenhuma, então não entra na briga que os outros tetos resolvem.
+  `treino/tests/test_verificacao_modelo.py` cobre os quatro casos do contrato
+  do app (entrada `landmarks_input`, forma `[N, features]`, saída `[1]` com as
+  probabilidades) e o caso TFLite de janela errada. **Sem `skip` de propósito:**
+  `valida` devolve `False` tanto para modelo errado quanto para "onnxruntime
+  ausente", então um skip deixaria a suite verde sem verificar nada — o teste
+  positivo exige `True` e falha alto se a dependência sumir. Status: **ativo**.
+
+- **`treino/Treinar.bat` invocava `extrair_negativos.py` por um caminho com um
+  TAB no meio** — a linha 80 tinha o byte `0x09` onde devia ter `	` de
+  `%RAIZ%	reino\`, provavelmente de um escape mastigado na hora de escrever o
+  arquivo. O passo de extrair os negativos (os clipes de "Nada", que são o que
+  ensina o modelo a **não** responder a movimento qualquer) nunca rodou desde
+  que o arquivo foi criado. Status: **corrigido**.
+
 - **Ferramenta de treino passou a ser `treino/`; `treinamento/` foi removida** —
   o repositório ficou com duas ferramentas de treino em paralelo e era questão
   de tempo até alguém treinar por uma e conferir pela outra. Ficou a `treino/`.
@@ -28,11 +52,8 @@ Formato: **Constante(s)** — valor atual — decisão e por quê — status.
   `treinamento/tests/test_landmark_contract.py` virou
   `treino/tests/test_landmark_contract.py`, repontado para os gêmeos
   (`normalize_landmarks`, `normaliza_corpo`, `reamostra`).
-  **Cobertura perdida:** `test_verificacao_modelo.py` foi junto. Ele testava
-  `verificar_onnx_exportado`, que checava o `.onnx` de forma estática (só o
-  pacote `onnx`) e por isso rodava na CI. O `valida` da `treino/` checa melhor
-  — roda o modelo — mas exige `onnxruntime`, que não está no `requirements.txt`.
-  Para recuperar essa verificação na CI, é preciso adicionar essa dependência.
+  `test_verificacao_modelo.py` foi junto na remoção e **voltou em seguida**,
+  reescrito para o `valida` da `treino/` — ver a entrada abaixo.
   Status: **ativo**.
 
 - **`CONFIANCA_INDIVIDUAL_SEM_RIVAL` = 0.99 (novo)** — o portão de margem dos
