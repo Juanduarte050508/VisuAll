@@ -16,9 +16,18 @@ import numpy as np
 import os
 from pathlib import Path
 
+# Windows + console cp1252 quebra nos prints com "→"/"✅" abaixo
+# (UnicodeEncodeError). Força UTF-8 na saída, sem alterar as mensagens.
+import sys as _sys
+if hasattr(_sys.stdout, "reconfigure"):
+    _sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 # ============ CONFIGURAÇÃO ============
-PASTA_IMAGENS = "../../data/raw_images"   # pasta raiz com subpastas por letra
-SAIDA         = "../../data/dataset_static.npz"
+# Caminhos ancorados no próprio arquivo, não no diretório de onde se chama o
+# script: data_extraction -> backend -> linear -> raiz do repo.
+RAIZ          = Path(__file__).resolve().parents[3]
+PASTA_IMAGENS = str(RAIZ / "data" / "raw_images")   # pasta raiz com subpastas por letra
+SAIDA         = str(RAIZ / "data" / "dataset_static.npz")
 EXTENSOES     = [".jpg", ".jpeg", ".png", ".bmp", ".webp"]
 # ======================================
 

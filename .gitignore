@@ -1,4 +1,4 @@
-﻿# Models & datasets (too large for Git - upload via GitHub Releases)
+# Models & datasets (too large for Git - upload via GitHub Releases)
 *.pkl
 *.h5
 *.npz
@@ -25,3 +25,7 @@ Thumbs.db
 *.iml
 .vscode/
 mobile/local.properties
+
+# Gravacoes e backups do treino local (nao vao pro git)
+data/
+treino/modelos_anteriores/

@@ -6,15 +6,26 @@ Saída:    modelo_mlp_estatico.pkl  +  letras_mlp_estatico.pkl
 """
 import numpy as np
 import pickle
+from pathlib import Path
 from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
 
+# Windows + console cp1252 quebra nos prints com "→"/"✅" abaixo
+# (UnicodeEncodeError). Força UTF-8 na saída, sem alterar as mensagens.
+import sys as _sys
+if hasattr(_sys.stdout, "reconfigure"):
+    _sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 # ============ CONFIGURAÇÃO ============
-DATASET       = "../../data/dataset_static.npz"
-SAIDA_MODELO  = "../../models/static_model.pkl"
-SAIDA_CLASSES = "../../models/static_classes.pkl"
+# Caminhos ancorados no próprio arquivo, não no diretório de onde se chama o
+# script: training -> backend -> linear -> raiz do repo.
+RAIZ          = Path(__file__).resolve().parents[3]
+DATASET       = str(RAIZ / "data" / "dataset_static.npz")
+SAIDA_MODELO  = str(RAIZ / "models" / "static_model.pkl")
+SAIDA_CLASSES = str(RAIZ / "models" / "static_classes.pkl")
+(RAIZ / "models").mkdir(exist_ok=True)
 # ======================================
 
 data = np.load(DATASET, allow_pickle=True)
