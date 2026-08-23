@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Barra que agrupa os chips de zoom, sobreposta ao rodapé da preview. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <corners android:radius="20dp"/>
+    <solid android:color="#B3000000"/>
+</shape>

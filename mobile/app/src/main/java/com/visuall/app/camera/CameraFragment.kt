@@ -2,10 +2,13 @@ package com.visuall.app.camera
 
 import android.Manifest
 import android.content.ContentValues
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.BitmapFactory
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -18,8 +21,11 @@ import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.widget.SeekBar
 import android.widget.Toast
+import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.core.Camera
+import androidx.camera.core.CameraInfo
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
@@ -65,7 +71,6 @@ class CameraFragment : Fragment() {
     private var recording: Recording? = null
     private var zoomStateLiveData: LiveData<ZoomState>? = null
     private var zoomStateObserver: Observer<ZoomState>? = null
-    private var ignoreZoomCallback = false
 
     private var lensFacing  = CameraSelector.LENS_FACING_BACK
     private var flashMode   = ImageCapture.FLASH_MODE_AUTO
@@ -77,6 +82,36 @@ class CameraFragment : Fragment() {
 
     // Aspect ratio: true = 4:3 (padrão), false = 16:9
     private var is4to3 = true
+
+    // Modo atual. PRO captura foto igual ao FOTO; o que ele acrescenta é o
+    // controle de exposição, que fica escondido nos outros modos.
+    private var modo = Modo.FOTO
+
+    private var gradeLigada = false
+
+    // Temporizador de disparo, em segundos. 0 = desligado.
+    private var temporizador = 0
+    private var contagemEmCurso = false
+
+    // Zoom pedido pelo chip, em ratio da câmera atual. Guardado porque cada
+    // rebind (troca de proporção, de modo, de lente) zera o zoom da sessão.
+    private var zoomAtual = 1f
+
+    // Id da câmera física ultra-wide, quando existir.
+    //
+    // Não dá pra chegar na ultra-wide por zoom: este aparelho reporta
+    // zoomRatioRange [1.0, 8.0] em TODAS as câmeras, ou seja, o mínimo é 1x e
+    // a grande-angular é outra câmera física. Por isso o chip 0.6x TROCA de
+    // câmera, e só aparece se descobrirUltraWide() achar uma (ver lá o
+    // critério). Em aparelho sem ultra-wide o chip simplesmente não existe,
+    // em vez de virar um botão que não faz nada.
+    private var idUltraWide: String? = null
+    private var usandoUltraWide = false
+    // Rótulo do chip da grande-angular, medido no aparelho (ver
+    // descobrirUltraWide). O valor inicial só existe até a medição acontecer.
+    private var rotuloUltraWide = "0.6x"
+
+    private enum class Modo { FOTO, VIDEO, PRO }
 
     private val timerHandler = Handler(Looper.getMainLooper())
     private var timerSeconds = 0
@@ -166,7 +201,17 @@ class CameraFragment : Fragment() {
             }
             return
         }
-        val selector = cameraSelectorForAvailableLens(lensFacing)
+        // A grande-angular é uma câmera física, não um zoom (ver
+        // descobrirUltraWide), então ela entra aqui, na escolha do seletor.
+        val idWide = idUltraWide
+        val selector = if (usandoUltraWide && idWide != null &&
+            lensFacing == CameraSelector.LENS_FACING_BACK
+        ) {
+            seletorDaCamera(idWide)
+        } else {
+            usandoUltraWide = false
+            cameraSelectorForAvailableLens(lensFacing)
+        }
         val targetRotation = currentTargetRotation()
 
         val aspectRatioStrategy = if (is4to3)
@@ -202,7 +247,8 @@ class CameraFragment : Fragment() {
                     .build()
                 provider.bindToLifecycle(viewLifecycleOwner, selector, preview, imageCapture!!)
             }
-            setupZoom()
+            camera?.cameraInfo?.let { info -> descobrirUltraWide(provider, info) }
+            configurarZoomEExposicao()
             applyAspectRatioToPreview()
         } catch (e: Exception) {
             e.printStackTrace()
@@ -302,11 +348,17 @@ class CameraFragment : Fragment() {
     private fun setPortraitHudVisible(visible: Boolean) {
         val visibility = if (visible) View.VISIBLE else View.GONE
         binding.btnFlash.visibility = visibility
-        binding.btnAspectRatio.visibility = visibility
+        binding.topChips.visibility = visibility
+        binding.btnVisuall.visibility = visibility
         binding.tvTimer.visibility = if (visible && isRecording) View.VISIBLE else View.GONE
-        binding.zoomContainer.visibility = visibility
+        binding.zoomBar.visibility = visibility
         binding.modesRow.visibility = visibility
         binding.controlsRow.visibility = visibility
+        // Estes dois têm dono próprio (o modo e o botão da grade); esconder
+        // junto é seguro, mas mostrar de volta só quem estava ligado é que
+        // mantém o HUD coerente ao voltar de paisagem.
+        binding.proPanel.visibility = if (visible && modo == Modo.PRO) View.VISIBLE else View.GONE
+        binding.gridOverlay.visibility = if (visible && gradeLigada) View.VISIBLE else View.GONE
     }
 
     private fun ensureLandscapeHud() {
@@ -382,54 +434,170 @@ class CameraFragment : Fragment() {
     // Como a janela e sempre retrato, ROTATION_0 e a resposta certa sempre.
     private fun currentTargetRotation(): Int = Surface.ROTATION_0
 
-    // ── Zoom ───────────────────────────────────────────────────────────────
-    private fun setupZoom() {
-        val cam = camera ?: return
+    // ── Zoom, ultra-wide e exposição ───────────────────────────────────────
 
-        zoomStateObserver?.let { observer ->
-            zoomStateLiveData?.removeObserver(observer)
+    // Distância focal mínima de uma câmera, ou null se ela não declarar.
+    private fun focalDe(manager: CameraManager, id: String): Float? = try {
+        manager.getCameraCharacteristics(id)
+            .get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
+            ?.minOrNull()
+    } catch (e: Exception) {
+        null
+    }
+
+    // Procura uma grande-angular entre as câmeras traseiras.
+    //
+    // O critério é comparativo, não um número mágico: a ultra-wide é a câmera
+    // traseira com distância focal MENOR que a da principal (a que o CameraX
+    // acabou de abrir). Exijo uma folga de 20% pra não confundir com variações
+    // entre sensores parecidos, e exijo também que o CameraX consiga enxergar
+    // aquela câmera -- se ela não estiver em availableCameraInfos, não há como
+    // vincular nela e o chip não deve existir.
+    //
+    // O rótulo do chip sai da medição (focal da ultra / focal da principal), e
+    // não de um "0.6x" fixo: cada aparelho tem a sua proporção.
+    private fun descobrirUltraWide(provider: ProcessCameraProvider, atual: CameraInfo) {
+        if (idUltraWide != null) return
+        val manager = context?.getSystemService(Context.CAMERA_SERVICE) as? CameraManager ?: return
+        try {
+            val idPrincipal = Camera2CameraInfo.from(atual).cameraId
+            val focalPrincipal = focalDe(manager, idPrincipal) ?: return
+
+            val visiveisAoCameraX = provider.availableCameraInfos.mapNotNull { info ->
+                runCatching { Camera2CameraInfo.from(info).cameraId }.getOrNull()
+            }.toSet()
+
+            val candidata = manager.cameraIdList
+                .filter { id ->
+                    id in visiveisAoCameraX &&
+                        manager.getCameraCharacteristics(id)
+                            .get(CameraCharacteristics.LENS_FACING) ==
+                        CameraCharacteristics.LENS_FACING_BACK
+                }
+                .mapNotNull { id -> focalDe(manager, id)?.let { id to it } }
+                .filter { (_, focal) -> focal < focalPrincipal * 0.8f }
+                .minByOrNull { (_, focal) -> focal }
+
+            if (candidata == null) {
+                Log.i("CameraFragment", "Sem ultra-wide utilizavel; chip de grande-angular fica oculto")
+                return
+            }
+            idUltraWide = candidata.first
+            rotuloUltraWide = "%.1fx".format(Locale.US, candidata.second / focalPrincipal)
+            Log.i("CameraFragment", "Ultra-wide: camera ${candidata.first} ($rotuloUltraWide)")
+        } catch (e: Exception) {
+            Log.w("CameraFragment", "Falha ao procurar a camera grande-angular", e)
+        }
+    }
+
+    // Seletor que prende o bind numa câmera física específica.
+    private fun seletorDaCamera(id: String): CameraSelector =
+        CameraSelector.Builder()
+            .addCameraFilter { infos ->
+                infos.filter { runCatching { Camera2CameraInfo.from(it).cameraId }.getOrNull() == id }
+            }
+            .build()
+
+    // Chama a cada bind: mostra só os chips que esta câmera aguenta e reaplica
+    // o zoom escolhido, já que cada rebind zera o zoom da sessão.
+    private fun configurarZoomEExposicao() {
+        val cam = camera ?: return
+        val b = _binding ?: return
+
+        val maxZoom = cam.cameraInfo.zoomState.value?.maxZoomRatio ?: 1f
+        b.chipZoomWide.text = rotuloUltraWide
+        b.chipZoomWide.visibility = if (idUltraWide != null) View.VISIBLE else View.GONE
+        b.chipZoom2.visibility = if (maxZoom >= 2f) View.VISIBLE else View.GONE
+        b.chipZoom5.visibility = if (maxZoom >= 5f) View.VISIBLE else View.GONE
+
+        cam.cameraControl.setZoomRatio(zoomAtual.coerceIn(1f, maxZoom))
+        atualizarChipsZoom()
+        configurarExposicao(cam)
+    }
+
+    private fun atualizarChipsZoom() {
+        val b = _binding ?: return
+        val selecionado = listOf(
+            b.chipZoomWide to usandoUltraWide,
+            b.chipZoom1 to (!usandoUltraWide && zoomAtual < 1.5f),
+            b.chipZoom2 to (!usandoUltraWide && zoomAtual >= 1.5f && zoomAtual < 3.5f),
+            b.chipZoom5 to (!usandoUltraWide && zoomAtual >= 3.5f)
+        )
+        val ouro = ContextCompat.getColor(requireContext(), R.color.gold_primary)
+        val claro = ContextCompat.getColor(requireContext(), R.color.text_primary)
+        selecionado.forEach { (chip, ativo) ->
+            chip.setBackgroundResource(if (ativo) R.drawable.bg_zoom_chip_on else 0)
+            chip.setTextColor(if (ativo) ouro else claro)
+        }
+    }
+
+    // Troca o zoom pedido por um chip. O 0.6x é o único que não é zoom: ele
+    // troca de câmera física, então precisa de rebind.
+    private fun aplicarZoom(ratio: Float, ultraWide: Boolean) {
+        if (ultraWide && idUltraWide == null) return
+        val precisaRebind = ultraWide != usandoUltraWide
+        usandoUltraWide = ultraWide
+        zoomAtual = if (ultraWide) 1f else ratio
+        if (precisaRebind) {
+            bindCamera()
+        } else {
+            val cam = camera ?: return
+            val maxZoom = cam.cameraInfo.zoomState.value?.maxZoomRatio ?: 1f
+            cam.cameraControl.setZoomRatio(zoomAtual.coerceIn(1f, maxZoom))
+            atualizarChipsZoom()
+        }
+    }
+
+    // Compensação de exposição: é o controle do modo PRO.
+    //
+    // Nem toda câmera suporta -- e quando não suporta, o modo PRO inteiro sai
+    // da fileira de modos em vez de virar um botão que não faz nada.
+    private fun configurarExposicao(cam: Camera) {
+        val b = _binding ?: return
+        val estado = cam.cameraInfo.exposureState
+        val suportado = estado.isExposureCompensationSupported
+        b.modePro.visibility = if (suportado) View.VISIBLE else View.GONE
+
+        if (!suportado) {
+            if (modo == Modo.PRO) aplicarModo(Modo.FOTO)
+            return
         }
 
-        val liveData = cam.cameraInfo.zoomState
-        val observer = Observer<ZoomState> { zoomState ->
-            if (_binding == null) return@Observer
-            binding.tvZoomMin.text = formatZoomLabel(zoomState.minZoomRatio)
-            binding.tvZoomMax.text = formatZoomLabel(zoomState.maxZoomRatio)
+        val faixa = estado.exposureCompensationRange
+        b.seekEv.max = faixa.upper - faixa.lower
+        b.seekEv.progress = estado.exposureCompensationIndex - faixa.lower
+        atualizarRotuloEv(cam, estado.exposureCompensationIndex)
 
-            if (!binding.seekZoom.isPressed) {
-                val progress = (zoomState.linearZoom * 100f).roundToInt().coerceIn(0, 100)
-                if (binding.seekZoom.progress != progress) {
-                    ignoreZoomCallback = true
-                    binding.seekZoom.progress = progress
-                    ignoreZoomCallback = false
+        b.seekEv.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: SeekBar?, progresso: Int, doUsuario: Boolean) {
+                if (!doUsuario) return
+                val indice = faixa.lower + progresso
+                camera?.let {
+                    it.cameraControl.setExposureCompensationIndex(indice)
+                    atualizarRotuloEv(it, indice)
                 }
             }
-        }
-        zoomStateLiveData = liveData
-        zoomStateObserver = observer
-        liveData.observe(viewLifecycleOwner, observer)
+            override fun onStartTrackingTouch(sb: SeekBar?) = Unit
+            override fun onStopTrackingTouch(sb: SeekBar?) = Unit
+        })
+    }
 
-        _binding?.seekZoom?.setOnProgressChangedListener { progress, _ ->
-            if (ignoreZoomCallback) return@setOnProgressChangedListener
-            cam.cameraControl.setLinearZoom((progress / 100f).coerceIn(0f, 1f))
-        }
+    // O índice de exposição é um passo, não um valor em EV: o valor real é
+    // índice * passo, e o passo é uma fração que varia por aparelho.
+    private fun atualizarRotuloEv(cam: Camera, indice: Int) {
+        val passo = cam.cameraInfo.exposureState.exposureCompensationStep
+        val ev = indice * passo.numerator.toFloat() / passo.denominator.toFloat()
+        _binding?.tvEvLabel?.text = "EV %+.1f".format(Locale.getDefault(), ev)
     }
 
     // ── Botões ─────────────────────────────────────────────────────────────
-    private fun formatZoomLabel(ratio: Float): String {
-        val inteiro = ratio.roundToInt()
-        return if (abs(ratio - inteiro) < 0.05f) {
-            "${inteiro}x"
-        } else {
-            "%.1fx".format(Locale.US, ratio)
-        }
-    }
 
     private fun setupButtons() {
-        binding.modeRetrato.setOnClickListener { selectMode("RETRATO") }
-        binding.modeFoto.setOnClickListener    { selectMode("FOTO") }
-        binding.modeVideo.setOnClickListener   { selectMode("VIDEO") }
-        binding.btnLibrasMode.setOnClickListener {
+        binding.modeFoto.setOnClickListener  { aplicarModo(Modo.FOTO) }
+        binding.modeVideo.setOnClickListener { aplicarModo(Modo.VIDEO) }
+        binding.modePro.setOnClickListener   { aplicarModo(Modo.PRO) }
+
+        binding.btnVisuall.setOnClickListener {
             releaseCamera()
             findNavController().navigate(R.id.action_camera_to_libras)
         }
@@ -440,6 +608,14 @@ class CameraFragment : Fragment() {
             bindCamera()
         }
 
+        binding.btnGrid.setOnClickListener { alternarGrade() }
+        binding.btnTimer.setOnClickListener { alternarTemporizador() }
+
+        binding.chipZoomWide.setOnClickListener { aplicarZoom(1f, ultraWide = true) }
+        binding.chipZoom1.setOnClickListener    { aplicarZoom(1f, ultraWide = false) }
+        binding.chipZoom2.setOnClickListener    { aplicarZoom(2f, ultraWide = false) }
+        binding.chipZoom5.setOnClickListener    { aplicarZoom(5f, ultraWide = false) }
+
         binding.btnShutter.setOnTouchListener { v, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
@@ -449,7 +625,7 @@ class CameraFragment : Fragment() {
                 MotionEvent.ACTION_UP -> {
                     binding.btnShutter.setImageResource(
                         if (isVideoMode) R.drawable.ic_shutter_video else R.drawable.ic_shutter)
-                    if (isVideoMode) toggleRecording() else takePhoto()
+                    dispararComTemporizador()
                     v.performClick()
                     true
                 }
@@ -485,16 +661,114 @@ class CameraFragment : Fragment() {
         binding.btnGallery.setOnClickListener { openGallery() }
     }
 
-    private fun selectMode(mode: String) {
-        val orange = ContextCompat.getColor(requireContext(), R.color.orange_accent)
-        val dim    = ContextCompat.getColor(requireContext(), R.color.text_dim)
-        binding.modeRetrato.setTextColor(if (mode == "RETRATO") orange else dim)
-        binding.modeFoto.setTextColor(   if (mode == "FOTO")    orange else dim)
-        binding.modeVideo.setTextColor(  if (mode == "VIDEO")   orange else dim)
-        isVideoMode = mode == "VIDEO"
+    // ── Modo, grade e temporizador ─────────────────────────────────────────
+
+    private fun aplicarModo(novo: Modo) {
+        // Trocar de modo no meio de uma gravação deixaria o arquivo pela
+        // metade e o botão fora de sincronia com o estado real.
+        if (isRecording) return
+        cancelarContagem()
+
+        modo = novo
+        isVideoMode = novo == Modo.VIDEO
+
+        val ouro = ContextCompat.getColor(requireContext(), R.color.gold_primary)
+        val apagado = ContextCompat.getColor(requireContext(), R.color.text_dim)
+        listOf(
+            binding.modeFoto to (novo == Modo.FOTO),
+            binding.modeVideo to (novo == Modo.VIDEO),
+            binding.modePro to (novo == Modo.PRO)
+        ).forEach { (view, ativo) ->
+            view.setTextColor(if (ativo) ouro else apagado)
+            view.setTypeface(null, if (ativo) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
+        }
+
+        binding.tvModeBadge.text = when (novo) {
+            Modo.FOTO -> "FOTO"
+            Modo.VIDEO -> "VÍDEO"
+            Modo.PRO -> "PRO"
+        }
+        binding.proPanel.visibility = if (novo == Modo.PRO) View.VISIBLE else View.GONE
         binding.btnShutter.setImageResource(
             if (isVideoMode) R.drawable.ic_shutter_video else R.drawable.ic_shutter)
+
+        // O temporizador é de foto: em vídeo ele confundiria com o tempo de
+        // gravação, então volta pra OFF ao entrar no modo vídeo.
+        if (isVideoMode && temporizador != 0) {
+            temporizador = 0
+            binding.btnTimer.text = "OFF"
+        }
+        binding.btnTimer.visibility = if (isVideoMode) View.GONE else View.VISIBLE
+
+        // Vídeo e foto usam use cases diferentes, então precisam de rebind.
         bindCamera()
+    }
+
+    private fun alternarGrade() {
+        gradeLigada = !gradeLigada
+        binding.gridOverlay.visibility = if (gradeLigada) View.VISIBLE else View.GONE
+        binding.btnGrid.setBackgroundResource(
+            if (gradeLigada) R.drawable.bg_topbar_chip_on else R.drawable.bg_topbar_chip)
+        binding.btnGrid.imageTintList = ContextCompat.getColorStateList(
+            requireContext(),
+            if (gradeLigada) R.color.text_on_gold else R.color.text_primary)
+    }
+
+    private fun alternarTemporizador() {
+        temporizador = when (temporizador) {
+            0 -> 3
+            3 -> 10
+            else -> 0
+        }
+        binding.btnTimer.text = if (temporizador == 0) "OFF" else "${temporizador}s"
+        binding.btnTimer.setBackgroundResource(
+            if (temporizador == 0) R.drawable.bg_topbar_chip else R.drawable.bg_topbar_chip_on)
+        binding.btnTimer.setTextColor(ContextCompat.getColor(
+            requireContext(),
+            if (temporizador == 0) R.color.text_primary else R.color.text_on_gold))
+    }
+
+    // Disparo único do obturador, respeitando o temporizador.
+    //
+    // Vídeo ignora o temporizador de propósito (ver aplicarModo), e um toque
+    // durante a contagem CANCELA em vez de enfileirar um segundo disparo.
+    private fun dispararComTemporizador() {
+        if (isVideoMode) {
+            toggleRecording()
+            return
+        }
+        if (contagemEmCurso) {
+            cancelarContagem()
+            return
+        }
+        if (temporizador == 0) {
+            takePhoto()
+            return
+        }
+        contagemEmCurso = true
+        binding.tvCountdown.visibility = View.VISIBLE
+        contarRegressivo(temporizador)
+    }
+
+    private fun contarRegressivo(restante: Int) {
+        val b = _binding ?: return
+        if (restante <= 0) {
+            cancelarContagem()
+            takePhoto()
+            return
+        }
+        b.tvCountdown.text = restante.toString()
+        timerHandler.postDelayed({ contarRegressivo(restante - 1) }, 1000L)
+    }
+
+    private fun cancelarContagem() {
+        if (!contagemEmCurso) return
+        contagemEmCurso = false
+        timerHandler.removeCallbacksAndMessages(null)
+        _binding?.tvCountdown?.visibility = View.GONE
+        // removeCallbacksAndMessages derruba também o cronômetro de gravação,
+        // que compartilha este handler -- então ele volta se estiver gravando.
+        if (isRecording) timerHandler.post(timerRunnable)
     }
 
     // ── Foto ───────────────────────────────────────────────────────────────

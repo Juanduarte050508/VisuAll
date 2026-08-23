@@ -2,92 +2,177 @@
 <androidx.constraintlayout.widget.ConstraintLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
-    xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/root_layout"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/background">
 
     <!--
-        PreviewView com proporção dinâmica (4:3 ou 16:9, calculada em
-        CameraFragment a partir da resolução real da câmera).
-        Fica centralizada na faixa entre a barra de ícones do topo e a
-        fileira de modos (RETRATO/FOTO/VIDEO), em vez de flutuar do topo
-        até o fim da tela — isso evita que, em 16:9, a preview invada a
-        área dos controles inferiores.
+        ATENÇÃO ao mexer aqui: o CameraFragment ajusta a proporção da preview
+        com ConstraintSet.clone(root_layout), e o clone estoura com "All
+        children of ConstraintLayout must have ids" se QUALQUER filho direto
+        deste ConstraintLayout estiver sem id. Como isso roda no onViewCreated,
+        a falta de um id derruba o app na abertura. Toda view nova solta aqui
+        precisa de android:id.
     -->
+
+    <!-- ── Barra do topo ───────────────────────────────────────────────── -->
+
+    <ImageView
+        android:id="@+id/btn_flash"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:layout_marginStart="20dp"
+        android:layout_marginTop="12dp"
+        android:contentDescription="Flash"
+        android:padding="10dp"
+        android:src="@drawable/ic_flash_auto"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <!-- Proporção, temporizador e grade, centralizados entre o flash e o
+         botão do VisuAll. -->
+    <LinearLayout
+        android:id="@+id/top_chips"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
+
+        <TextView
+            android:id="@+id/btn_aspect_ratio"
+            android:layout_width="wrap_content"
+            android:layout_height="28dp"
+            android:layout_marginHorizontal="4dp"
+            android:background="@drawable/bg_topbar_chip"
+            android:contentDescription="Proporção da foto"
+            android:gravity="center"
+            android:minWidth="46dp"
+            android:paddingHorizontal="10dp"
+            android:text="4:3"
+            android:textColor="@color/text_primary"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/btn_timer"
+            android:layout_width="wrap_content"
+            android:layout_height="28dp"
+            android:layout_marginHorizontal="4dp"
+            android:background="@drawable/bg_topbar_chip"
+            android:contentDescription="Temporizador"
+            android:gravity="center"
+            android:minWidth="46dp"
+            android:paddingHorizontal="10dp"
+            android:text="OFF"
+            android:textColor="@color/text_primary"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <ImageView
+            android:id="@+id/btn_grid"
+            android:layout_width="34dp"
+            android:layout_height="28dp"
+            android:layout_marginHorizontal="4dp"
+            android:background="@drawable/bg_topbar_chip"
+            android:contentDescription="Grade de composição"
+            android:padding="6dp"
+            android:src="@drawable/ic_grid"
+            app:tint="@color/text_primary" />
+
+    </LinearLayout>
+
+    <!-- Porta de entrada das funcionalidades de acessibilidade do VisuAll.
+         Dourado preenchido de propósito: todo o resto da barra é escuro com
+         contorno, então este é o único elemento cheio e não se confunde com
+         os controles de câmera. -->
+    <ImageView
+        android:id="@+id/btn_visuall"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:layout_marginTop="12dp"
+        android:layout_marginEnd="20dp"
+        android:background="@drawable/bg_visuall_btn"
+        android:contentDescription="Abrir o modo Libras do VisuAll"
+        android:padding="9dp"
+        android:src="@drawable/ic_accessibility"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:tint="@color/text_on_gold" />
+
+    <!-- ── Preview ─────────────────────────────────────────────────────── -->
 
     <androidx.camera.view.PreviewView
         android:id="@+id/preview_view"
         android:layout_width="0dp"
         android:layout_height="0dp"
-
-        android:layout_marginTop="72dp"
-        android:layout_marginBottom="16dp"
-
-        app:scaleType="fillCenter"
-        app:layout_constraintTop_toTopOf="parent"
+        android:layout_marginTop="12dp"
+        android:layout_marginBottom="12dp"
         app:layout_constraintBottom_toTopOf="@id/modes_row"
+        app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent" />
+        app:layout_constraintTop_toBottomOf="@id/top_chips"
+        app:scaleType="fillCenter" />
 
-    <!--
-        Contorno sutil delimitando a área real de captura.
-
-        O android:id NÃO é decorativo aqui: o CameraFragment ajusta a
-        proporção da preview com ConstraintSet.clone(root), e o clone estoura
-        com "All children of ConstraintLayout must have ids to use
-        ConstraintSet" se QUALQUER filho direto deste ConstraintLayout estiver
-        sem id. Como isso roda no onViewCreated, a falta do id derrubava o app
-        na abertura. Toda view nova solta aqui precisa de id.
-    -->
     <View
         android:id="@+id/viewfinder_border"
         android:layout_width="0dp"
         android:layout_height="0dp"
         android:background="@drawable/bg_viewfinder_border"
-        app:layout_constraintTop_toTopOf="@id/preview_view"
         app:layout_constraintBottom_toBottomOf="@id/preview_view"
+        app:layout_constraintEnd_toEndOf="@id/preview_view"
         app:layout_constraintStart_toStartOf="@id/preview_view"
-        app:layout_constraintEnd_toEndOf="@id/preview_view" />
+        app:layout_constraintTop_toTopOf="@id/preview_view" />
 
-    <!-- Flash -->
-    <ImageView
-        android:id="@+id/btn_flash"
-        android:layout_width="44dp"
-        android:layout_height="44dp"
-        android:layout_marginStart="28dp"
-        android:layout_marginTop="16dp"
-        android:contentDescription="Flash"
-        android:padding="8dp"
-        android:src="@drawable/ic_flash_auto"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
+    <com.visuall.app.ui.GridOverlayView
+        android:id="@+id/grid_overlay"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="@id/preview_view"
+        app:layout_constraintEnd_toEndOf="@id/preview_view"
+        app:layout_constraintStart_toStartOf="@id/preview_view"
+        app:layout_constraintTop_toTopOf="@id/preview_view" />
 
-    <!-- Botão Aspect Ratio (topo direito) -->
     <TextView
-        android:id="@+id/btn_aspect_ratio"
-        android:layout_width="43dp"
-        android:layout_height="39dp"
-        android:layout_marginTop="16dp"
-        android:layout_marginEnd="24dp"
-        android:background="@drawable/bg_zoom"
-        android:contentDescription="Aspect Ratio"
-        android:gravity="center"
-        android:paddingHorizontal="10dp"
-        android:text="4:3"
-        android:textColor="@color/text_primary"
-        android:textSize="13sp"
+        android:id="@+id/tv_mode_badge"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_margin="10dp"
+        android:background="@drawable/bg_mode_badge"
+        android:paddingHorizontal="8dp"
+        android:paddingVertical="3dp"
+        android:text="FOTO"
+        android:textColor="@color/gold_primary"
+        android:textSize="10sp"
         android:textStyle="bold"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
+        app:layout_constraintStart_toStartOf="@id/preview_view"
+        app:layout_constraintTop_toTopOf="@id/preview_view" />
 
-    <!-- Timer gravação -->
+    <!-- Contagem regressiva do temporizador. -->
+    <TextView
+        android:id="@+id/tv_countdown"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="3"
+        android:textColor="@color/gold_primary"
+        android:textSize="72sp"
+        android:textStyle="bold"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="@id/preview_view"
+        app:layout_constraintEnd_toEndOf="@id/preview_view"
+        app:layout_constraintStart_toStartOf="@id/preview_view"
+        app:layout_constraintTop_toTopOf="@id/preview_view" />
+
     <TextView
         android:id="@+id/tv_timer"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="48dp"
+        android:layout_marginTop="10dp"
         android:background="@drawable/bg_live"
         android:paddingHorizontal="10dp"
         android:paddingVertical="4dp"
@@ -96,140 +181,210 @@
         android:textSize="12sp"
         android:textStyle="bold"
         android:visibility="gone"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent" />
+        app:layout_constraintEnd_toEndOf="@id/preview_view"
+        app:layout_constraintStart_toStartOf="@id/preview_view"
+        app:layout_constraintTop_toTopOf="@id/preview_view" />
 
-    <!-- Zoom -->
+    <!-- Exposição do modo PRO. Só aparece em PRO. -->
     <LinearLayout
-        android:id="@+id/zoom_container"
-        android:layout_width="39dp"
-        android:layout_height="201dp"
-        android:layout_marginEnd="14dp"
-        android:background="@drawable/bg_zoom"
-        android:gravity="center"
-        android:orientation="vertical"
-        android:paddingHorizontal="6dp"
-        android:paddingVertical="10dp"
-        app:layout_constraintBottom_toBottomOf="@id/preview_view"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintTop_toTopOf="@id/preview_view">
+        android:id="@+id/pro_panel"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="20dp"
+        android:layout_marginBottom="10dp"
+        android:background="@drawable/bg_zoom_bar"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="14dp"
+        android:paddingVertical="4dp"
+        android:visibility="gone"
+        app:layout_constraintBottom_toTopOf="@id/zoom_bar"
+        app:layout_constraintEnd_toEndOf="@id/preview_view"
+        app:layout_constraintStart_toStartOf="@id/preview_view">
 
         <TextView
-            android:id="@+id/tv_zoom_max"
-            android:layout_width="wrap_content"
+            android:id="@+id/tv_ev_label"
+            android:layout_width="62dp"
             android:layout_height="wrap_content"
-            android:text="10x"
+            android:text="EV 0,0"
             android:textColor="@color/gold_primary"
-            android:textSize="11sp"
+            android:textSize="12sp"
             android:textStyle="bold" />
 
-        <com.visuall.app.ui.VerticalZoomSlider
-            android:id="@+id/seek_zoom"
-            android:layout_width="34dp"
-            android:layout_height="121dp"
-            android:layout_marginVertical="8dp" />
-
-        <TextView
-            android:id="@+id/tv_zoom_min"
-            android:layout_width="wrap_content"
-            android:layout_height="17dp"
-            android:text="1x"
-            android:textColor="@color/text_primary"
-            android:textSize="11sp"
-            android:textStyle="bold" />
+        <SeekBar
+            android:id="@+id/seek_ev"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:contentDescription="Compensação de exposição" />
 
     </LinearLayout>
 
-    <!-- Modos -->
+    <!-- Chips de zoom. Quais aparecem depende do que a câmera suporta:
+         ver configurarChipsDeZoom no CameraFragment. -->
+    <LinearLayout
+        android:id="@+id/zoom_bar"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="14dp"
+        android:background="@drawable/bg_zoom_bar"
+        android:gravity="center"
+        android:orientation="horizontal"
+        android:padding="4dp"
+        app:layout_constraintBottom_toBottomOf="@id/preview_view"
+        app:layout_constraintEnd_toEndOf="@id/preview_view"
+        app:layout_constraintStart_toStartOf="@id/preview_view">
+
+        <TextView
+            android:id="@+id/chip_zoom_wide"
+            android:layout_width="wrap_content"
+            android:layout_height="32dp"
+            android:layout_marginHorizontal="2dp"
+            android:gravity="center"
+            android:minWidth="44dp"
+            android:paddingHorizontal="8dp"
+            android:text="0.6x"
+            android:textColor="@color/text_primary"
+            android:textSize="12sp"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/chip_zoom_1"
+            android:layout_width="wrap_content"
+            android:layout_height="32dp"
+            android:layout_marginHorizontal="2dp"
+            android:gravity="center"
+            android:minWidth="44dp"
+            android:paddingHorizontal="8dp"
+            android:text="1x"
+            android:textColor="@color/text_primary"
+            android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/chip_zoom_2"
+            android:layout_width="wrap_content"
+            android:layout_height="32dp"
+            android:layout_marginHorizontal="2dp"
+            android:gravity="center"
+            android:minWidth="44dp"
+            android:paddingHorizontal="8dp"
+            android:text="2x"
+            android:textColor="@color/text_primary"
+            android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/chip_zoom_5"
+            android:layout_width="wrap_content"
+            android:layout_height="32dp"
+            android:layout_marginHorizontal="2dp"
+            android:gravity="center"
+            android:minWidth="44dp"
+            android:paddingHorizontal="8dp"
+            android:text="5x"
+            android:textColor="@color/text_primary"
+            android:textSize="12sp" />
+
+    </LinearLayout>
+
+    <!-- ── Modos ───────────────────────────────────────────────────────── -->
+
     <LinearLayout
         android:id="@+id/modes_row"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="20dp"
-        android:orientation="horizontal"
+        android:layout_marginBottom="18dp"
         android:gravity="center_vertical"
+        android:orientation="horizontal"
         app:layout_constraintBottom_toTopOf="@id/controls_row"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent">
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent">
 
-        <TextView android:id="@+id/mode_retrato"
-            android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:layout_marginHorizontal="14dp" android:text="RETRATO"
-            android:textColor="@color/text_dim" android:textSize="12sp"
-            android:letterSpacing="0.05" android:paddingVertical="6dp" />
+        <TextView
+            android:id="@+id/mode_foto"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginHorizontal="16dp"
+            android:letterSpacing="0.05"
+            android:paddingVertical="6dp"
+            android:text="FOTO"
+            android:textColor="@color/gold_primary"
+            android:textSize="12sp"
+            android:textStyle="bold" />
 
-        <TextView android:id="@+id/mode_foto"
-            android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:layout_marginHorizontal="14dp" android:text="FOTO"
-            android:textColor="@color/gold_primary" android:textSize="12sp"
-            android:letterSpacing="0.05" android:paddingVertical="6dp" />
+        <TextView
+            android:id="@+id/mode_video"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginHorizontal="16dp"
+            android:letterSpacing="0.05"
+            android:paddingVertical="6dp"
+            android:text="VÍDEO"
+            android:textColor="@color/text_dim"
+            android:textSize="12sp" />
 
-        <TextView android:id="@+id/mode_video"
-            android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:layout_marginHorizontal="14dp" android:text="VIDEO"
-            android:textColor="@color/text_dim" android:textSize="12sp"
-            android:letterSpacing="0.05" android:paddingVertical="6dp" />
-
-        <ImageView android:id="@+id/btn_libras_mode"
-            android:layout_width="36dp" android:layout_height="36dp"
-            android:layout_marginHorizontal="10dp"
-            android:background="@drawable/vf_bg_action_btn"
-            android:contentDescription="Entrar no modo Libras"
-            android:padding="8dp"
-            android:src="@drawable/ic_accessibility"
-            app:tint="@color/gold_primary" />
+        <TextView
+            android:id="@+id/mode_pro"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginHorizontal="16dp"
+            android:letterSpacing="0.05"
+            android:paddingVertical="6dp"
+            android:text="PRO"
+            android:textColor="@color/text_dim"
+            android:textSize="12sp" />
 
     </LinearLayout>
+
+    <!-- ── Disparo ─────────────────────────────────────────────────────── -->
 
     <androidx.constraintlayout.widget.ConstraintLayout
         android:id="@+id/controls_row"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="40dp"
+        android:layout_marginBottom="32dp"
         android:paddingHorizontal="32dp"
         app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent">
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent">
 
         <ImageView
             android:id="@+id/btn_gallery"
             android:layout_width="54dp"
             android:layout_height="54dp"
-            android:src="@drawable/ic_gallery"
             android:background="@drawable/bg_gallery"
-            android:scaleType="centerCrop"
             android:clipToOutline="true"
             android:contentDescription="Galeria"
-            app:layout_constraintDimensionRatio="1:1"
-            app:layout_constraintTop_toTopOf="parent"
+            android:scaleType="centerCrop"
+            android:src="@drawable/ic_gallery"
             app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintDimensionRatio="1:1"
+            app:layout_constraintEnd_toStartOf="@id/shutter_container"
             app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintEnd_toStartOf="@id/shutter_container" />
+            app:layout_constraintTop_toTopOf="parent" />
 
         <FrameLayout
             android:id="@+id/shutter_container"
             android:layout_width="76dp"
             android:layout_height="76dp"
-            app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintEnd_toEndOf="parent">
+            app:layout_constraintTop_toTopOf="parent">
 
             <ImageView
                 android:id="@+id/btn_shutter"
                 android:layout_width="76dp"
                 android:layout_height="76dp"
                 android:layout_gravity="center"
-                android:src="@drawable/ic_shutter"
-                android:contentDescription="Capturar" />
+                android:contentDescription="Capturar"
+                android:src="@drawable/ic_shutter" />
 
         </FrameLayout>
 
         <ImageView
             android:id="@+id/btn_flip"
             android:layout_width="54dp"
-            android:layout_height="53dp"
+            android:layout_height="54dp"
             android:contentDescription="Girar câmera"
             android:padding="10dp"
             android:scaleType="centerInside"
