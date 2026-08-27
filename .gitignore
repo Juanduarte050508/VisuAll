@@ -26,3 +26,11 @@ mobile/local.properties
 # Gravacoes e backups do treino local (nao vao pro git)
 data/
 treino/modelos_anteriores/
+
+# APKs baixados do CI (artefato, nao fonte)
+apk_ci_download/
+
+# Cache de landmarks e bytecode dos scripts de diagnostico
+treino/diagnostico/__pycache__/
+treino/diagnostico/*.npz
+treino/diagnostico/*.npz.numpy2

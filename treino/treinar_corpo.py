@@ -148,6 +148,59 @@ def extrai_video(caminho, pose, hands):
     return quadros
 
 
+# Limiares da maquina de captura do app (LibrasAnalyzer.kt). Precisam ser os
+# MESMOS: e o trecho que o app entrega ao modelo que estamos ensinando.
+MOV_WINDOW, START_MOTION, END_MOTION = 5, 0.050, 0.030
+START_FRAMES, END_FRAMES, MIN_FRAMES, MAX_FRAMES = 3, 5, 10, 60
+
+
+def _movimento(buffer):
+    """bodyMotion() do app: desvio padrao das coordenadas x,y das MAOS."""
+    if len(buffer) < 3:
+        return 0.0
+    total, n = 0.0, 0
+    for ponto in range(N_POSE, N_PONTOS):
+        for coord in (0, 1):
+            total += float(np.std([q[ponto * 3 + coord] for q in buffer]))
+            n += 1
+    return total / n if n else 0.0
+
+
+def _tem_mao(frame):
+    return bool(np.any(frame[N_POSE * 3:]))
+
+
+def segmento_do_app(quadros):
+    """O trecho que a maquina de estado do app captura deste clipe (ou None).
+
+    O treino aprendia com o clipe INTEIRO, mas o app nunca ve o clipe inteiro:
+    ele comeca a gravar quando o movimento passa de START_MOTION e corta quando
+    cai. Medido, o descompasso custa caro -- o AJUDAR cai de 87% (clipe) para
+    44% (trecho do app). Treinar tambem com este recorte e o que fecha a
+    diferenca.
+    """
+    buffer, capturando, gesto = [], False, []
+    ini_cnt = fim_cnt = 0
+    for frame in quadros:
+        buffer.append(frame)
+        if len(buffer) > MOV_WINDOW:
+            buffer.pop(0)
+        mov = _movimento(buffer)
+        if not capturando:
+            if _tem_mao(frame) and len(buffer) >= MOV_WINDOW and mov > START_MOTION:
+                ini_cnt += 1
+                if ini_cnt >= START_FRAMES:
+                    capturando, gesto, fim_cnt = True, list(buffer), 0
+            else:
+                ini_cnt = 0
+        else:
+            gesto.append(frame)
+            fim_cnt = fim_cnt + 1 if mov < END_MOTION else 0
+            if fim_cnt >= END_FRAMES or len(gesto) >= MAX_FRAMES:
+                return gesto if len(gesto) >= MIN_FRAMES else None
+    return gesto if capturando and len(gesto) >= MIN_FRAMES else None
+
+
 def monta_dataset(recortes):
     """Le todos os clipes e devolve X [N, 30, 225] e y [N]."""
     import mediapipe as mp
@@ -186,6 +239,12 @@ def monta_dataset(recortes):
                     if b - a >= 10:
                         X.append(np.array(reamostra(quadros[a:b]), dtype=np.float32))
                         y.append(gesto)
+                # E o trecho que o app REALMENTE captura deste clipe. Sem ele,
+                # o modelo so ve clipes inteiros e erra no celular.
+                seg = segmento_do_app(quadros)
+                if seg is not None:
+                    X.append(np.array(reamostra(seg), dtype=np.float32))
+                    y.append(gesto)
             print("  %-12s %2d clipes -> %d amostras"
                   % (gesto, len(clipes), len(X) - antes))
     finally:
@@ -328,7 +387,9 @@ def valida(caminho, n_gestos):
 
 def main():
     ap = argparse.ArgumentParser(description="Treina o modelo de gestos corporais.")
-    ap.add_argument("--epocas", type=int, default=60)
+    ap.add_argument("--epocas", type=int, default=80)
+    ap.add_argument("--sem-ruido", action="store_true",
+                    help="desliga o aumento por ruido")
     ap.add_argument("--do-zero", action="store_true",
                     help="treina SÓ com os seus vídeos, deixando o app esquecer "
                          "os gestos que você não gravou")
@@ -340,7 +401,12 @@ def main():
         print("Não existe %s — grave no modo 'corpo' do Gravar.bat primeiro." % DATA)
         return 1
 
-    recortes = [(0.0, 1.0)] if args.sem_recortes else [(0.0, 1.0), (0.0, 0.9), (0.1, 1.0)]
+    # 7 recortes temporais em vez de 3: mais variacoes de onde o gesto comeca e
+    # termina, que e exatamente a variacao que a segmentacao do app introduz.
+    recortes = [(0.0, 1.0)] if args.sem_recortes else [
+        (0.0, 1.0), (0.0, 0.9), (0.1, 1.0), (0.05, 0.95),
+        (0.0, 0.8), (0.2, 1.0), (0.1, 0.9),
+    ]
 
     print("Lendo os clipes (isto demora: cada quadro passa por pose + 2 mãos)...")
     X, y, gestos = monta_dataset(recortes)
@@ -422,9 +488,24 @@ def main():
         X, y_idx, test_size=0.2, random_state=42,
         stratify=y_idx if minimo >= 5 else None)
 
+    # Ruido como aumento: 2 copias de cada amostra com perturbacao pequena.
+    # Impede o modelo de decorar as posicoes exatas dos clipes gravados, que
+    # nunca se repetem igual no celular.
+    if not args.sem_ruido:
+        copias = [X_tr] + [
+            X_tr + np.random.default_rng(sem).normal(0, 0.02, X_tr.shape).astype(np.float32)
+            for sem in (1, 2)
+        ]
+        X_tr = np.concatenate(copias)
+        y_tr = np.concatenate([y_tr, y_tr, y_tr])
+        print("  com ruido: %d amostras de treino" % len(X_tr))
+
+    # LSTM bidirecional: le o gesto do fim pro comeco tambem. Sinais corporais
+    # se distinguem tanto pelo desfecho quanto pelo inicio (COMPUTADOR x
+    # CONVERSAR), e a versao unidirecional confundia os dois.
     modelo = tf.keras.Sequential([
         tf.keras.layers.Input(shape=(JANELA, N_FEATURES)),
-        tf.keras.layers.LSTM(64),
+        tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(96)),
         tf.keras.layers.Dropout(0.25),
         tf.keras.layers.Dense(64, activation="relu"),
         tf.keras.layers.Dense(len(classes), activation="softmax"),
@@ -432,8 +513,13 @@ def main():
     modelo.compile(optimizer="adam", loss="sparse_categorical_crossentropy",
                    metrics=["accuracy"])
     print("\n  treinando LSTM (%d épocas)...\n" % args.epocas)
+    # Peso por classe: SURDO tem 53 clipes e CONVERSAR tem 22. Sem isto o
+    # modelo aprende a preferir quem tem mais exemplos.
+    contagem = np.bincount(y_tr, minlength=len(classes)).astype(np.float64)
+    peso = {i: (len(y_tr) / (len(classes) * c) if c else 0.0)
+            for i, c in enumerate(contagem)}
     modelo.fit(X_tr, y_tr, validation_data=(X_te, y_te),
-               epochs=args.epocas, batch_size=16, verbose=2)
+               epochs=args.epocas, batch_size=16, verbose=2, class_weight=peso)
 
     perda, acerto = modelo.evaluate(X_te, y_te, verbose=0)
     print("\n  acerto no teste: %.1f%%" % (acerto * 100))

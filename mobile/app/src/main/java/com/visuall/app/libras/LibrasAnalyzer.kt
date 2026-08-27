@@ -128,6 +128,14 @@ class LibrasAnalyzer(
         // depois do fim do movimento e não capturar a letra.
         const val MOVIMENTO_ENCERRAMENTO_MS = 400L
         const val TEMPO_PRA_LIMPAR       = 3_000L
+        // No modo corpo a referencia exige mais tempo (TEMPO_LIMPAR_CORPO =
+        // 5.0 em m01_visuall_config.py): um sinal de corpo dura muito mais que
+        // uma letra, entao 3s de palma aberta acontecem sem querer.
+        const val TEMPO_PRA_LIMPAR_CORPO = 5_000L
+        // Espera antes de a mao aberta poder limpar de novo. Sem ela, manter a
+        // palma aberta depois de limpar dispararia a cada quadro seguinte.
+        // Estava escrita como 2_000L solto em dois lugares diferentes.
+        const val ESPERA_ENTRE_LIMPEZAS_MS = 2_000L
         // Tempo mínimo com a MESMA letra reconhecida antes de comitar na
         // frase — em milissegundos, não em frames, pelo mesmo motivo do
         // MOVIMENTO_SUSTENTADO_MS acima. Dinâmicas são transitórias; exigir
@@ -151,7 +159,46 @@ class LibrasAnalyzer(
         // Valores de referência do pipeline Python (modo corpo):
         // LIMIAR_INICIO=0.050, LIMIAR_FIM=0.030, CONFIANCA_CORPO=0.85, cooldown 2s.
         const val BODY_START_MOTION      = 0.050f
+        // Baixado de 0.030 depois de MEDIR o movimento real de cada sinal nos
+        // 200 clipes gravados (treino/diagnostico/mede_movimento.py). O valor
+        // Abaixo daqui por BODY_END_FRAMES quadros seguidos, a captura
+        // encerra e o trecho vai pro modelo. 0.030 e o LIMIAR_FIM do pipeline
+        // Python de referencia (m01_visuall_config.py).
+        //
+        // Ja tentei 0.015 aqui, com o argumento de que o movimento mediano do
+        // AJUDAR e 0.0267 e portanto ele seria cortado no meio. Foi pior, e a
+        // medicao (treino/diagnostico/mede_parada.py) mostra por que: baixar o
+        // limiar nao faz a captura durar ate o fim do sinal, faz ela NUNCA
+        // encerrar sozinha e bater no teto de BODY_MAX_FRAMES. Corte limpo por
+        // parada, sobre os 200 clipes: 76% em 0.030 contra 65% em 0.015, e o
+        // COMPUTADOR caindo de 19/36 pra 13/36. No aparelho isso apareceu como
+        // "a palavra so e capturada quando eu comeco o proximo sinal" -- a
+        // janela entregue ao modelo pegava o fim de um sinal colado no comeco
+        // do outro, e a classificacao desabava pra CONVERSAR.
+        //
+        // Medianas medidas: AJUDAR 0.0267 | COMPUTADOR 0.0599 | CONVERSAR
+        // 0.0448 | PESSOA 0.0133 | SURDO 0.0106 | NEUTRO 0.0083.
+        //
+        // Este valor tem um gemeo em treino/treinar_corpo.py (END_MOTION). Os
+        // dois PRECISAM andar juntos: e o recorte que o modelo aprende a
+        // classificar. Mudar um sem o outro foi exatamente o erro acima.
         const val BODY_END_MOTION        = 0.030f
+        // Quanto a mao pode se AFASTAR do ponto onde parou e ainda contar
+        // como "parada no lugar", pra limpar a frase. Fracao do quadro (0..1).
+        //
+        // Rede de seguranca, NAO a trava principal. Quem impede um sinal de
+        // encher a barra e gestoEmAndamento (a captura esta gravando). Isto
+        // aqui so cobre o intervalo entre o movimento comecar e a captura
+        // engatar, e um sinal que nunca passe de BODY_START_MOTION.
+        //
+        // Ja foi 0.06 e era apertado demais: com 5s de mao levantada, a deriva
+        // natural passava disso, a contagem reiniciava e limpar ficou
+        // impossivel -- relatado como "a barra comeca a carregar e para".
+        const val LIMPAR_DESLOCAMENTO_MAXIMO = 0.15f
+        // Por quantos quadros a ultima posicao conhecida de uma mao e mantida
+        // quando o MediaPipe a perde. ~0.4s na taxa medida no aparelho (13
+        // quadros/s). Ver preencheMaoPerdida no BodyGestureEngine.
+        const val MAX_QUADROS_MAO_PERDIDA = 5
         const val BODY_START_FRAMES      = 3
         const val BODY_END_FRAMES        = 5
         const val BODY_MIN_FRAMES        = 10
@@ -290,6 +337,7 @@ class LibrasAnalyzer(
     // Os portões de estabilidade/cooldown que decidem se uma letra entra na
     // frase — ver LetterCommitGate.
     private val commitGate            = LetterCommitGate()
+    private val clearGate             = ClearGestureGate()
     private var tempoInicioEsticado   = 0L
     private var ultimoTempoLimpar     = 0L
     // A frase e as regras de como ela muda (repetição, sugestão, apagar) moram
@@ -509,6 +557,25 @@ class LibrasAnalyzer(
         }
     }
 
+    // A mao que conta pro gesto de limpar: a primeira ABERTA no quadro.
+    //
+    // Ja tentei "a primeira da lista" (a ordem do MediaPipe muda entre quadros)
+    // e depois "direita, senao esquerda", copiando o
+    // right_hand_landmarks or left_hand_landmarks da referencia. As duas estao
+    // erradas aqui, e a segunda foi pior: a referencia usa o Holistic, onde so
+    // existe UMA mao de cada lado, enquanto aqui as duas maos aparecem em 395
+    // de 463 quadros medidos no aparelho -- entao "direita" escolhia a mao
+    // parada ao lado do corpo e a mao aberta erguida nunca era testada.
+    // Resultado: aberta=true em 0 de 463 quadros, com o gesto sendo feito.
+    //
+    // Perguntar "alguma mao esta aberta?" e o que o gesto quer dizer, e nao
+    // depende de rotulo de lado -- que numa camera frontal espelhada nem
+    // corresponde a mao anatomica.
+    private fun maoAbertaNoQuadro(handResult: HandLandmarkerResult) =
+        handResult.landmarks().firstOrNull { hand ->
+            LibrasMath.detectarDedosEsticados(hand.map { Pair(it.x() * aspectX, it.y()) })
+        }
+
     private fun analisarCorpo(handResult: HandLandmarkerResult, poseResult: PoseLandmarkerResult) {
         onLandmarks(handsToArrays(handResult), poseToArray(poseResult), frameAspect)
         val bodyFrame = bodyEngine.extractFrame(handResult, poseResult, aspectX)
@@ -522,29 +589,52 @@ class LibrasAnalyzer(
             return
         }
 
-        // Gesto de limpar: mão toda aberta e parada por TEMPO_PRA_LIMPAR limpa
-        // a frase — o mesmo gesto do modo alfabeto (a barra vermelha mostra o
-        // progresso). Responde à dúvida "manter a mão aberta reseta as palavras".
-        val maoAberta = handResult.landmarks().firstOrNull()?.let { hand ->
-            LibrasMath.detectarDedosEsticados(hand.map { Pair(it.x() * aspectX, it.y()) })
-        } ?: false
-        if (maoAberta) {
-            if (tempoInicioEsticado == 0L) tempoInicioEsticado = agora
-            val progresso = ((agora - tempoInicioEsticado).toFloat() / TEMPO_PRA_LIMPAR)
-                .coerceIn(0f, 1f)
-            onGestoLimpar(progresso)
-            if ((agora - tempoInicioEsticado) >= TEMPO_PRA_LIMPAR &&
-                (agora - ultimoTempoLimpar) > 2_000L) {
-                sentence.limpar(); tempoInicioEsticado = 0L; ultimoTempoLimpar = agora
-                bodyEngine.limparTokens()
-                onFraseUpdate("")
-            }
+        // Movimento PRIMEIRO: o gesto de limpar precisa saber se a mão está
+        // parada, e essa informação vem da mesma janela que a captura usa.
+        bodyEngine.registrarMovimento(bodyFrame)
+
+        // Gesto de limpar: mão toda aberta E PARADA por TEMPO_PRA_LIMPAR limpa
+        // a frase (a barra vermelha mostra o progresso).
+        //
+        // A exigência de estar parada é o que conserta o AJUDAR. Antes só a
+        // abertura da mão era checada, apesar de o comentário aqui já dizer
+        // "e parada" — então um sinal feito de palma aberta caía no contador de
+        // limpar, o resetCapture() abaixo zerava a captura, e o gesto NUNCA
+        // chegava ao modelo. Relatado no aparelho exatamente assim: "AJUDAR não
+        // funciona, ele fica contando os segundos pra limpar o texto".
+        val mao = maoAbertaNoQuadro(handResult)
+        val maoAberta = mao != null
+        // Pulso (ponto 0): é o que menos se mexe quando só os dedos mudam de
+        // forma, então serve de referência estável de "a mão está neste lugar".
+        val pulso = mao?.firstOrNull()
+        // gestoEmAndamento e a trava principal: no AJUDAR a mao aberta e a de
+        // APOIO e mal sai do lugar, entao o deslocamento sozinho nao segurava a
+        // barra. Se a captura esta gravando, a pessoa esta sinalizando.
+        val limpeza = clearGate.avaliar(
+            maoAberta, pulso?.x() ?: 0f, pulso?.y() ?: 0f, agora,
+            gestoEmAndamento = bodyEngine.gestoEmAndamento
+        )
+        onGestoLimpar(limpeza.progresso)
+        if (limpeza.limpar) {
+            sentence.limpar()
+            bodyEngine.limparTokens()
+            onFraseUpdate("")
+        }
+        // NÃO interrompe a captura só porque a barra começou a encher. Foi o
+        // erro da primeira tentativa de consertar o AJUDAR: medindo os clipes,
+        // 70% dos quadros de AJUDAR ficam abaixo do limiar de "parado", então
+        // a barra engatilhava quase sempre e o return abortava a captura --
+        // pior que o bug original.
+        //
+        // Os dois não precisam se excluir: pra limpar é preciso a palma aberta
+        // e imóvel por 3s seguidos, e nessa condição o movimento fica abaixo
+        // de BODY_START_MOTION, então a captura não começa de qualquer jeito.
+        // Deixar os dois correrem em paralelo é o que permite um sinal de palma
+        // aberta ser classificado.
+        if (limpeza.limpar) {
             bodyEngine.resetCapture()
             notificarLetra("-", 0f, "corpo")
             return
-        } else {
-            tempoInicioEsticado = 0L
-            onGestoLimpar(0f)
         }
 
         val novaFrase = bodyEngine.processarFrame(bodyFrame, agora, ::notificarLetra, ::notificarFeedback)

@@ -43,6 +43,21 @@ internal class BodyGestureEngine(private val context: Context) {
     private val bodyMovementBuffer = ArrayDeque<FloatArray>()
     private val bodyGestureBuffer  = ArrayList<FloatArray>()
     private var bodyState          = BodyState.OCIOSO
+
+    // Verdadeiro enquanto um sinal esta sendo gravado. O gesto de limpar a
+    // frase (LibrasAnalyzer) consulta isto pra nao contar durante um sinal --
+    // ver ClearGestureGate. Vale a decisao do quadro anterior, porque quem
+    // pergunta decide antes de chamar processarFrame; um quadro de atraso nao
+    // muda nada diante dos 3s que a limpeza exige.
+    val gestoEmAndamento: Boolean
+        get() = bodyState == BodyState.CAPTURANDO
+
+    private var ultimoNormalizado: FloatArray? = null
+    // Ultima posicao conhecida de cada slot de mao, pra cobrir os quadros em
+    // que o MediaPipe perde a mao por um instante. Ver preencheMaoPerdida.
+    private val ultimaMao = arrayOfNulls<FloatArray>(2)
+    private val quadrosSemMao = intArrayOf(0, 0)
+    private var ultimoMovimento    = 0f
     private var bodyStartCount     = 0
     private var bodyEndCount       = 0
     private var ultimoTempoCorpo   = 0L
@@ -149,9 +164,29 @@ internal class BodyGestureEngine(private val context: Context) {
         handResult.landmarks().forEachIndexed { handIndex, landmarks ->
             val handedness = handResult.handedness().getOrNull(handIndex)
                 ?.firstOrNull()?.categoryName().orEmpty()
-            val offset = if (handedness.equals("Left", ignoreCase = true)) {
+            // ATENCAO: o rotulo vem INVERTIDO em relacao ao pipeline de treino.
+            //
+            // O treino extrai os landmarks com o MediaPipe Solutions (Python) e
+            // o app usa o MediaPipe Tasks. Medido na mesma cena, com a mao
+            // DIREITA sozinha erguida:
+            //    video (Solutions):  Left@esq   Right@dir
+            //    app   (Tasks):      Right@esq  Left@dir
+            // Coordenadas iguais, rotulos trocados. Sem esta inversao cada mao
+            // cai no slot da outra e o modelo recebe o gesto espelhado nas
+            // maos.
+            //
+            // So aparece num sinal de duas maos assimetrico: rodando os 200
+            // clipes com os slots trocados de proposito, COMPUTADOR vai de
+            // 32/32 pra 0/32 (29 viram CONVERSAR) enquanto PESSOA fica em
+            // 29/30 e SURDO em 30/37 -- exatamente o relato do aparelho, "so o
+            // COMPUTADOR nao sai, e sai CONVERSAR".
+            // Ver treino/diagnostico/testa_troca_maos.py.
+            //
+            // O desempate por avgX abaixo NAO se inverte: e coordenada, e as
+            // coordenadas ja concordam entre os dois lados.
+            val offset = if (handedness.equals("Right", ignoreCase = true)) {
                 LibrasAnalyzer.BODY_POSE_POINTS
-            } else if (handedness.equals("Right", ignoreCase = true)) {
+            } else if (handedness.equals("Left", ignoreCase = true)) {
                 LibrasAnalyzer.BODY_POSE_POINTS + LibrasAnalyzer.BODY_HAND_POINTS
             } else {
                 val avgX = landmarks.map { it.x() }.average()
@@ -169,7 +204,51 @@ internal class BodyGestureEngine(private val context: Context) {
             }
         }
 
-        return Frame(frame, hasHand, hasPose, hasLeftHand, hasRightHand)
+        val slotA = preencheMaoPerdida(frame, 0, LibrasAnalyzer.BODY_POSE_POINTS, hasLeftHand)
+        val slotB = preencheMaoPerdida(
+            frame, 1, LibrasAnalyzer.BODY_POSE_POINTS + LibrasAnalyzer.BODY_HAND_POINTS,
+            hasRightHand)
+        return Frame(frame, hasHand || slotA || slotB, hasPose, slotA, slotB)
+    }
+
+    // Quando o MediaPipe perde uma mao por alguns quadros, os 63 valores dela
+    // ficam em ZERO -- a mao "salta" pra origem e volta. Como bodyMotion() e o
+    // desvio padrao sobre uma janela de 5 quadros, esse salto vira um pico
+    // enorme de movimento que nao existe de verdade.
+    //
+    // Medido no aparelho com as maos PARADAS (treino/diagnostico, diag3):
+    // 81% dos quadros com movimento acima de 0.20 tinham mudanca no numero de
+    // maos detectadas na janela, contra 3% dos demais. O efeito pratico era a
+    // captura nunca encerrar (o movimento nao ficava 5 quadros abaixo do
+    // limiar de parada) e, por tabela, a barra de limpar nunca completar.
+    //
+    // Nos 16623 quadros dos videos de treino a contagem de maos NUNCA muda no
+    // meio de um clipe -- entao repetir a ultima posicao aproxima o app do que
+    // o modelo aprendeu, em vez de afastar.
+    //
+    // O limite existe pra nao deixar uma mao fantasma: se ela sumiu de verdade,
+    // depois de MAX_QUADROS_MAO_PERDIDA os zeros voltam.
+    private fun preencheMaoPerdida(
+        frame: FloatArray,
+        slot: Int,
+        pontoInicial: Int,
+        detectada: Boolean
+    ): Boolean {
+        val base = pontoInicial * 3
+        val tamanho = LibrasAnalyzer.BODY_HAND_POINTS * 3
+        if (detectada) {
+            ultimaMao[slot] = frame.copyOfRange(base, base + tamanho)
+            quadrosSemMao[slot] = 0
+            return true
+        }
+        val ultima = ultimaMao[slot] ?: return false
+        if (quadrosSemMao[slot] >= LibrasAnalyzer.MAX_QUADROS_MAO_PERDIDA) {
+            ultimaMao[slot] = null
+            return false
+        }
+        quadrosSemMao[slot]++
+        ultima.copyInto(frame, base)
+        return true
     }
 
     private fun writeBodyPoint(frame: FloatArray, pointIndex: Int, x: Float, y: Float, z: Float) {
@@ -177,6 +256,25 @@ internal class BodyGestureEngine(private val context: Context) {
         frame[base] = x
         frame[base + 1] = y
         frame[base + 2] = z
+    }
+
+    // Atualiza a janela de movimento com este quadro e devolve a magnitude
+    // atual. Precisa ser chamado UMA vez por quadro, antes de processarFrame.
+    //
+    // Existe porque o gesto de "limpar a frase" (decidido no LibrasAnalyzer)
+    // precisa saber se a mao esta parada, e essa decisao acontece antes de
+    // processarFrame. Sem isto, o limpar so conseguia olhar se a mao estava
+    // ABERTA -- e qualquer sinal feito de palma aberta, como AJUDAR, caia no
+    // contador de limpar e nunca chegava a ser classificado.
+    fun registrarMovimento(bodyFrame: Frame): Float {
+        val normalized = LibrasMath.normalizeBodyFrame(bodyFrame.points)
+        ultimoNormalizado = normalized
+        bodyMovementBuffer.addLast(normalized)
+        while (bodyMovementBuffer.size > LibrasAnalyzer.BODY_MOV_WINDOW) {
+            bodyMovementBuffer.removeFirst()
+        }
+        ultimoMovimento = bodyMotion()
+        return ultimoMovimento
     }
 
     private fun bodyMotion(): Float {
@@ -206,10 +304,11 @@ internal class BodyGestureEngine(private val context: Context) {
         onFeedback: (mensagem: String, nivel: Int) -> Unit
     ): String? {
         bodyNoHandSince = 0L
-        val normalized = LibrasMath.normalizeBodyFrame(bodyFrame.points)
-        bodyMovementBuffer.addLast(normalized)
-        while (bodyMovementBuffer.size > LibrasAnalyzer.BODY_MOV_WINDOW) bodyMovementBuffer.removeFirst()
-        val movimento = bodyMotion()
+        // A janela de movimento e o valor ja foram atualizados por
+        // registrarMovimento(), que o LibrasAnalyzer chama antes de decidir o
+        // gesto de limpar. Recalcular aqui contaria o mesmo quadro duas vezes.
+        val normalized = ultimoNormalizado ?: LibrasMath.normalizeBodyFrame(bodyFrame.points)
+        val movimento = ultimoMovimento
         var novaFrase: String? = null
 
         when (bodyState) {
@@ -305,6 +404,10 @@ internal class BodyGestureEngine(private val context: Context) {
     // Só zera a máquina de estado de captura (buffers/contadores) — chamado
     // toda vez que a mão está aberta ou quando não há corpo no quadro.
     fun resetCapture() {
+        ultimaMao[0] = null
+        ultimaMao[1] = null
+        quadrosSemMao[0] = 0
+        quadrosSemMao[1] = 0
         bodyState = BodyState.OCIOSO
         bodyStartCount = 0
         bodyEndCount = 0
