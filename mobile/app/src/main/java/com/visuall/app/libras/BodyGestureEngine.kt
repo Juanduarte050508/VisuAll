@@ -60,6 +60,7 @@ internal class BodyGestureEngine(private val context: Context) {
     private var ultimoMovimento    = 0f
     private var bodyStartCount     = 0
     private var bodyEndCount       = 0
+    private var capturaComecouEm   = 0L
     private var ultimoTempoCorpo   = 0L
     private var ultimaClasseCorpo  = ""
     private var bodyNoHandSince    = 0L
@@ -325,6 +326,7 @@ internal class BodyGestureEngine(private val context: Context) {
                     bodyStartCount++
                     if (bodyStartCount >= LibrasAnalyzer.BODY_START_FRAMES) {
                         bodyState = BodyState.CAPTURANDO
+                        capturaComecouEm = agora
                         bodyGestureBuffer.clear()
                         bodyGestureBuffer.addAll(bodyMovementBuffer)
                         bodyEndCount = 0
@@ -340,7 +342,8 @@ internal class BodyGestureEngine(private val context: Context) {
                 bodyEndCount = if (movimento < LibrasAnalyzer.BODY_END_MOTION) bodyEndCount + 1 else 0
 
                 if (bodyEndCount >= LibrasAnalyzer.BODY_END_FRAMES ||
-                    bodyGestureBuffer.size >= LibrasAnalyzer.BODY_MAX_FRAMES) {
+                    bodyGestureBuffer.size >= LibrasAnalyzer.BODY_MAX_FRAMES ||
+                    (agora - capturaComecouEm) >= LibrasAnalyzer.BODY_MAX_DURACAO_MS) {
                     val prediction = classify(bodyGestureBuffer)
                     bodyState = BodyState.OCIOSO
                     bodyStartCount = 0

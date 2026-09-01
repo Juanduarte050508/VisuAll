@@ -203,6 +203,16 @@ class LibrasAnalyzer(
         const val BODY_END_FRAMES        = 5
         const val BODY_MIN_FRAMES        = 10
         const val BODY_MAX_FRAMES        = 60
+        // Teto da captura em TEMPO, nao so em quadros.
+        //
+        // BODY_MAX_FRAMES vale 2,0s nos videos de treino, que tem 30 quadros/s.
+        // O aparelho roda a ~13 (medido: 60 quadros em 4,7s), entao la os
+        // mesmos 60 quadros deixavam a captura correr mais de 5 segundos --
+        // relatado como "o PESSOA demora muito pra confirmar a palavra", e com
+        // a janela pegando bem mais que o sinal. Cortar pelo tempo faz o teto
+        // significar a mesma coisa nos dois lados, seja qual for a taxa de
+        // quadros do aparelho.
+        const val BODY_MAX_DURACAO_MS    = 2_000L
         // De volta a 0.85, o valor do pipeline Python citado logo acima.
         // Tinha sido subido pra 0.90 junto com os limiares de mão, mas o modo
         // corpo não tem portão de margem (ver isReliable em BodyGestureEngine):
