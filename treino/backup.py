@@ -14,7 +14,11 @@ from datetime import datetime
 from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parents[1]
-PASTA_BACKUP = RAIZ / "modelos_anteriores"
+# Em treino/, nao na raiz: e o caminho que o .gitignore cobre e o que os
+# docstrings daqui e do restaurar.py sempre disseram. Estava caindo na raiz
+# porque RAIZ ja aponta pro repositorio -- e ali os backups ficavam FORA do
+# ignore, prontos pra entrar num commit por acidente.
+PASTA_BACKUP = RAIZ / "treino" / "modelos_anteriores"
 MANTER = 10          # backups mais antigos que isso sao descartados
 
 
