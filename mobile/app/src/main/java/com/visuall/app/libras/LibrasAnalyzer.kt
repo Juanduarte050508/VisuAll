@@ -112,6 +112,9 @@ class LibrasAnalyzer(
         // (MOVIMENTO_SUSTENTADO_MS) — uma tremida de 1 frame não basta, um
         // traço real de H/J/K/X/Z (que dura ~300-500ms) sim.
         const val LIMIAR_MOVIMENTO       = 0.30f
+        const val J_TRAJETO_X_MIN        = 0.18f
+        const val J_TRAJETO_Y_MIN        = 0.24f
+        const val J_TRAJETO_TOTAL_MIN    = 0.55f
         // Em MILISSEGUNDOS, não em frames (ver ESTAB_MIN_* abaixo pro mesmo
         // motivo): num aparelho que analisa poucos frames por segundo, uma
         // contagem em frames vira uma janela de tempo bem maior do que

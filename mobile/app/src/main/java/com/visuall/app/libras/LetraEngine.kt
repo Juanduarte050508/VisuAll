@@ -61,6 +61,7 @@ internal class LetraEngine(
     // movimento ainda estava sustentado. É ela que é reclassificada durante o
     // ENCERRANDO — ver escolherClassificacao. null = não há gesto recente.
     private var janelaCongelada: List<FloatArray>? = null
+    private var janelaCruaCongelada: List<FloatArray>? = null
 
     private data class ModeloIndividual(
         val label: String,
@@ -113,12 +114,14 @@ internal class LetraEngine(
     fun resetMovimentoSustentado() {
         movementGate.reset()
         janelaCongelada = null
+        janelaCruaCongelada = null
     }
 
     fun limparBuffer() {
         bufferLm.clear()
         bufferPontos.clear()
         janelaCongelada = null
+        janelaCruaCongelada = null
     }
 
     // Pipeline completo de um frame com mão detectada: normaliza, alimenta a
@@ -253,12 +256,15 @@ internal class LetraEngine(
         // no MovementGate, que é testável porque recebe o instante.
         when (movementGate.avaliar(movimento, System.currentTimeMillis())) {
             EstadoMovimento.SUSTENTADO -> {
-                if (bufferLm.size >= LibrasAnalyzer.JANELA_MLP) {
+                if (bufferLm.size >= LibrasAnalyzer.JANELA_MLP &&
+                    bufferPontos.size >= LibrasAnalyzer.JANELA_MLP) {
                     val janela = bufferLm.toList().takeLast(LibrasAnalyzer.JANELA_MLP)
+                    val janelaCrua = bufferPontos.toList().takeLast(LibrasAnalyzer.JANELA_MLP)
                     // Guardada a cada quadro: quando o movimento parar, esta é
                     // a última janela feita SÓ de quadros do gesto.
                     janelaCongelada = janela
-                    return classificarDinamico(janela)
+                    janelaCruaCongelada = janelaCrua
+                    return classificarDinamico(janela, janelaCrua)
                 }
             }
             EstadoMovimento.ENCERRANDO -> {
@@ -267,14 +273,20 @@ internal class LetraEngine(
                 // exatamente o que fazia a letra dinâmica se perder no fim do
                 // movimento. Reclassificamos a janela congelada, sempre a
                 // mesma, até a letra estabilizar e entrar na frase.
-                janelaCongelada?.let { return classificarDinamico(it) }
+                val janela = janelaCongelada
+                val janelaCrua = janelaCruaCongelada
+                if (janela != null && janelaCrua != null) {
+                    return classificarDinamico(janela, janelaCrua)
+                }
             }
             EstadoMovimento.PARADO -> {
                 if (janelaCongelada != null) {
                     janelaCongelada = null
+                    janelaCruaCongelada = null
                     // O rabicho do gesto que acabou não pode virar o começo da
                     // janela do próximo: a janela recomeça vazia.
                     bufferLm.clear()
+                    bufferPontos.clear()
                 }
             }
         }
@@ -345,7 +357,10 @@ internal class LetraEngine(
         return probs
     }
 
-    private fun classificarDinamico(janela: List<FloatArray>): Prediction {
+    private fun classificarDinamico(
+        janela: List<FloatArray>,
+        janelaCrua: List<FloatArray>
+    ): Prediction {
         val entrada = FloatArray(LibrasAnalyzer.FEATURES_DINAMICO)
         janela.forEachIndexed { i, frame ->
             frame.copyInto(entrada, i * LibrasAnalyzer.FEATURES_ESTATICO)
@@ -353,7 +368,16 @@ internal class LetraEngine(
         // mirrorLandmarks nega as posições pares, que na sequência concatenada
         // continuam sendo exatamente os x de cada quadro — espelhar os 420
         // valores de uma vez espelha a sequência inteira.
-        return comFallbackEspelhado(entrada, ::classificarDinamicoOrientado)
+        val direto = DynamicLetterMotion.filtrar(
+            classificarDinamicoOrientado(entrada),
+            janelaCrua
+        )
+        if (direto.letra != "-") return direto
+
+        return DynamicLetterMotion.filtrar(
+            classificarDinamicoOrientado(LibrasMath.mirrorLandmarks(entrada)),
+            janelaCrua
+        )
     }
 
     private fun classificarDinamicoOrientado(entrada: FloatArray): Prediction {
