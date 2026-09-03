@@ -8,22 +8,21 @@ on:
   push:
     branches: ["**"]
     paths:
-      - "treino/**"
-      - "linear/**"
-      - "modular/**"
-      - "requirements.txt"
+      - "computer/**"
+      - "mobile/app/src/main/assets/**"
       - ".github/workflows/python-training.yml"
   pull_request:
     paths:
-      - "treino/**"
-      - "linear/**"
-      - "modular/**"
-      - "requirements.txt"
+      - "computer/**"
+      - "mobile/app/src/main/assets/**"
       - ".github/workflows/python-training.yml"
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: computer
     steps:
       - uses: actions/checkout@v4
         with:
@@ -34,6 +33,7 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
+          cache-dependency-path: computer/requirements.txt
 
       # Instala o requirements.txt INTEIRO de propósito, mesmo sendo mais
       # lento: as versões de mediapipe/onnx/protobuf só brigam entre si num
@@ -60,7 +60,7 @@ jobs:
           detector = vision.HandLandmarker.create_from_options(
               vision.HandLandmarkerOptions(
                   base_options=BaseOptions(
-                      model_asset_path="mobile/app/src/main/assets/hand_landmarker.task"),
+                      model_asset_path="../mobile/app/src/main/assets/hand_landmarker.task"),
                   running_mode=vision.RunningMode.IMAGE,
                   num_hands=1,
               )

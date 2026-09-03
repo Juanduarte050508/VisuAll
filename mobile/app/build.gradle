@@ -55,13 +55,13 @@ android {
     }
 }
 
-// O LandmarkContractTest le tests/fixtures/landmark_contract.json (fora do
-// modulo, compartilhado com os testes Python). Sem declarar isso como entrada,
+// O LandmarkContractTest le computer/tests/fixtures/landmark_contract.json
+// (fora do modulo, compartilhado com os testes Python). Sem declarar isso como entrada,
 // o Gradle considera o teste "atualizado" quando so as fixtures mudam e nao
 // roda de novo -- ou seja, o contrato poderia sair de sincronia sem ninguem
 // perceber, que e exatamente o que esse teste existe pra evitar.
 tasks.withType(Test).configureEach {
-    inputs.file(rootProject.file('../tests/fixtures/landmark_contract.json'))
+    inputs.file(rootProject.file('../computer/tests/fixtures/landmark_contract.json'))
         .withPropertyName('landmarkContractFixtures')
         .withPathSensitivity(PathSensitivity.RELATIVE)
 }

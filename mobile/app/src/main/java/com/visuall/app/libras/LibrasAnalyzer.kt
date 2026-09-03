@@ -85,7 +85,7 @@ class LibrasAnalyzer(
         const val MARGEM_DINAMICA_MINIMA = 0.32f
         // Usado só pelos modelos INDIVIDUAIS (um classificador binário "é
         // esta letra ou não" por letra, treinado pela ferramenta em
-        // treino/). Diferente do modelo geral (multiclasse, softmax
+        // computer/treino/). Diferente do modelo geral (multiclasse, softmax
         // sobre TODAS as letras reais), um binário nunca viu "mão se
         // mexendo sem sinalizar nada" como exemplo negativo — só viu outras
         // letras reais. Isso o deixa mais propenso a "confiante" demais
@@ -172,14 +172,14 @@ class LibrasAnalyzer(
         // LIMIAR_INICIO=0.050, LIMIAR_FIM=0.030, CONFIANCA_CORPO=0.85, cooldown 2s.
         const val BODY_START_MOTION      = 0.050f
         // Baixado de 0.030 depois de MEDIR o movimento real de cada sinal nos
-        // 200 clipes gravados (treino/diagnostico/mede_movimento.py). O valor
+        // 200 clipes gravados (computer/treino/diagnostico/mede_movimento.py). O valor
         // Abaixo daqui por BODY_END_FRAMES quadros seguidos, a captura
         // encerra e o trecho vai pro modelo. 0.030 e o LIMIAR_FIM do pipeline
         // Python de referencia (m01_visuall_config.py).
         //
         // Ja tentei 0.015 aqui, com o argumento de que o movimento mediano do
         // AJUDAR e 0.0267 e portanto ele seria cortado no meio. Foi pior, e a
-        // medicao (treino/diagnostico/mede_parada.py) mostra por que: baixar o
+        // medicao (computer/treino/diagnostico/mede_parada.py) mostra por que: baixar o
         // limiar nao faz a captura durar ate o fim do sinal, faz ela NUNCA
         // encerrar sozinha e bater no teto de BODY_MAX_FRAMES. Corte limpo por
         // parada, sobre os 200 clipes: 76% em 0.030 contra 65% em 0.015, e o
@@ -191,7 +191,7 @@ class LibrasAnalyzer(
         // Medianas medidas: AJUDAR 0.0267 | COMPUTADOR 0.0599 | CONVERSAR
         // 0.0448 | PESSOA 0.0133 | SURDO 0.0106 | NEUTRO 0.0083.
         //
-        // Este valor tem um gemeo em treino/treinar_corpo.py (END_MOTION). Os
+        // Este valor tem um gemeo em computer/treino/treinar_corpo.py (END_MOTION). Os
         // dois PRECISAM andar juntos: e o recorte que o modelo aprende a
         // classificar. Mudar um sem o outro foi exatamente o erro acima.
         const val BODY_END_MOTION        = 0.030f

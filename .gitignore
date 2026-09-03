@@ -1,16 +1,15 @@
-# Models & datasets (too large for Git - upload via GitHub Releases)
+# Models & datasets generated locally
 *.pkl
 *.h5
 *.npz
 *.npy
+!computer/models/*.pkl
 
 # Python
 __pycache__/
 *.pyc
 .venv/
 venv/
-
-# Local training inputs/outputs
 
 # System
 .env
@@ -24,13 +23,21 @@ Thumbs.db
 mobile/local.properties
 
 # Gravacoes e backups do treino local (nao vao pro git)
-data/
-treino/modelos_anteriores/
+computer/data/
+computer/treino/modelos_anteriores/
 
 # APKs baixados do CI (artefato, nao fonte)
 apk_ci_download/
 
+# App Android gerado localmente (pesado e recriavel).
+# Nao congela o app: codigo e assets em mobile/app/src/main continuam versionados.
+*.apk
+*.aab
+mobile/app/build/
+mobile/build/
+
 # Cache de landmarks e bytecode dos scripts de diagnostico
-treino/diagnostico/__pycache__/
-treino/diagnostico/*.npz
-treino/diagnostico/*.npz.numpy2
+computer/treino/diagnostico/__pycache__/
+computer/treino/diagnostico/*.npz
+computer/treino/diagnostico/*.npz.numpy2
+computer/models/legacy/

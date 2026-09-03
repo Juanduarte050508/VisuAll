@@ -13,6 +13,16 @@ Formato: **Constante(s)** — valor atual — decisão e por quê — status.
 
 ## Não lançado
 
+- **Repositorio dividido em `mobile/` e `computer/`** — o app Android ficou
+  isolado em `mobile/`; backend de PC, scripts de treino, fixtures e modelos
+  Python foram agrupados em `computer/`. Caminhos de CI, scripts e testes foram
+  repontados para essa nova estrutura. Status: **ativo**.
+
+- **APK/AAB gerados ficaram fora do Git** — `*.apk`, `*.aab` e builds Android
+  locais agora sao ignorados. Isso nao congela o aplicativo: codigo, assets e
+  modelos usados em `mobile/app/src/main` continuam versionados; o binario e
+  recriado a partir da branch atual. Status: **ativo**.
+
 - **`normaliza_corpo` fixado em float32 em toda operação** — a função misturava
   `np.float32` com float comum do Python (`/ 2.0`, `float(np.sqrt(...))`), e o
   resultado disso **depende da versão do numpy**: no 1.x um escalar `np.float32`

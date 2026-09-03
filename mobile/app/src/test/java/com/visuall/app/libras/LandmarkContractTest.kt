@@ -8,9 +8,9 @@ import org.junit.Test
 import java.io.File
 
 /**
- * Trava o lado Kotlin no contrato de tests/fixtures/landmark_contract.json.
+ * Trava o lado Kotlin no contrato de computer/tests/fixtures/landmark_contract.json.
  *
- * O gêmeo deste arquivo é treino/tests/test_landmark_contract.py, que
+ * O gêmeo deste arquivo é computer/treino/tests/test_landmark_contract.py, que
  * roda os MESMOS casos contra a implementação Python usada no treino.
  * Enquanto os dois passarem, o modelo é treinado e usado com os dados
  * preparados exatamente do mesmo jeito.
@@ -36,13 +36,13 @@ class LandmarkContractTest {
         val raiz = System.getProperty("user.dir") ?: "."
         var dir: File? = File(raiz)
         while (dir != null) {
-            val candidato = File(dir, "tests/fixtures/landmark_contract.json")
+            val candidato = File(dir, "computer/tests/fixtures/landmark_contract.json")
             if (candidato.isFile) return candidato
             dir = dir.parentFile
         }
         throw IllegalStateException(
-            "tests/fixtures/landmark_contract.json não encontrado a partir de $raiz" +
-                " — rode 'python tests/gerar_fixtures_contrato.py' na raiz do repo."
+            "computer/tests/fixtures/landmark_contract.json não encontrado a partir de $raiz" +
+                " — rode 'python tests/gerar_fixtures_contrato.py' dentro de computer."
         )
     }
 

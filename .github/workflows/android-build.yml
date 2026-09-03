@@ -10,10 +10,12 @@ on:
     branches: ["**"]
     paths:
       - "mobile/**"
+      - "computer/tests/fixtures/**"
       - ".github/workflows/android-build.yml"
   pull_request:
     paths:
       - "mobile/**"
+      - "computer/tests/fixtures/**"
       - ".github/workflows/android-build.yml"
 
 jobs:

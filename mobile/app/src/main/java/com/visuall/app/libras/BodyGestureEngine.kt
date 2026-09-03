@@ -181,7 +181,7 @@ internal class BodyGestureEngine(private val context: Context) {
             // 32/32 pra 0/32 (29 viram CONVERSAR) enquanto PESSOA fica em
             // 29/30 e SURDO em 30/37 -- exatamente o relato do aparelho, "so o
             // COMPUTADOR nao sai, e sai CONVERSAR".
-            // Ver treino/diagnostico/testa_troca_maos.py.
+            // Ver computer/treino/diagnostico/testa_troca_maos.py.
             //
             // O desempate por avgX abaixo NAO se inverte: e coordenada, e as
             // coordenadas ja concordam entre os dois lados.
@@ -217,7 +217,7 @@ internal class BodyGestureEngine(private val context: Context) {
     // desvio padrao sobre uma janela de 5 quadros, esse salto vira um pico
     // enorme de movimento que nao existe de verdade.
     //
-    // Medido no aparelho com as maos PARADAS (treino/diagnostico, diag3):
+    // Medido no aparelho com as maos PARADAS (computer/treino/diagnostico, diag3):
     // 81% dos quadros com movimento acima de 0.20 tinham mudanca no numero de
     // maos detectadas na janela, contra 3% dos demais. O efeito pratico era a
     // captura nunca encerrar (o movimento nao ficava 5 quadros abaixo do

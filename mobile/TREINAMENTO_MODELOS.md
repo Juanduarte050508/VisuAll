@@ -1,7 +1,7 @@
 # Treinamento dos modelos
 
 > Pra gravar amostras novas com a webcam e treinar sem mexer em código, veja
-> `treino/README.md` na raiz do repo. Este arquivo aqui documenta o
+> `computer/treino/README.md` na raiz do repo. Este arquivo aqui documenta o
 > formato/requisitos dos modelos em si.
 
 Este app usa dois tipos de reconhecimento:
@@ -21,8 +21,7 @@ app/src/main/assets/letras_dinamicas/geral/labels.txt
 (além do modelo "geral" acima, `LetraEngine.kt` também pode carregar modelos
 individuais por letra em `letras_estaticas/<LETRA>/` e
 `letras_dinamicas/<LETRA>/` — usados antes do geral quando existem, ver
-`treino/README.md`. O fallback pra `letras_dinamicas/parcial/` existia
-mas foi removido no commit `1f33768`; aquela pasta nao e mais lida.)
+`computer/treino/README.md`.)
 
 ## 1. Coletar amostras no celular
 

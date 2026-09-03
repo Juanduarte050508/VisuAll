@@ -11,7 +11,7 @@ internal object PhraseOutput {
      * Acrescenta "?" ao texto exibido quando o marcador de sobrancelha está
      * ativo, sem mexer na frase armazenada.
      *
-     * Porta de montar_exibicao (linear/backend/app.py). O "?" é só apresentação:
+     * Porta de montar_exibicao (computer/linear/backend/app.py). O "?" é só apresentação:
      * a frase guardada continua sem ele, senão apagar uma letra deixaria o "?"
      * preso no meio do texto.
      */
