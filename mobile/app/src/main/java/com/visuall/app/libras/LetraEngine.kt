@@ -47,6 +47,7 @@ internal class LetraEngine(
     private val trainingStore = CalibrationTrainingStore(context, labelsEstatico, labelsDinamico)
 
     private val bufferLm          = ArrayDeque<FloatArray>()
+    private val bufferPontos      = ArrayDeque<FloatArray>()
     private val calibrationLock   = Any()
     private val calibrationBuffer = ArrayList<FloatArray>()
     @Volatile private var calibrationTarget: String? = null
@@ -116,6 +117,7 @@ internal class LetraEngine(
 
     fun limparBuffer() {
         bufferLm.clear()
+        bufferPontos.clear()
         janelaCongelada = null
     }
 
@@ -124,9 +126,12 @@ internal class LetraEngine(
     // classifica (estático, dinâmico ou calibração pessoal) e emite o
     // feedback textual correspondente.
     fun process(pontos: List<Pair<Float, Float>>): Prediction {
+        val pontosCrus = pontosParaArray(pontos)
         val dados = LibrasMath.normalizeLandmarks(pontos)
         captureCalibrationFrame(dados)
+        bufferPontos.addLast(pontosCrus)
         bufferLm.addLast(dados)
+        while (bufferPontos.size > LibrasAnalyzer.JANELA_MLP + 5) bufferPontos.removeFirst()
         while (bufferLm.size > LibrasAnalyzer.JANELA_MLP + 5) bufferLm.removeFirst()
 
         val movimento = calcularMovimento()
@@ -192,11 +197,55 @@ internal class LetraEngine(
         return Prediction(match.letter, confianca, "calibrado")
     }
 
-    private fun calcularMovimento(): Float {
+    private fun pontosParaArray(pontos: List<Pair<Float, Float>>): FloatArray {
+        val arr = FloatArray(pontos.size * 2)
+        pontos.forEachIndexed { index, ponto ->
+            arr[index * 2] = ponto.first
+            arr[index * 2 + 1] = ponto.second
+        }
+        return arr
+    }
+
+    private fun calcularMovimento(): Float =
+        maxOf(calcularMovimentoForma(), calcularMovimentoCru())
+
+    private fun calcularMovimentoForma(): Float {
         if (bufferLm.size < 5) return 0f
         val recent = bufferLm.toList().takeLast(5)
         return LibrasMath.std(recent.map { it[2] }) + LibrasMath.std(recent.map { it[3] }) +
                LibrasMath.std(recent.map { it[16] }) + LibrasMath.std(recent.map { it[17] })
+    }
+
+    private fun calcularMovimentoCru(): Float {
+        if (bufferPontos.size < 5) return 0f
+        val recent = bufferPontos.toList().takeLast(5)
+        val escalas = recent.mapNotNull { escalaDaMaoCrua(it).takeIf { escala -> escala > 0f } }
+        if (escalas.isEmpty()) return 0f
+        val escala = escalas.average().toFloat()
+        // Movimento do pulso captura translação da mão inteira. As pontas dos
+        // dedos cobrem gestos em que a mão fica quase no lugar, mas a ponta
+        // desenha a trajetória. Isso só abre o portão dinâmico; o ONNX recebe
+        // a mesma janela normalizada de antes.
+        return maxOf(
+            movimentoPontoCru(recent, 0, escala),
+            movimentoPontoCru(recent, 8, escala),
+            movimentoPontoCru(recent, 20, escala)
+        )
+    }
+
+    private fun escalaDaMaoCrua(frame: FloatArray): Float {
+        if (frame.size <= 19) return 0f
+        val dx = frame[18] - frame[0]
+        val dy = frame[19] - frame[1]
+        return kotlin.math.sqrt(dx * dx + dy * dy)
+            .takeIf { it > LibrasMath.ESCALA_MINIMA_MAO } ?: 0f
+    }
+
+    private fun movimentoPontoCru(frames: List<FloatArray>, ponto: Int, escala: Float): Float {
+        val base = ponto * 2
+        if (frames.any { it.size <= base + 1 } || escala <= 0f) return 0f
+        return (LibrasMath.std(frames.map { it[base] }) +
+            LibrasMath.std(frames.map { it[base + 1] })) / escala
     }
 
     private fun escolherClassificacao(dados: FloatArray, movimento: Float): Prediction {

@@ -25,12 +25,10 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
-import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 
-import androidx.appcompat.app.AlertDialog
 import android.util.Size
 import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.core.CameraSelector
@@ -48,9 +46,6 @@ import androidx.navigation.fragment.findNavController
 import com.visuall.app.R
 import com.visuall.app.databinding.FragmentLibrasBinding
 import com.visuall.app.ui.ScanFrameView
-import org.json.JSONArray
-import org.json.JSONObject
-import java.text.Normalizer
 import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -95,24 +90,6 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
     private var ultimaLetraChip = ""
     private var linhasAtivas = true
     private var modoAtual = LibrasAnalyzer.Modo.ALFABETO
-    private val palavrasSugeridas = listOf(
-        "ajuda", "ajudar", "agua", "amigo", "amanha", "aprender", "aqui",
-        "banheiro", "bom", "boa", "casa", "comida", "computador", "conversa",
-        "conversar", "desculpa", "dor", "escola", "estou", "familia", "feliz",
-        "hoje", "jovi", "libras", "mae", "medico", "nao", "obrigado", "obrigada",
-        "oi", "onde", "pai", "pessoa", "por favor", "preciso", "professor",
-        "quero", "responder", "sim", "surdo", "tudo", "voce", "voltar"
-    )
-    private val sugestoesContextuais = mapOf(
-        "bom" to listOf("dia"),
-        "boa" to listOf("tarde", "noite"),
-        "por" to listOf("favor"),
-        "eu" to listOf("preciso", "quero", "estou"),
-        "voce" to listOf("pode", "quer", "entendeu"),
-        "preciso" to listOf("ajuda", "agua", "medico"),
-        "quero" to listOf("comida", "agua", "conversar")
-    )
-
     private val speechLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -287,6 +264,7 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         // muito menos latência no MediaPipe/ONNX.
         val analysisBuilder = ImageAnalysis.Builder()
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+            .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
             .setResolutionSelector(resolutionSelector)
             .setTargetRotation(targetRotation)
 
@@ -319,6 +297,7 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
                     .also { p -> p.setSurfaceProvider(binding.previewView.surfaceProvider) }
                 val fallbackAnalysis = ImageAnalysis.Builder()
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                    .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
                     .setTargetRotation(targetRotation)
                     .build()
                 provider.bindToLifecycle(viewLifecycleOwner, selector, fallbackPreview, fallbackAnalysis)
@@ -820,10 +799,8 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
                 binding.progressConfidence.visibility = View.VISIBLE
                 binding.progressConfidence.progress = porcentagem
 
-                binding.progressConfidence.progressTintList =
-                    ColorStateList.valueOf(confidenceColor(confianca))
-                binding.progressConfidence.progressBackgroundTintList =
-                    ColorStateList.valueOf(0x33242424)
+                binding.progressConfidence.progressTintList = confidenceTint(confianca)
+                binding.progressConfidence.progressBackgroundTintList = TINT_CONFIANCA_FUNDO
             } else {
                 ultimaLetraChip = ""
                 binding.chipResult.visibility = View.INVISIBLE
@@ -833,15 +810,12 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         }
     }
 
-    private fun confidenceColor(confianca: Float): Int {
-        val ctx = requireContext()
-        return when {
-            confianca >= 0.92f -> ContextCompat.getColor(ctx, R.color.gold_light)
-            confianca >= 0.84f -> ContextCompat.getColor(ctx, R.color.gold_primary)
-            else -> 0xFF8E6A26.toInt()
-
+    private fun confidenceTint(confianca: Float): ColorStateList =
+        when {
+            confianca >= 0.92f -> TINT_CONFIANCA_ALTA
+            confianca >= 0.84f -> TINT_CONFIANCA_MEDIA
+            else -> TINT_CONFIANCA_BAIXA
         }
-    }
 
     private fun onFeedback(mensagem: String, nivel: Int) {
         activity?.runOnUiThread {

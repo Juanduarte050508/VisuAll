@@ -8,6 +8,7 @@ import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import com.google.mediapipe.framework.image.BitmapImageBuilder
+import com.google.mediapipe.tasks.components.containers.NormalizedLandmark
 import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.core.Delegate
 import com.google.mediapipe.tasks.vision.core.RunningMode
@@ -15,6 +16,7 @@ import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker.HandLandmarkerOptions
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarkerResult
 import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarkerResult
+import java.util.Locale
 
 // Orquestrador do reconhecimento Libras: cada frame da câmera passa por
 // aqui, mas a inteligência de cada modo vive num módulo dedicado —
@@ -136,6 +138,7 @@ class LibrasAnalyzer(
         // palma aberta depois de limpar dispararia a cada quadro seguinte.
         // Estava escrita como 2_000L solto em dois lugares diferentes.
         const val ESPERA_ENTRE_LIMPEZAS_MS = 2_000L
+        const val PERF_LOG_INTERVAL_MS  = 2_000L
         // Tempo mínimo com a MESMA letra reconhecida antes de comitar na
         // frase — em milissegundos, não em frames, pelo mesmo motivo do
         // MOVIMENTO_SUSTENTADO_MS acima. Dinâmicas são transitórias; exigir
@@ -146,6 +149,12 @@ class LibrasAnalyzer(
         const val COOLDOWN_DINAMICO      = 700L
         const val COOLDOWN_ESTATICO      = 1_100L
         const val NO_HAND_TOLERANCE      = 3
+        // No modo alfabeto o modelo recebe UMA mao, mas o MediaPipe pode
+        // devolver duas. A ordem dessa lista nao e um contrato estavel; se a
+        // segunda mao entra no quadro, result.landmarks()[0] pode trocar de
+        // uma mao para outra e o classificador passa a ver outro sinal. Este
+        // limite conserva a mao anterior quando o pulso dela continua perto.
+        const val ALFABETO_TROCA_MAO_MAX = 0.22f
         const val FEATURES_ESTATICO      = 42
         const val FEATURES_DINAMICO      = 420
         const val BODY_POSE_POINTS       = 33
@@ -265,7 +274,9 @@ class LibrasAnalyzer(
         CORPO
     }
 
-    private val handLandmarker: HandLandmarker
+    private val handLandmarkerAlfabeto: HandLandmarker
+    private var handLandmarkerCorpo: HandLandmarker? = null
+    private var handLandmarkerCorpoIndisponivel = false
     // onLetra/onFeedback passam por notificarLetra/notificarFeedback (abaixo)
     // em vez de serem chamados direto — os dois seriam disparados a CADA
     // frame analisado (mão parada no mesmo sinal, corpo ocioso esperando
@@ -309,12 +320,12 @@ class LibrasAnalyzer(
     // bater com o treino. Câmera traseira não é espelhada por natureza.
     @Volatile private var espelharImagem = true
 
-    private fun handOptions(delegate: Delegate) = HandLandmarkerOptions.builder()
+    private fun handOptions(delegate: Delegate, numHands: Int) = HandLandmarkerOptions.builder()
         .setBaseOptions(BaseOptions.builder()
             .setModelAssetPath("hand_landmarker.task")
             .setDelegate(delegate)
             .build())
-        .setNumHands(2)
+        .setNumHands(numHands)
         // Reduzido de 0.5 → 0.4: facilita a detecção inicial da mão,
         // principalmente em ângulos ou iluminação menos ideais.
         .setMinHandDetectionConfidence(0.4f)
@@ -327,7 +338,7 @@ class LibrasAnalyzer(
         .setRunningMode(RunningMode.VIDEO)
         .build()
 
-    init {
+    private fun criarHandLandmarker(numHands: Int): HandLandmarker {
         // GPU costuma ser bem mais rápido que CPU pra esses modelos de
         // landmark, mas nem todo aparelho/driver aceita o delegate (falha na
         // hora de montar o grafo, não durante a inferência — é assim que o
@@ -336,11 +347,38 @@ class LibrasAnalyzer(
         // é obrigatório (sem ele não tem reconhecimento nenhum), então mesmo
         // a tentativa em CPU pode falhar — mesmo comportamento de antes desta
         // mudança nesse caso extremo.
-        handLandmarker = try {
-            HandLandmarker.createFromOptions(context, handOptions(Delegate.GPU))
+        return try {
+            HandLandmarker.createFromOptions(context, handOptions(Delegate.GPU, numHands))
         } catch (e: Throwable) {
-            android.util.Log.w("LibrasAnalyzer", "GPU indisponivel pro HandLandmarker, usando CPU", e)
-            HandLandmarker.createFromOptions(context, handOptions(Delegate.CPU))
+            android.util.Log.w(
+                "LibrasAnalyzer",
+                "GPU indisponivel pro HandLandmarker($numHands mao(s)), usando CPU",
+                e
+            )
+            HandLandmarker.createFromOptions(context, handOptions(Delegate.CPU, numHands))
+        }
+    }
+
+    init {
+        // O alfabeto usa uma mao. No modo corpo, o detector de 2 maos e
+        // carregado sob demanda para nao pagar esse custo em toda abertura do
+        // modo Libras.
+        handLandmarkerAlfabeto = criarHandLandmarker(numHands = 1)
+    }
+
+    private fun handLandmarkerAtual(): HandLandmarker {
+        if (modoAtual != Modo.CORPO) return handLandmarkerAlfabeto
+        if (handLandmarkerCorpoIndisponivel) return handLandmarkerAlfabeto
+        return handLandmarkerCorpo ?: try {
+            criarHandLandmarker(numHands = 2).also { handLandmarkerCorpo = it }
+        } catch (error: Throwable) {
+            handLandmarkerCorpoIndisponivel = true
+            android.util.Log.w(
+                "LibrasAnalyzer",
+                "HandLandmarker de 2 maos indisponivel; usando detector de 1 mao",
+                error
+            )
+            handLandmarkerAlfabeto
         }
     }
 
@@ -363,6 +401,20 @@ class LibrasAnalyzer(
     private var aspectX               = 0.5625f
     // Proporção real (largura/altura) do frame analisado, repassada ao overlay.
     private var frameAspect           = 0.75f
+    private var temMaoAlfabetoSelecionada = false
+    private var maoAlfabetoX          = 0f
+    private var maoAlfabetoY          = 0f
+    private var perfInicioMs          = SystemClock.uptimeMillis()
+    private var perfFrames            = 0
+    private var perfSemMao            = 0
+    private var perfMultimaos         = 0
+    private var perfTotalNs           = 0L
+    private var perfMaxFrameNs        = 0L
+    private var perfHandNs            = 0L
+    private var perfFaceNs            = 0L
+    private var perfPoseNs            = 0L
+    private var perfLetraNs           = 0L
+    private var perfCorpoNs           = 0L
 
     // Campos de estado do reconhecimento de letra que precisam ser zerados
     // juntos sempre que a mão some do quadro ou o modo troca — extraído para
@@ -371,6 +423,7 @@ class LibrasAnalyzer(
         commitGate.reset()
         sentence.limparPendente()
         letraEngine.resetMovimentoSustentado()
+        temMaoAlfabetoSelecionada = false
         // Sem isso, tirar a mão do quadro e voltar a fazer O MESMO sinal (ex.:
         // "A" a 87%) seria filtrado pelo dedup de notificarLetra por parecer
         // idêntico ao último valor notificado antes da mão sumir — mesmo o
@@ -391,6 +444,8 @@ class LibrasAnalyzer(
     override fun analyze(imageProxy: ImageProxy) {
       // rawBitmap/preparedBitmap precisam existir fora do try para o finally
       // poder reciclá-los (variável declarada dentro do try não é visível lá).
+      val frameStartNs = SystemClock.elapsedRealtimeNanos()
+      var handCount = -1
       var rawBitmap: Bitmap? = null
       var preparedBitmap: Bitmap? = null
       try {
@@ -411,12 +466,17 @@ class LibrasAnalyzer(
         aspectX = 0.75f * frameAspect
 
         val timestamp = nextVideoTimestamp()
-        val result = handLandmarker.detectForVideo(mpImage, timestamp)
+        val handStartNs = SystemClock.elapsedRealtimeNanos()
+        val result = handLandmarkerAtual().detectForVideo(mpImage, timestamp)
+        perfHandNs += SystemClock.elapsedRealtimeNanos() - handStartNs
+        handCount = result.landmarks().size
 
         // Rosto roda nos DOIS modos, igual ao Holistic do Python ("Em AMBOS
         // os modos o ROSTO entra como marcador não-manual") — ver
         // FaceMarkerEngine para o throttle de frames e o porte do ler_marcador.
+        val faceStartNs = SystemClock.elapsedRealtimeNanos()
         faceEngine.step(mpImage, timestamp, onInterrogativo)
+        perfFaceNs += SystemClock.elapsedRealtimeNanos() - faceStartNs
 
         if (modoAtual == Modo.CORPO) {
             val poseDetector = bodyEngine.ensureLoaded()
@@ -434,8 +494,15 @@ class LibrasAnalyzer(
                 )
                 return
             }
+            val poseStartNs = SystemClock.elapsedRealtimeNanos()
             val poseResult = poseDetector.detectForVideo(mpImage, timestamp)
-            analisarCorpo(result, poseResult)
+            perfPoseNs += SystemClock.elapsedRealtimeNanos() - poseStartNs
+            val corpoStartNs = SystemClock.elapsedRealtimeNanos()
+            try {
+                analisarCorpo(result, poseResult)
+            } finally {
+                perfCorpoNs += SystemClock.elapsedRealtimeNanos() - corpoStartNs
+            }
             return
         }
 
@@ -457,7 +524,7 @@ class LibrasAnalyzer(
 
         framesSemMao = 0
         onLandmarks(handsToArrays(result), null, frameAspect)
-        val lms    = result.landmarks()[0]
+        val lms = selecionarMaoAlfabeto(result) ?: return
         // x corrigido para 4:3 (features + geometria); o desenho usa o cru.
         val pontos = lms.map { Pair(it.x() * aspectX, it.y()) }
         val dedicosEsticados = LibrasMath.detectarDedosEsticados(pontos)
@@ -480,7 +547,9 @@ class LibrasAnalyzer(
             tempoInicioEsticado = 0L
             onGestoLimpar(0f)
 
+            val letraStartNs = SystemClock.elapsedRealtimeNanos()
             val predicao = letraEngine.process(pontos)
+            perfLetraNs += SystemClock.elapsedRealtimeNanos() - letraStartNs
             val letra = predicao.letra
             val confianca = predicao.confianca
             val modo = predicao.modo
@@ -510,6 +579,7 @@ class LibrasAnalyzer(
         notificarLetra("-", 0f, modoAtual.name.lowercase())
         notificarFeedback("ERRO NO RECONHECIMENTO", FEEDBACK_ALERTA)
       } finally {
+        registrarPerf(frameStartNs, handCount)
         if (rawBitmap !== preparedBitmap) rawBitmap?.recycle()
         preparedBitmap?.recycle()
         imageProxy.close()
@@ -565,6 +635,111 @@ class LibrasAnalyzer(
         return FloatArray(p.size * 2).also { arr ->
             p.forEachIndexed { i, lm -> arr[i * 2] = lm.x(); arr[i * 2 + 1] = lm.y() }
         }
+    }
+
+    private fun registrarPerf(frameStartNs: Long, handCount: Int) {
+        val frameNs = SystemClock.elapsedRealtimeNanos() - frameStartNs
+        perfFrames++
+        perfTotalNs += frameNs
+        if (frameNs > perfMaxFrameNs) perfMaxFrameNs = frameNs
+        if (handCount == 0) perfSemMao++
+        if (handCount > 1) perfMultimaos++
+
+        val agora = SystemClock.uptimeMillis()
+        val duracaoMs = agora - perfInicioMs
+        if (duracaoMs < PERF_LOG_INTERVAL_MS) return
+
+        val fps = perfFrames * 1000f / duracaoMs.coerceAtLeast(1L)
+        android.util.Log.i(
+            "LibrasPerf",
+            "modo=$modoAtual fps=${perfFmt(fps)} " +
+                "frame=${perfFmt(perfMediaMs(perfTotalNs))}ms " +
+                "max=${perfFmt(perfNsMs(perfMaxFrameNs))}ms " +
+                "hand=${perfFmt(perfMediaMs(perfHandNs))}ms " +
+                "face=${perfFmt(perfMediaMs(perfFaceNs))}ms " +
+                "pose=${perfFmt(perfMediaMs(perfPoseNs))}ms " +
+                "letra=${perfFmt(perfMediaMs(perfLetraNs))}ms " +
+                "corpo=${perfFmt(perfMediaMs(perfCorpoNs))}ms " +
+                "semMao=$perfSemMao/$perfFrames multimaos=$perfMultimaos/$perfFrames"
+        )
+        perfInicioMs = agora
+        perfFrames = 0
+        perfSemMao = 0
+        perfMultimaos = 0
+        perfTotalNs = 0L
+        perfMaxFrameNs = 0L
+        perfHandNs = 0L
+        perfFaceNs = 0L
+        perfPoseNs = 0L
+        perfLetraNs = 0L
+        perfCorpoNs = 0L
+    }
+
+    private fun perfMediaMs(totalNs: Long): Float =
+        perfNsMs(totalNs) / perfFrames.coerceAtLeast(1)
+
+    private fun perfNsMs(ns: Long): Float = ns / 1_000_000f
+
+    private fun perfFmt(value: Float): String =
+        String.format(Locale.US, "%.1f", value)
+
+    private fun selecionarMaoAlfabeto(
+        result: HandLandmarkerResult
+    ): List<NormalizedLandmark>? {
+        val maos = result.landmarks().filter { it.size >= BODY_HAND_POINTS }
+        if (maos.isEmpty()) return null
+
+        val escolhida = if (temMaoAlfabetoSelecionada) {
+            val maisProxima = maos.minByOrNull { distanciaPulsoSelecionado2(it) }
+            val limite2 = ALFABETO_TROCA_MAO_MAX * ALFABETO_TROCA_MAO_MAX
+            if (maisProxima != null && distanciaPulsoSelecionado2(maisProxima) <= limite2) {
+                maisProxima
+            } else {
+                maoMaisForte(maos)
+            }
+        } else {
+            maoMaisForte(maos)
+        }
+
+        escolhida?.let { memorizarMaoAlfabeto(it) }
+        return escolhida
+    }
+
+    private fun maoMaisForte(
+        maos: List<List<NormalizedLandmark>>
+    ): List<NormalizedLandmark>? =
+        maos.maxByOrNull { areaMao(it) }
+
+    private fun areaMao(mao: List<NormalizedLandmark>): Float {
+        var minX = Float.MAX_VALUE
+        var maxX = -Float.MAX_VALUE
+        var minY = Float.MAX_VALUE
+        var maxY = -Float.MAX_VALUE
+        mao.forEach { lm ->
+            val x = lm.x() * aspectX
+            val y = lm.y()
+            if (x < minX) minX = x
+            if (x > maxX) maxX = x
+            if (y < minY) minY = y
+            if (y > maxY) maxY = y
+        }
+        val largura = (maxX - minX).coerceAtLeast(0f)
+        val altura = (maxY - minY).coerceAtLeast(0f)
+        return largura * altura
+    }
+
+    private fun distanciaPulsoSelecionado2(mao: List<NormalizedLandmark>): Float {
+        val pulso = mao.firstOrNull() ?: return Float.MAX_VALUE
+        val dx = pulso.x() * aspectX - maoAlfabetoX
+        val dy = pulso.y() - maoAlfabetoY
+        return dx * dx + dy * dy
+    }
+
+    private fun memorizarMaoAlfabeto(mao: List<NormalizedLandmark>) {
+        val pulso = mao.firstOrNull() ?: return
+        maoAlfabetoX = pulso.x() * aspectX
+        maoAlfabetoY = pulso.y()
+        temMaoAlfabetoSelecionada = true
     }
 
     // A mao que conta pro gesto de limpar: a primeira ABERTA no quadro.
@@ -737,8 +912,11 @@ class LibrasAnalyzer(
     fun getFrase(): String = sentence.frase
 
     fun close() {
-        runCatching { handLandmarker.close() }
-            .onFailure { android.util.Log.w("LibrasAnalyzer", "Falha ao fechar HandLandmarker", it) }
+        runCatching { handLandmarkerAlfabeto.close() }
+            .onFailure { android.util.Log.w("LibrasAnalyzer", "Falha ao fechar HandLandmarker alfabeto", it) }
+        runCatching { handLandmarkerCorpo?.close() }
+            .onFailure { android.util.Log.w("LibrasAnalyzer", "Falha ao fechar HandLandmarker corpo", it) }
+        handLandmarkerCorpo = null
         runCatching { letraEngine.close() }
             .onFailure { android.util.Log.w("LibrasAnalyzer", "Falha ao fechar LetraEngine", it) }
         runCatching { bodyEngine.close() }
