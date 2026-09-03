@@ -13,6 +13,46 @@ Formato: **Constante(s)** — valor atual — decisão e por quê — status.
 
 ## Não lançado
 
+- **`TEMPO_HOLD_LIMPAR_MS`** — 3000 ms — a lixeira fazia o contrário do que se
+  espera dela: um toque limpava a frase inteira e o toque longo é que apagava
+  uma letra. Errar o alvo custava a frase toda. Agora toque apaga a última
+  letra/sinal e segurar 3 s limpa tudo, com a `progress_clear` enchendo durante
+  o hold — a mesma barra que o gesto de mão aberta já usa. O tempo é menor que o
+  daquele gesto (`TEMPO_PRA_LIMPAR_CORPO`, 5 s), onde a espera longa existe pra
+  não confundir limpeza com sinal sendo feito; no botão não há essa dúvida. O
+  hold é cronometrado à mão
+  (`setOnTouchListener` + `postDelayed`) porque o toque longo do Android dispara
+  em ~500 ms e não há API pra alongar esse valor. Status: **ativo**.
+
+- **Sugestão de palavras removida** — o `WordSuggestionEngine` propunha palavras
+  a cada letra reconhecida, competindo com a leitura da própria frase justamente
+  enquanto ela estava sendo escrita. Saíram o motor, a linha de botões nos dois
+  layouts (retrato e paisagem), `LibrasAnalyzer.aplicarSugestao` e
+  `SentenceBuilder.aplicarSugestao` — nada de meio-termo, pra não sobrar caminho
+  morto que volte a aparecer. A `phrase_bubble` foi reancorada em `modes_row`
+  (retrato) e `action_row` (paisagem), que era onde a linha removida se
+  ancorava. Status: **ativo**.
+
+- **`PhraseOutput.textoParaVoz`** — o TextToSpeech normaliza o texto que recebe
+  e expande abreviação por conta própria: soletrar A-V e fechar a palavra saía
+  falado como "avenida", "R" virava "rua", "KM" virava "quilômetro". Quem
+  soletra em Libras está escrevendo LETRAS, então nada pode dar margem pro motor
+  adivinhar palavra que a pessoa não escreveu. A regra agora tem três degraus:
+  letra sozinha vira o nome dela ("V" → "vê"); palavra que está na lista de
+  abreviações é soletrada; qualquer outra é falada em minúsculas — a caixa alta
+  é o que faz o motor tratar o token como sigla. Status: **corrigido**.
+
+- **Ícone adaptativo virou vetor** — o `ic_launcher_foreground` era PNG com a
+  arte inteira, o nome "VisuAll" e o fundo preto chapado embutidos, nos tamanhos
+  do ícone LEGADO (48 a 192 px). Um foreground adaptativo é desenhado num canvas
+  de 108 dp do qual o launcher mostra os 72 dp centrais: os PNGs eram esticados,
+  o texto saía cortado pela máscara e o preto opaco na camada da frente anulava
+  o `ic_launcher_background`. Agora é `drawable/ic_launcher_foreground.xml`,
+  vetor transparente e sem texto, com a marca dentro dos 66 dp garantidos, mais
+  uma camada `monochrome` pro ícone temático do Android 13+. A espiral virou
+  íris cheia (traço fino empasta a 48 dp) e a seta virou sobrancelha — saindo da
+  amêndoa, ela fazia o conjunto ler como o símbolo de Marte. Status: **ativo**.
+
 - **Repositorio dividido em `mobile/` e `computer/`** — o app Android ficou
   isolado em `mobile/`; backend de PC, scripts de treino, fixtures e modelos
   Python foram agrupados em `computer/`. Caminhos de CI, scripts e testes foram

@@ -391,7 +391,7 @@ class LibrasAnalyzer(
     private val clearGate             = ClearGestureGate()
     private var tempoInicioEsticado   = 0L
     private var ultimoTempoLimpar     = 0L
-    // A frase e as regras de como ela muda (repetição, sugestão, apagar) moram
+    // A frase e as regras de como ela muda (repetição, apagar) moram
     // no SentenceBuilder, que é testável em JVM.
     private val sentence              = SentenceBuilder()
     private var framesSemMao          = 0
@@ -870,13 +870,6 @@ class LibrasAnalyzer(
     // pra não haver duas versões do alfabeto podendo divergir.
     fun labelsAlfabeto(): List<String> = letraEngine.labelsAlfabeto
     fun labelsDinamicas(): Set<String> = letraEngine.labelsDinamicasSet
-
-    fun aplicarSugestao(palavra: String) {
-        if (!sentence.aplicarSugestao(palavra)) return
-        commitGate.reset()
-        onRepeticaoPendente(null)
-        onFraseUpdate(sentence.frase)
-    }
 
     fun adicionarEspaco() {
         sentence.adicionarEspaco()

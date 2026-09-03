@@ -1,6 +1,7 @@
 package com.visuall.app.libras
 
 import android.Manifest
+import android.animation.ValueAnimator
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Context
@@ -19,13 +20,13 @@ import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CaptureRequest
 import android.util.Log
 import android.util.Range
+import android.view.MotionEvent
 import android.view.Surface
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
-import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 
@@ -61,6 +62,13 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         val TINT_CONFIANCA_MEDIA = ColorStateList.valueOf(0xFFE8A020.toInt())
         val TINT_CONFIANCA_BAIXA = ColorStateList.valueOf(0xFF8E6A26.toInt())
         val TINT_CONFIANCA_FUNDO = ColorStateList.valueOf(0x33242424)
+
+        // Quanto tempo o dedo precisa ficar na lixeira pra limpar a frase
+        // inteira. Mais curto que o gesto de mao aberta
+        // (LibrasAnalyzer.TEMPO_PRA_LIMPAR_CORPO, 5s): ali o tempo longo existe
+        // pra nao confundir com um sinal sendo feito, e aqui nao ha essa
+        // duvida -- o dedo esta no botao de proposito.
+        const val TEMPO_HOLD_LIMPAR_MS = 3_000L
     }
 
     private var _binding: FragmentLibrasBinding? = null
@@ -90,6 +98,12 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
     private var ultimaLetraChip = ""
     private var linhasAtivas = true
     private var modoAtual = LibrasAnalyzer.Modo.ALFABETO
+
+    // Hold da lixeira: animador da barra de progresso e a trava que impede o
+    // ACTION_UP de apagar uma letra depois de a limpeza ja ter disparado (ou
+    // depois de o dedo sair de cima do botao).
+    private var holdAnimator: ValueAnimator? = null
+    private var toqueLixeiraConsumido = false
     private val speechLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -174,6 +188,14 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         } else {
             root.post(bindRunnable)
         }
+    }
+
+    // Dispara quando o dedo completa TEMPO_HOLD_LIMPAR_MS sobre a lixeira.
+    private val limparTudoRunnable = Runnable {
+        toqueLixeiraConsumido = true
+        librasAnalyzer?.limparFrase()
+        vibrateConfirmation()
+        pararProgressoHold()
     }
 
     private val bindRunnable = Runnable {
@@ -489,7 +511,6 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         binding.progressClear.visibility = View.GONE
         binding.replyBubble.visibility = View.GONE
         binding.phraseBubble.visibility = View.GONE
-        binding.suggestionsRow.visibility = View.GONE
         binding.replyPanel.visibility = View.GONE
     }
 
@@ -570,10 +591,6 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
             clearReply()
         }
 
-        binding.btnSuggestion1.setOnClickListener { applySuggestionFrom(binding.btnSuggestion1) }
-        binding.btnSuggestion2.setOnClickListener { applySuggestionFrom(binding.btnSuggestion2) }
-        binding.btnSuggestion3.setOnClickListener { applySuggestionFrom(binding.btnSuggestion3) }
-
         binding.btnConfirmLetter.setOnClickListener {
             librasAnalyzer?.repetirLetraPendente()
         }
@@ -622,13 +639,53 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
             scheduleBindCamera(180L)
         }
 
-        // Toque: limpa a frase inteira (a lixeira zera tudo de uma vez).
-        // Toque longo: apaga só a última letra/sinal, para quem quer corrigir.
+        // Toque: apaga só a última letra/sinal. Segurar 3s: limpa a frase toda.
+        //
+        // O toque longo do Android dispara em ~500ms e não existe API pra
+        // alongar isso, então o hold é cronometrado aqui: o ACTION_DOWN agenda
+        // a limpeza pra daqui a TEMPO_HOLD_LIMPAR_MS e a barra progress_clear
+        // enche nesse intervalo — o mesmo retorno visual que o gesto de mão
+        // aberta já dá. Soltar antes cancela o agendamento e vale como toque.
         binding.btnDeleteLetter.setOnClickListener {
-            librasAnalyzer?.limparFrase()
-        }
-        binding.btnDeleteLetter.setOnLongClickListener {
             librasAnalyzer?.apagarUltima()
+        }
+        binding.btnDeleteLetter.setOnTouchListener { view, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    view.isPressed = true
+                    toqueLixeiraConsumido = false
+                    iniciarProgressoHold()
+                    view.postDelayed(limparTudoRunnable, TEMPO_HOLD_LIMPAR_MS)
+                }
+
+                // Dedo arrastou pra fora: desiste do hold sem apagar nada. Sem
+                // isso a limpeza dispararia mesmo com o dedo longe do botão,
+                // já que o toque continua sendo entregue a esta view.
+                MotionEvent.ACTION_MOVE -> {
+                    val dentro = event.x >= 0f && event.y >= 0f &&
+                        event.x <= view.width && event.y <= view.height
+                    if (!dentro && !toqueLixeiraConsumido) {
+                        toqueLixeiraConsumido = true
+                        view.isPressed = false
+                        cancelarHoldLimpar(view)
+                    }
+                }
+
+                MotionEvent.ACTION_UP -> {
+                    view.isPressed = false
+                    cancelarHoldLimpar(view)
+                    // performClick em vez de chamar apagarUltima direto: mantém
+                    // o caminho de acessibilidade, que ativa a view por clique.
+                    if (!toqueLixeiraConsumido) view.performClick()
+                }
+
+                MotionEvent.ACTION_CANCEL -> {
+                    view.isPressed = false
+                    cancelarHoldLimpar(view)
+                }
+
+                else -> return@setOnTouchListener false
+            }
             true
         }
 
@@ -664,36 +721,32 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         binding.btnModeBody.alpha = 1f
     }
 
-    private fun updateWordSuggestions(frase: String) {
-        if (modoAtual != LibrasAnalyzer.Modo.ALFABETO) {
-            hideSuggestions()
-            return
-        }
+    // ── Hold da lixeira ────────────────────────────────────────────────────
 
-        val sugestoes = WordSuggestionEngine.sugerir(frase)
-
-        val botoes = listOf(binding.btnSuggestion1, binding.btnSuggestion2, binding.btnSuggestion3)
-        botoes.forEachIndexed { index, botao ->
-            val palavra = sugestoes.getOrNull(index)
-            botao.text = palavra.orEmpty()
-            botao.tag = palavra
-            botao.isVisible = palavra != null
-        }
-        binding.suggestionsRow.isVisible = sugestoes.isNotEmpty()
-    }
-
-    private fun hideSuggestions() {
-        binding.suggestionsRow.isVisible = false
-        listOf(binding.btnSuggestion1, binding.btnSuggestion2, binding.btnSuggestion3).forEach { botao ->
-            botao.text = ""
-            botao.tag = null
+    /** Enche progress_clear ao longo dos 3s, pra o hold ter fim visível. */
+    private fun iniciarProgressoHold() {
+        holdAnimator?.cancel()
+        val barra = _binding?.progressClear ?: return
+        barra.progress = 0
+        barra.isVisible = true
+        holdAnimator = ValueAnimator.ofInt(0, 100).apply {
+            duration = TEMPO_HOLD_LIMPAR_MS
+            addUpdateListener { anim ->
+                _binding?.progressClear?.progress = anim.animatedValue as Int
+            }
+            start()
         }
     }
 
-    private fun applySuggestionFrom(botao: TextView) {
-        val palavra = botao.tag as? String ?: return
-        librasAnalyzer?.aplicarSugestao(palavra)
-        hideSuggestions()
+    private fun pararProgressoHold() {
+        holdAnimator?.cancel()
+        holdAnimator = null
+        _binding?.progressClear?.isVisible = false
+    }
+
+    private fun cancelarHoldLimpar(view: View) {
+        view.removeCallbacks(limparTudoRunnable)
+        pararProgressoHold()
     }
 
     private fun startSpeechReply() {
@@ -851,16 +904,17 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
             fraseBase = frase
             if (isLandscapeHudCompact()) {
                 binding.phraseBubble.isVisible = false
-                hideSuggestions()
                 fraseAnterior = frase
                 return@runOnUiThread
             }
             binding.tvPhrase.text = fraseExibida()
             binding.phraseBubble.isVisible = frase.isNotBlank()
-            updateWordSuggestions(frase)
 
-            // TTS: fala o que acabou de entrar (regra e casos em PhraseOutput).
-            val fala = PhraseOutput.trechoParaFalar(frase, fraseAnterior)
+            // TTS: fala o que acabou de entrar. O trecho e a pronúncia dele
+            // são decididos no PhraseOutput — textoParaVoz é o que garante que
+            // o motor de voz não leia "AV" como "avenida".
+            val trecho = PhraseOutput.trechoParaFalar(frase, fraseAnterior)
+            val fala = PhraseOutput.textoParaVoz(trecho)
             if (frase.length > fraseAnterior.length) {
                 if (fala.isNotBlank()) {
                     tts?.speak(fala, TextToSpeech.QUEUE_FLUSH, null, null)
@@ -918,6 +972,9 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
     private fun onGestoLimpar(progresso: Float) {
         activity?.runOnUiThread {
             if (_binding == null) return@runOnUiThread
+            // Um hold na lixeira está usando a mesma barra: não deixa o gesto
+            // de mão aberta sobrescrever o progresso dele.
+            if (holdAnimator != null) return@runOnUiThread
             binding.progressClear.isVisible = progresso > 0f
             binding.progressClear.progress  = (progresso * 100).toInt()
             if (progresso == 0f) {
@@ -987,6 +1044,9 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
     override fun onDestroyView() {
         super.onDestroyView()
         landscapeHud = null
+        _binding?.btnDeleteLetter?.removeCallbacks(limparTudoRunnable)
+        holdAnimator?.cancel()
+        holdAnimator = null
         try {
             closeAnalyzerSafely()
         } catch (e: Exception) {
