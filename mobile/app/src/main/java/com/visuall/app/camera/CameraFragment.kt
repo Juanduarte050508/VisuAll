@@ -41,6 +41,12 @@ import androidx.camera.video.Recorder
 import androidx.camera.video.Recording
 import androidx.camera.video.VideoCapture
 import androidx.camera.video.VideoRecordEvent
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.core.content.ContextCompat
 import androidx.constraintlayout.widget.ConstraintSet
 import androidx.fragment.app.Fragment
@@ -49,6 +55,7 @@ import androidx.lifecycle.Observer
 import androidx.navigation.fragment.findNavController
 import com.visuall.app.R
 import com.visuall.app.databinding.FragmentCameraBinding
+import com.visuall.app.ui.compose.CameraLandscapeHud
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -387,6 +394,8 @@ class CameraFragment : Fragment() {
         return (value * resources.displayMetrics.density).roundToInt()
     }
 
+    private fun aspectRatioLabel(): String = if (is4to3) "4:3" else "16:9"
+
     private fun setPortraitHudVisible(visible: Boolean) {
         val visibility = if (visible) View.VISIBLE else View.GONE
         binding.btnFlash.visibility = visibility
@@ -405,8 +414,33 @@ class CameraFragment : Fragment() {
 
     private fun ensureLandscapeHud() {
         if (landscapeHud != null) return
-        val hud = layoutInflater.inflate(R.layout.hud_camera_land, binding.root, false)
-        hud.id = R.id.hud_camera_land_root
+        val hud = ComposeView(requireContext()).apply {
+            id = R.id.hud_camera_land_root
+            isClickable = false
+            isFocusable = false
+            setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
+            setContent {
+                var ratioLabel by remember { mutableStateOf(aspectRatioLabel()) }
+
+                CameraLandscapeHud(
+                    aspectRatioLabel = ratioLabel,
+                    onLibrasClick = {
+                        releaseCamera()
+                        findNavController().navigate(R.id.action_camera_to_libras)
+                    },
+                    onFlipClick = {
+                        lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK)
+                            CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK
+                        bindCamera()
+                    },
+                    onAspectRatioClick = {
+                        is4to3 = !is4to3
+                        ratioLabel = aspectRatioLabel()
+                        bindCamera()
+                    }
+                )
+            }
+        }
         binding.root.addView(
             hud,
             ViewGroup.LayoutParams(
@@ -414,23 +448,6 @@ class CameraFragment : Fragment() {
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
         )
-        hud.findViewById<View>(R.id.btn_libras_land).setOnClickListener {
-            releaseCamera()
-            findNavController().navigate(R.id.action_camera_to_libras)
-        }
-        hud.findViewById<View>(R.id.btn_flip_land).setOnClickListener {
-            lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK)
-                CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK
-            bindCamera()
-        }
-        hud.findViewById<android.widget.TextView>(R.id.btn_aspect_ratio_land).apply {
-            text = if (is4to3) "4:3" else "16:9"
-            setOnClickListener {
-                is4to3 = !is4to3
-                text = if (is4to3) "4:3" else "16:9"
-                bindCamera()
-            }
-        }
         landscapeHud = hud
     }
 

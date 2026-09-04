@@ -9,20 +9,58 @@ import android.os.Parcelable
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
-import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.RecyclerView
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.ViewCompositionStrategy
+import androidx.compose.ui.res.colorResource
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 import com.visuall.app.R
-import com.visuall.app.databinding.DialogHistoryBinding
 import kotlinx.parcelize.Parcelize
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-// ── Model ──────────────────────────────────────────────────────────────────
+// -- Model -----------------------------------------------------------------
 @Parcelize
 data class HistoryEntry(
     val word: String,
@@ -33,22 +71,13 @@ data class HistoryEntry(
         SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(timestamp))
 }
 
-// ── Bottom Sheet ───────────────────────────────────────────────────────────
+// -- Bottom Sheet ----------------------------------------------------------
 //
-// Uma folha por metade da conversa: o que foi sinalizado e o que foi respondido
-// sao consultados em momentos diferentes e por pessoas diferentes, entao cada
-// uma abre da sua propria tela. O titulo diz qual esta aberta.
-//
-// A ordem dos elementos e deliberada: conteudo primeiro, acoes depois. Antes as
-// tres acoes ficavam ACIMA da lista, e a destrutiva (limpar) dividia peso e
-// aparencia com copiar, enquanto compartilhar era a unica dourada -- a enfase
-// visual caia na acao menos usada e a perigosa ficava a um toque de distancia
-// no meio das outras. Agora copiar e compartilhar sao dois botoes iguais no
-// rodape e limpar e um icone separado, com confirmacao.
+// A folha do historico virou Compose porque e uma UI declarativa simples:
+// titulo, estado vazio/lista e acoes. Isso remove XML + RecyclerView.Adapter
+// sem encostar no ciclo pesado da camera e dos modelos.
 class HistoryBottomSheet : BottomSheetDialogFragment() {
 
-    private var _binding: DialogHistoryBinding? = null
-    private val binding get() = _binding!!
     var onClearConversation: (() -> Unit)? = null
 
     companion object {
@@ -59,10 +88,7 @@ class HistoryBottomSheet : BottomSheetDialogFragment() {
             return HistoryBottomSheet().also { sheet ->
                 sheet.arguments = Bundle().apply {
                     // Copia defensiva: em processo unico, um Bundle guarda a
-                    // MESMA referencia da lista (nao serializa de verdade ate
-                    // cruzar um processo). Sem isso, letras reconhecidas
-                    // enquanto o historico esta aberto mudam a lista por
-                    // baixo do RecyclerView sem notifyDataSetChanged().
+                    // MESMA referencia da lista ate precisar parcelar de fato.
                     putParcelableArrayList(ARG_WORDS, ArrayList(words))
                     putString(ARG_TITULO, titulo)
                 }
@@ -71,64 +97,61 @@ class HistoryBottomSheet : BottomSheetDialogFragment() {
     }
 
     override fun onCreateView(
-        inflater: LayoutInflater, container: ViewGroup?,
+        inflater: LayoutInflater,
+        container: ViewGroup?,
         savedInstanceState: Bundle?
     ): View {
-        _binding = DialogHistoryBinding.inflate(inflater, container, false)
-        return binding.root
-    }
-
-    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
-        super.onViewCreated(view, savedInstanceState)
-
         @Suppress("DEPRECATION")
-        val words = arguments?.getParcelableArrayList<HistoryEntry>(ARG_WORDS) ?: arrayListOf()
+        val initialWords = arguments
+            ?.getParcelableArrayList<HistoryEntry>(ARG_WORDS)
+            ?.toList()
+            .orEmpty()
         val titulo = arguments?.getString(ARG_TITULO).orEmpty()
 
-        binding.tvHistoryTitle.text = titulo
-        binding.rvHistory.layoutManager = LinearLayoutManager(requireContext())
-        binding.rvHistory.adapter = HistoryAdapter(words)
-        updateEmptyState(words)
+        return ComposeView(requireContext()).apply {
+            setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
+            setContent {
+                var words by remember { mutableStateOf(initialWords) }
 
-        binding.btnCopyConversation.setOnClickListener { copiarConversa(words) }
-        binding.btnShareConversation.setOnClickListener { compartilharConversa(words) }
-
-        binding.btnClearConversation.setOnClickListener {
-            if (words.isEmpty()) return@setOnClickListener
-            // Apagar o historico nao tem desfazer, e o botao fica ao lado de
-            // dois inofensivos. Uma pergunta e barata perto de perder a conversa.
-            AlertDialog.Builder(requireContext())
-                .setTitle("Apagar este historico?")
-                .setMessage("As ${words.size} mensagens de \"$titulo\" serao removidas. Nao da pra desfazer.")
-                .setNegativeButton("Cancelar", null)
-                .setPositiveButton("Apagar") { _, _ ->
-                    onClearConversation?.invoke()
-                    words.clear()
-                    binding.rvHistory.adapter = HistoryAdapter(words)
-                    updateEmptyState(words)
-                    Toast.makeText(requireContext(), "Historico apagado", Toast.LENGTH_SHORT).show()
-                }
-                .show()
+                HistorySheetContent(
+                    title = titulo,
+                    entries = words,
+                    onCopy = { copiarConversa(words, titulo) },
+                    onShare = { compartilharConversa(words, titulo) },
+                    onClear = {
+                        if (words.isEmpty()) return@HistorySheetContent
+                        confirmarLimpeza(titulo, words.size) {
+                            onClearConversation?.invoke()
+                            words = emptyList()
+                            Toast.makeText(
+                                requireContext(),
+                                "Historico apagado",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    }
+                )
+            }
         }
     }
 
-    private fun updateEmptyState(words: List<HistoryEntry>) {
-        val empty = words.isEmpty()
-        binding.tvEmpty.visibility = if (empty) View.VISIBLE else View.GONE
-        binding.rvHistory.visibility = if (empty) View.GONE else View.VISIBLE
-        binding.tvHistoryCount.text = when (words.size) {
-            0 -> ""
-            1 -> "1 mensagem"
-            else -> "${words.size} mensagens"
+    private fun confirmarLimpeza(titulo: String, total: Int, onConfirm: () -> Unit) {
+        val mensagem = if (total == 1) {
+            "A mensagem de \"$titulo\" sera removida. Nao da pra desfazer."
+        } else {
+            "As $total mensagens de \"$titulo\" serao removidas. Nao da pra desfazer."
         }
-        binding.shareActions.alpha = if (empty) 0.35f else 1f
-        binding.btnCopyConversation.isEnabled = !empty
-        binding.btnShareConversation.isEnabled = !empty
-        binding.btnClearConversation.isEnabled = !empty
+
+        AlertDialog.Builder(requireContext())
+            .setTitle("Apagar este historico?")
+            .setMessage(mensagem)
+            .setNegativeButton("Cancelar", null)
+            .setPositiveButton("Apagar") { _, _ -> onConfirm() }
+            .show()
     }
 
-    private fun copiarConversa(items: List<HistoryEntry>) {
-        val texto = formatarConversa(items)
+    private fun copiarConversa(items: List<HistoryEntry>, titulo: String) {
+        val texto = formatarConversa(items, titulo)
         if (texto.isBlank()) return
 
         val clipboard = requireContext()
@@ -137,8 +160,8 @@ class HistoryBottomSheet : BottomSheetDialogFragment() {
         Toast.makeText(requireContext(), "Copiado", Toast.LENGTH_SHORT).show()
     }
 
-    private fun compartilharConversa(items: List<HistoryEntry>) {
-        val texto = formatarConversa(items)
+    private fun compartilharConversa(items: List<HistoryEntry>, titulo: String) {
+        val texto = formatarConversa(items, titulo)
         if (texto.isBlank()) return
 
         val intent = Intent(Intent.ACTION_SEND).apply {
@@ -148,52 +171,242 @@ class HistoryBottomSheet : BottomSheetDialogFragment() {
         startActivity(Intent.createChooser(intent, "Compartilhar"))
     }
 
-    private fun formatarConversa(items: List<HistoryEntry>): String {
+    private fun formatarConversa(items: List<HistoryEntry>, titulo: String): String {
         if (items.isEmpty()) return ""
-        val titulo = arguments?.getString(ARG_TITULO).orEmpty()
         return buildString {
-            appendLine("VisuAll — $titulo")
+            appendLine("VisuAll - $titulo")
             appendLine()
             items.forEach { item ->
                 appendLine("[${item.formattedTime()}] ${item.word}")
             }
         }.trim()
     }
+}
 
-    override fun onDestroyView() {
-        super.onDestroyView()
-        _binding = null
+@Composable
+private fun HistorySheetContent(
+    title: String,
+    entries: List<HistoryEntry>,
+    onCopy: () -> Unit,
+    onShare: () -> Unit,
+    onClear: () -> Unit
+) {
+    val gold = colorResource(R.color.gold_primary)
+    val surface = colorResource(R.color.surface)
+    val textPrimary = colorResource(R.color.text_primary)
+    val textMuted = colorResource(R.color.text_muted)
+    val empty = entries.isEmpty()
+
+    MaterialTheme(
+        colorScheme = darkColorScheme(
+            primary = gold,
+            surface = surface,
+            onSurface = textPrimary
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+                .background(surface)
+                .padding(top = 12.dp, bottom = 20.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(width = 40.dp, height = 4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(Color(0xFF444444))
+                    .align(Alignment.CenterHorizontally)
+            )
+
+            Spacer(Modifier.height(18.dp))
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 22.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = title.ifBlank { "Historico" },
+                    modifier = Modifier.weight(1f),
+                    color = textPrimary,
+                    fontSize = 19.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                Text(
+                    text = historyCountText(entries.size),
+                    color = textMuted,
+                    fontSize = 12.sp,
+                    maxLines = 1
+                )
+            }
+
+            Spacer(Modifier.height(14.dp))
+
+            if (empty) {
+                Text(
+                    text = "Nada registrado ainda.",
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 36.dp),
+                    color = textMuted,
+                    fontSize = 14.sp,
+                    textAlign = TextAlign.Center
+                )
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 440.dp)
+                        .padding(horizontal = 22.dp)
+                ) {
+                    items(
+                        items = entries.asReversed(),
+                        key = { entry -> "${entry.timestamp}:${entry.source}:${entry.word}" }
+                    ) { entry ->
+                        HistoryRow(entry)
+                    }
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 14.dp, bottom = 14.dp)
+                    .height(1.dp)
+                    .background(Color(0xFF242424))
+            )
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 22.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                HistoryActionButton(
+                    text = "COPIAR",
+                    enabled = !empty,
+                    modifier = Modifier.weight(1f),
+                    onClick = onCopy
+                )
+                Spacer(Modifier.size(8.dp))
+                HistoryActionButton(
+                    text = "COMPARTILHAR",
+                    enabled = !empty,
+                    modifier = Modifier.weight(1f),
+                    onClick = onShare
+                )
+                Spacer(Modifier.size(20.dp))
+                ClearHistoryButton(enabled = !empty, onClick = onClear)
+            }
+        }
     }
 }
 
-// ── Adapter ────────────────────────────────────────────────────────────────
-//
-// A etiqueta de origem em cada item saiu: como cada folha mostra uma origem so,
-// repeti-la linha a linha era ruido -- o titulo da folha ja diz de quem e.
-class HistoryAdapter(private val items: List<HistoryEntry>) :
-    RecyclerView.Adapter<HistoryAdapter.VH>() {
+@Composable
+private fun HistoryRow(entry: HistoryEntry) {
+    val textPrimary = colorResource(R.color.text_primary)
+    val textMuted = colorResource(R.color.text_muted)
+    val bubbleShape = RoundedCornerShape(14.dp)
+    val response = entry.source == "RESPOSTA"
+    val bubbleColor = if (response) Color(0xE6111111) else Color(0xE0111111)
+    val borderColor = if (response) Color(0x66E8A020) else Color(0x22FFFFFF)
 
-    inner class VH(view: View) : RecyclerView.ViewHolder(view) {
-        val tvWord: TextView = view.findViewById(R.id.tv_word)
-        val tvTime: TextView = view.findViewById(R.id.tv_time)
-    }
-
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
-        val view = LayoutInflater.from(parent.context)
-            .inflate(R.layout.item_history, parent, false)
-        return VH(view)
-    }
-
-    override fun onBindViewHolder(holder: VH, position: Int) {
-        // Mais recente primeiro
-        val item = items[items.size - 1 - position]
-        holder.tvWord.text = item.word
-        holder.tvTime.text = item.formattedTime()
-        holder.tvWord.setBackgroundResource(
-            if (item.source == "RESPOSTA") R.drawable.vf_bg_reply_text
-            else R.drawable.vf_bg_phrase
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 7.dp)
+    ) {
+        Text(
+            text = entry.formattedTime(),
+            modifier = Modifier.padding(start = 4.dp, bottom = 4.dp),
+            color = textMuted,
+            fontSize = 11.sp
+        )
+        Text(
+            text = entry.word,
+            modifier = Modifier
+                .clip(bubbleShape)
+                .background(bubbleColor)
+                .border(1.dp, borderColor, bubbleShape)
+                .padding(horizontal = 16.dp, vertical = 11.dp),
+            color = textPrimary,
+            fontSize = 16.sp,
+            lineHeight = 20.sp
         )
     }
+}
 
-    override fun getItemCount() = items.size
+@Composable
+private fun HistoryActionButton(
+    text: String,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    val textPrimary = colorResource(R.color.text_primary)
+    val shape = RoundedCornerShape(18.dp)
+
+    Box(
+        modifier = modifier
+            .height(48.dp)
+            .alpha(if (enabled) 1f else 0.35f)
+            .clip(shape)
+            .background(Color(0xCC242424))
+            .border(1.dp, Color(0x66E8A020), shape)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(horizontal = 8.dp),
+            color = textPrimary,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+private fun ClearHistoryButton(enabled: Boolean, onClick: () -> Unit) {
+    val textPrimary = colorResource(R.color.text_primary)
+    val goldLight = colorResource(R.color.gold_light)
+
+    Box(
+        modifier = Modifier
+            .size(48.dp)
+            .alpha(if (enabled) 1f else 0.35f)
+            .clip(CircleShape)
+            .background(Color(0xE6111111))
+            .border(2.dp, goldLight, CircleShape)
+            .clickable(
+                enabled = enabled,
+                onClickLabel = "Apagar este historico",
+                role = Role.Button,
+                onClick = onClick
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Image(
+            painter = painterResource(R.drawable.ic_delete),
+            contentDescription = null,
+            modifier = Modifier.size(22.dp),
+            colorFilter = ColorFilter.tint(textPrimary)
+        )
+    }
+}
+
+private fun historyCountText(total: Int): String {
+    return when (total) {
+        0 -> ""
+        1 -> "1 mensagem"
+        else -> "$total mensagens"
+    }
 }

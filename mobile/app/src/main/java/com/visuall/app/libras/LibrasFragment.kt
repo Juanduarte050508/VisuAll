@@ -41,6 +41,8 @@ import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.constraintlayout.widget.ConstraintLayout
+import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.core.content.ContextCompat
 import androidx.core.view.isVisible
 import androidx.fragment.app.Fragment
@@ -48,6 +50,7 @@ import androidx.navigation.fragment.findNavController
 import com.visuall.app.R
 import com.visuall.app.databinding.FragmentLibrasBinding
 import com.visuall.app.ui.ScanFrameView
+import com.visuall.app.ui.compose.LibrasLandscapeHud
 import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -554,8 +557,23 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
 
     private fun ensureLandscapeHud() {
         if (landscapeHud != null) return
-        val hud = layoutInflater.inflate(R.layout.hud_libras_land, binding.root, false)
-        hud.id = R.id.hud_libras_land_root
+        val hud = ComposeView(requireContext()).apply {
+            id = R.id.hud_libras_land_root
+            isClickable = false
+            isFocusable = false
+            setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
+            setContent {
+                LibrasLandscapeHud(
+                    onExitClick = { exitLibrasMode() },
+                    onFlipClick = {
+                        lensFacing = if (lensFacing == CameraSelector.LENS_FACING_FRONT)
+                            CameraSelector.LENS_FACING_BACK
+                        else CameraSelector.LENS_FACING_FRONT
+                        scheduleBindCamera(180L)
+                    }
+                )
+            }
+        }
         binding.root.addView(
             hud,
             ViewGroup.LayoutParams(
@@ -563,15 +581,6 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
         )
-        hud.findViewById<View>(R.id.btn_exit_libras_land).setOnClickListener {
-            exitLibrasMode()
-        }
-        hud.findViewById<View>(R.id.btn_flip_libras_land).setOnClickListener {
-            lensFacing = if (lensFacing == CameraSelector.LENS_FACING_FRONT)
-                CameraSelector.LENS_FACING_BACK
-            else CameraSelector.LENS_FACING_FRONT
-            scheduleBindCamera(180L)
-        }
         landscapeHud = hud
     }
 
