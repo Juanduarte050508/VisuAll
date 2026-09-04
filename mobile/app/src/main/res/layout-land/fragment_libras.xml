@@ -267,93 +267,153 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
-    <LinearLayout
+    <!--
+        Modo resposta em tela cheia.
+
+        Era uma caixa flutuante ancorada acima do modes_row, e ela cobria a
+        moldura vermelha de deteccao no meio da tela: quem responde perdia de
+        vista o retorno de que o app esta enxergando a mao. O texto tambem tinha
+        15sp em tres linhas, pequeno demais pra ser lido do outro lado de um
+        balcao.
+
+        Em tela cheia os dois problemas somem por construcao. Nao ha o que
+        cobrir, porque a camera nao esta em jogo enquanto se responde: quem
+        sinaliza nao esta sinalizando nesse momento. E o texto ocupa a tela
+        inteira, que e o ponto do modo — escrever, virar o celular, a pessoa
+        ler de longe.
+
+        O elevation alto e necessario porque este bloco e declarado ANTES do
+        modes_row e do btn_reply; sem ele os dois seriam desenhados por cima.
+    -->
+    <androidx.constraintlayout.widget.ConstraintLayout
         android:id="@+id/reply_panel"
         android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_marginHorizontal="22dp"
-        android:layout_marginBottom="10dp"
-        android:background="@drawable/vf_bg_reply_panel"
-        android:orientation="vertical"
+        android:layout_height="0dp"
+        android:background="@color/background"
+        android:clickable="true"
+        android:elevation="24dp"
+        android:focusable="true"
         android:visibility="gone"
-        app:layout_constraintBottom_toTopOf="@id/action_row"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
 
+        <TextView
+            android:id="@+id/tv_reply_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="24dp"
+            android:layout_marginTop="26dp"
+            android:letterSpacing="0.12"
+            android:text="RESPOSTA"
+            android:textColor="@color/gold_primary"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toBottomOf="@id/btn_reply_exit" />
+
+        <ImageView
+            android:id="@+id/btn_reply_exit"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:layout_marginTop="16dp"
+            android:layout_marginEnd="16dp"
+            android:background="@drawable/vf_bg_action_btn"
+            android:contentDescription="Voltar para a camera"
+            android:padding="13dp"
+            android:src="@drawable/ic_close"
+            app:tint="@color/text_primary"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toTopOf="parent" />
+
+        <!--
+            O campo E a area de exibicao: o mesmo texto que se digita e o que a
+            pessoa surda le. Sem isso seriam duas telas (compor e mostrar) pra
+            um texto so, e alguem teria que lembrar de trocar entre elas.
+        -->
         <EditText
             android:id="@+id/et_reply"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:background="@drawable/vf_bg_reply_input"
-            android:hint="Digite ou grave sua resposta"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:layout_marginHorizontal="24dp"
+            android:layout_marginTop="12dp"
+            android:layout_marginBottom="16dp"
+            android:background="@null"
+            android:gravity="center"
+            android:hint="Toque para escrever, ou use FALAR"
             android:imeOptions="actionDone"
             android:inputType="textCapSentences|textMultiLine"
-            android:maxLines="3"
-            android:minHeight="48dp"
-            android:textColor="#F5F1E8"
-            android:textColorHint="#777777"
-            android:textSize="15sp" />
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_muted"
+            android:textSize="26sp"
+            android:textStyle="bold"
+            app:layout_constraintTop_toBottomOf="@id/btn_reply_exit"
+            app:layout_constraintBottom_toTopOf="@id/reply_actions"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent" />
 
         <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="40dp"
-            android:layout_marginTop="10dp"
+            android:id="@+id/reply_actions"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginHorizontal="20dp"
+            android:layout_marginBottom="16dp"
             android:gravity="center"
-            android:orientation="horizontal">
+            android:orientation="horizontal"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent">
 
             <TextView
                 android:id="@+id/btn_reply_audio"
                 android:layout_width="0dp"
-                android:layout_height="36dp"
+                android:layout_height="44dp"
                 android:layout_marginEnd="6dp"
-                android:layout_weight="1"
-                android:background="@drawable/vf_bg_mode_inactive"
+                android:layout_weight="1.5"
+                android:background="@drawable/vf_bg_reply_hero"
+                android:contentDescription="Falar a resposta pelo microfone"
+                android:drawableStart="@drawable/ic_mic"
+                android:drawablePadding="6dp"
+                android:drawableTint="@color/text_on_gold"
                 android:gravity="center"
-                android:text="AUDIO"
-                android:textColor="#F5F1E8"
-                android:textSize="10sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:id="@+id/btn_reply_text"
-                android:layout_width="0dp"
-                android:layout_height="36dp"
-                android:layout_marginHorizontal="6dp"
-                android:layout_weight="1"
-                android:background="@drawable/vf_bg_mode_active"
-                android:gravity="center"
-                android:text="DIGITAR"
-                android:textColor="#070707"
-                android:textSize="10sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:id="@+id/btn_reply_speak"
-                android:layout_width="0dp"
-                android:layout_height="36dp"
-                android:layout_marginHorizontal="6dp"
-                android:layout_weight="1"
-                android:background="@drawable/vf_bg_mode_active"
-                android:gravity="center"
+                android:paddingHorizontal="10dp"
                 android:text="FALAR"
-                android:textColor="#070707"
-                android:textSize="10sp"
+                android:textColor="@color/text_on_gold"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/btn_reply_erase"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_marginHorizontal="6dp"
+                android:layout_weight="1"
+                android:background="@drawable/vf_bg_reply_ghost"
+                android:contentDescription="Apagar a resposta"
+                android:gravity="center"
+                android:text="LIMPAR"
+                android:textColor="@color/text_primary"
+                android:textSize="12sp"
                 android:textStyle="bold" />
 
             <TextView
                 android:id="@+id/btn_reply_close"
                 android:layout_width="0dp"
-                android:layout_height="36dp"
+                android:layout_height="44dp"
                 android:layout_marginStart="6dp"
-                android:layout_weight="0.75"
-                android:background="@drawable/vf_bg_mode_inactive"
+                android:layout_weight="1.2"
+                android:background="@drawable/vf_bg_reply_ghost"
+                android:contentDescription="Guardar e esconder o teclado para mostrar a resposta"
                 android:gravity="center"
-                android:text="OK"
-                android:textColor="#F5F1E8"
-                android:textSize="10sp"
+                android:text="PRONTO"
+                android:textColor="@color/text_primary"
+                android:textSize="12sp"
                 android:textStyle="bold" />
         </LinearLayout>
-    </LinearLayout>
+    </androidx.constraintlayout.widget.ConstraintLayout>
+
 
     <LinearLayout
         android:id="@+id/calibration_panel"
@@ -622,20 +682,18 @@
             android:visibility="gone"
             android:contentDescription="Repetir letra bloqueada" />
 
-        <TextView
+        <ImageView
             android:id="@+id/btn_reply"
-            android:layout_width="wrap_content"
-            android:layout_height="40dp"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
             android:layout_marginHorizontal="4dp"
-            android:background="@drawable/vf_bg_mode_inactive"
-            android:gravity="center"
-            android:minWidth="92dp"
-            android:paddingHorizontal="10dp"
-            android:text="RESPONDER"
-            android:textColor="#F5F1E8"
-            android:textSize="9sp"
-            android:textStyle="bold"
-            android:contentDescription="Falar e escrever resposta na tela" />
+            android:background="@drawable/vf_bg_action_primary"
+            android:contentDescription="Responder: toque para escrever, segure para falar"
+            android:focusable="true"
+            android:padding="11dp"
+            android:src="@drawable/ic_voice_reply"
+            android:tooltipText="Responder (segure para falar)"
+            app:tint="@color/text_primary" />
 
         <ImageView
             android:id="@+id/btn_history"

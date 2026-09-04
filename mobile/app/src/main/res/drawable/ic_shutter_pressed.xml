@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Obturador pressionado: mesmo desenho, dourado escurecido. -->
+<!-- Obturador pressionado: mesmo desenho, anel mais escuro e centro acinzentado.
+     E o unico retorno de toque do botao. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item>
         <shape android:shape="oval">
@@ -9,7 +10,7 @@
     </item>
     <item android:top="7dp" android:bottom="7dp" android:left="7dp" android:right="7dp">
         <shape android:shape="oval">
-            <solid android:color="@color/gold_dark"/>
+            <solid android:color="#B8B3AB"/>
         </shape>
     </item>
 </layer-list>

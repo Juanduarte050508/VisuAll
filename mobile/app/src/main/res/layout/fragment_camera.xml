@@ -165,7 +165,7 @@
         android:src="@drawable/ic_accessibility"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintTop_toTopOf="parent"
-        app:tint="@color/text_on_gold" />
+        app:tint="@color/text_primary" />
 
     <TextView
         android:id="@+id/tv_mode_badge"
@@ -419,8 +419,9 @@
             android:id="@+id/btn_flip"
             android:layout_width="54dp"
             android:layout_height="54dp"
+            android:background="@drawable/vf_bg_action_btn"
             android:contentDescription="Girar câmera"
-            android:padding="10dp"
+            android:padding="14dp"
             android:scaleType="centerInside"
             android:src="@drawable/ic_flip"
             app:layout_constraintBottom_toBottomOf="parent"

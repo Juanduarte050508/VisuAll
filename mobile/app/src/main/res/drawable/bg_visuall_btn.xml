@@ -1,8 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Botão do VisuAll: dourado preenchido de propósito. É a porta para as
-     funcionalidades de acessibilidade e precisa se distinguir dos controles
-     de câmera, que são todos escuros com contorno. -->
+<!-- Botao do VisuAll (a porta do modo Libras): anel dourado e fundo escuro,
+     igual ao obturador e aos controles do modo Libras.
+
+     Antes era dourado preenchido, de proposito, pra se destacar dos controles
+     de camera. A padronizacao troca esse destaque por coerencia: o botao deixa
+     de gritar sozinho e passa a ser reconhecido pelo desenho do app. O que o
+     mantem achavel e a posicao fixa no canto superior direito, sozinho ali. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
-    <solid android:color="@color/gold_primary"/>
+    <solid android:color="#E6111111"/>
     <stroke android:width="2dp" android:color="@color/gold_light"/>
 </shape>
