@@ -119,58 +119,6 @@ class SentenceBuilderTest {
         assertEquals(" ", s.frase)
     }
 
-    // ── Sugestão de palavra ─────────────────────────────────────────────────
-
-    @Test
-    fun `sugestao substitui a palavra sendo escrita`() {
-        val s = builder("C", "A", "S")
-        assertTrue(s.aplicarSugestao("CASA"))
-        // Espaço no fim pra a próxima palavra já começar limpa.
-        assertEquals("CASA ", s.frase)
-    }
-
-    @Test
-    fun `sugestao preserva as palavras anteriores`() {
-        val s = SentenceBuilder()
-        s.aplicarSugestao("MINHA")
-        listOf("C", "A", "S").forEach { s.aceitarLetra(it) }
-        assertEquals("MINHA CAS", s.frase)
-        assertTrue(s.aplicarSugestao("CASA"))
-        assertEquals("MINHA CASA ", s.frase)
-    }
-
-    @Test
-    fun `sugestao em frase vazia nao deixa espaco na frente`() {
-        val s = SentenceBuilder()
-        assertTrue(s.aplicarSugestao("OI"))
-        assertEquals("OI ", s.frase)
-    }
-
-    @Test
-    fun `sugestao vazia ou em branco e ignorada`() {
-        val s = builder("A", "B")
-        assertFalse(s.aplicarSugestao(""))
-        assertFalse(s.aplicarSugestao("   "))
-        assertEquals("AB", s.frase)
-    }
-
-    @Test
-    fun `sugestao e aparada antes de entrar`() {
-        val s = SentenceBuilder()
-        assertTrue(s.aplicarSugestao("  OI  "))
-        assertEquals("OI ", s.frase)
-    }
-
-    @Test
-    fun `sugestao logo depois de um espaco nao come a palavra anterior`() {
-        // Frase terminando em espaço: substringBeforeLast corta ali, então a
-        // "palavra sendo escrita" é vazia e a sugestão só se acrescenta.
-        val s = builder("O", "I")
-        s.adicionarEspaco()
-        assertTrue(s.aplicarSugestao("TUDO"))
-        assertEquals("OI TUDO ", s.frase)
-    }
-
     // ── Apagar e limpar ─────────────────────────────────────────────────────
 
     @Test

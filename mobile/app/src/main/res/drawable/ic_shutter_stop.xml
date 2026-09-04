@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Gravando: quadrado de parada. Mesmo anel dourado do restante. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item>
         <shape android:shape="oval">
-            <stroke android:width="3dp" android:color="@color/text_primary"/>
+            <stroke android:width="3dp" android:color="@color/gold_light"/>
             <solid android:color="#00000000"/>
         </shape>
     </item>

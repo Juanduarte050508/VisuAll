@@ -1,6 +1,7 @@
 package com.visuall.app.libras
 
 import android.Manifest
+import android.animation.ValueAnimator
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Context
@@ -19,14 +20,15 @@ import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CaptureRequest
 import android.util.Log
 import android.util.Range
+import android.view.MotionEvent
 import android.view.Surface
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
-import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 
 import android.util.Size
@@ -61,6 +63,13 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         val TINT_CONFIANCA_MEDIA = ColorStateList.valueOf(0xFFE8A020.toInt())
         val TINT_CONFIANCA_BAIXA = ColorStateList.valueOf(0xFF8E6A26.toInt())
         val TINT_CONFIANCA_FUNDO = ColorStateList.valueOf(0x33242424)
+
+        // Quanto tempo o dedo precisa ficar na lixeira pra limpar a frase
+        // inteira. Mais curto que o gesto de mao aberta
+        // (LibrasAnalyzer.TEMPO_PRA_LIMPAR_CORPO, 5s): ali o tempo longo existe
+        // pra nao confundir com um sinal sendo feito, e aqui nao ha essa
+        // duvida -- o dedo esta no botao de proposito.
+        const val TEMPO_HOLD_LIMPAR_MS = 3_000L
     }
 
     private var _binding: FragmentLibrasBinding? = null
@@ -90,6 +99,36 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
     private var ultimaLetraChip = ""
     private var linhasAtivas = true
     private var modoAtual = LibrasAnalyzer.Modo.ALFABETO
+
+    // Hold da lixeira: animador da barra de progresso e a trava que impede o
+    // ACTION_UP de apagar uma letra depois de a limpeza ja ter disparado (ou
+    // depois de o dedo sair de cima do botao).
+    private var holdAnimator: ValueAnimator? = null
+    private var toqueLixeiraConsumido = false
+
+    // O painel de resposta esta aberto? Guardado a parte porque o relayout do
+    // HUD mexe na visibilidade das views e precisa saber ao que voltar.
+    private var painelRespostaAberto = false
+
+    // Texto da resposta atual. Vivia no tv_reply da bolha; com a bolha fora da
+    // tela ele passa a ser estado do fragmento, sem view espelhando.
+    private var respostaAtual = ""
+
+
+    // Acabamos de abrir uma activity nossa (o reconhecedor de fala)? Se sim, o
+    // onResume seguinte nao deve religar a camera. Ver o comentario no onResume.
+    private var voltandoDeActivityNossa = false
+
+    // Com a resposta ocupando a tela inteira, o "voltar" do sistema precisa
+    // fechar o PAINEL antes de qualquer outra coisa. Sem isto ele sai do modo
+    // Libras inteiro: quem esta respondendo aperta voltar esperando sair da
+    // resposta e perde a camera junto, tendo que reabrir tudo.
+    private val fecharRespostaNoVoltar = object : OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() {
+            saveReplyToScreen()
+            closeReplyPanel()
+        }
+    }
     private val speechLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -107,9 +146,10 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
             openReplyPanel(focus = false)
             binding.etReply.setText(texto)
             binding.etReply.setSelection(texto.length)
-            binding.tvReply.text = texto
-            binding.replyBubble.isVisible = true
-            speakReply(texto)
+            // Sem falar de volta: a resposta existe pra ser LIDA por quem nao
+            // ouve. Repetir em voz alta o que a pessoa acabou de dizer nao
+            // entrega a mensagem a ninguem.
+            saveReplyToScreen()
         }
     }
 
@@ -130,6 +170,8 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
             applyPreviewAspectRatio()
             applyHudLayout()
         }
+        requireActivity().onBackPressedDispatcher
+            .addCallback(viewLifecycleOwner, fecharRespostaNoVoltar)
         setupButtons()
         updateModeButtons()
     }
@@ -174,6 +216,14 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         } else {
             root.post(bindRunnable)
         }
+    }
+
+    // Dispara quando o dedo completa TEMPO_HOLD_LIMPAR_MS sobre a lixeira.
+    private val limparTudoRunnable = Runnable {
+        toqueLixeiraConsumido = true
+        librasAnalyzer?.limparFrase()
+        vibrateConfirmation()
+        pararProgressoHold()
     }
 
     private val bindRunnable = Runnable {
@@ -362,6 +412,9 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
                     return@post
                 }
                 librasAnalyzer = newAnalyzer
+                // O analyzer e recriado a cada bind; sem isto, um religamento
+                // com a resposta aberta voltaria reconhecendo.
+                newAnalyzer.pausado = painelRespostaAberto
                 boundAnalysis.setAnalyzer(cameraExecutor, newAnalyzer)
                 sincronizarAlfabeto(newAnalyzer)
                 bindInProgress = false
@@ -487,10 +540,16 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         binding.progressConfidence.visibility = if (visible) View.INVISIBLE else View.GONE
         binding.tvFeedback.visibility = if (visible) View.INVISIBLE else View.GONE
         binding.progressClear.visibility = View.GONE
-        binding.replyBubble.visibility = View.GONE
-        binding.phraseBubble.visibility = View.GONE
-        binding.suggestionsRow.visibility = View.GONE
-        binding.replyPanel.visibility = View.GONE
+
+        // Estas tres NAO seguem o `visible` do HUD: elas tem estado proprio
+        // (ha resposta? ha frase? o painel estava aberto?). Zera-las aqui era o
+        // que fazia a resposta piscar e sumir ao voltar do microfone -- o
+        // onResume chama este metodo dentro de um post(), ou seja DEPOIS de o
+        // resultado da fala ja ter preenchido a caixa. A conversa na tela
+        // precisa durar ate alguem apagar, nao ate a proxima troca de layout.
+        binding.phraseBubble.isVisible = visible && fraseBase.isNotBlank()
+        binding.replyPanel.isVisible = visible && painelRespostaAberto
+        atualizarBotaoResponder()
     }
 
     private fun ensureLandscapeHud() {
@@ -538,9 +597,19 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
 
     override fun onResume() {
         super.onResume()
+
+        // Voltando do reconhecedor de fala: nada da camera mudou, e religar
+        // significa unbindAll() -- a preview perde a superficie e a tela PISCA
+        // PRETO ate o primeiro quadro novo. Fora o custo de recriar o analyzer
+        // e recarregar os modelos. O CameraX ja religa sozinho pelo lifecycle
+        // quando a activity volta pro STARTED, entao aqui basta nao atrapalhar.
+        val religarCamera = !voltandoDeActivityNossa
+        voltandoDeActivityNossa = false
+
         _binding?.root?.post {
             applyPreviewAspectRatio()
             applyHudLayout()
+            if (!religarCamera) return@post
             if (cameraProvider != null) {
                 scheduleBindCamera(250L)
             } else {
@@ -558,37 +627,50 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
                 saveReplyToScreen()
                 closeReplyPanel()
             } else {
-                openReplyPanel()
+                openReplyPanel(focus = true)
             }
         }
 
-        binding.replyBubble.setOnClickListener {
-            openReplyPanel(focus = true)
+        // Atalho: responder por voz custava dois toques (abrir o painel, depois
+        // achar o microfone dentro dele) e e o caminho mais comum de quem ouve.
+        // Segurar o botao pula o painel e vai direto pro reconhecimento de fala.
+        binding.btnReply.setOnLongClickListener {
+            startSpeechReply()
+            true
         }
-
-        binding.btnReplyClear.setOnClickListener {
-            clearReply()
-        }
-
-        binding.btnSuggestion1.setOnClickListener { applySuggestionFrom(binding.btnSuggestion1) }
-        binding.btnSuggestion2.setOnClickListener { applySuggestionFrom(binding.btnSuggestion2) }
-        binding.btnSuggestion3.setOnClickListener { applySuggestionFrom(binding.btnSuggestion3) }
 
         binding.btnConfirmLetter.setOnClickListener {
             librasAnalyzer?.repetirLetraPendente()
         }
 
         binding.btnReplyAudio.setOnClickListener { startSpeechReply() }
-        binding.btnReplyText.setOnClickListener { focusReplyText() }
-        binding.btnReplySpeak.setOnClickListener { speakReply() }
+
+        // PRONTO guarda o texto e esconde o teclado, mas NAO sai da tela cheia:
+        // e exatamente aqui que o celular e virado pra pessoa surda ler.
         binding.btnReplyClose.setOnClickListener {
+            saveReplyToScreen()
+            binding.etReply.clearFocus()
+            hideKeyboard()
+        }
+
+        // Sair da tela cheia e uma acao separada, no X do canto.
+        binding.btnReplyExit.setOnClickListener {
             saveReplyToScreen()
             closeReplyPanel()
         }
+
+        binding.btnReplyErase.setOnClickListener {
+            esvaziarResposta()
+            binding.etReply.setText("")
+            focusReplyText()
+        }
         binding.etReply.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_DONE) {
+                // Mesmo efeito do PRONTO: guarda e sai do teclado, sem fechar a
+                // tela cheia, que e justamente o que vai ser mostrado.
                 saveReplyToScreen()
-                closeReplyPanel()
+                binding.etReply.clearFocus()
+                hideKeyboard()
                 true
             } else {
                 false
@@ -622,23 +704,74 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
             scheduleBindCamera(180L)
         }
 
-        // Toque: limpa a frase inteira (a lixeira zera tudo de uma vez).
-        // Toque longo: apaga só a última letra/sinal, para quem quer corrigir.
+        // Toque: apaga só a última letra/sinal. Segurar 3s: limpa a frase toda.
+        //
+        // O toque longo do Android dispara em ~500ms e não existe API pra
+        // alongar isso, então o hold é cronometrado aqui: o ACTION_DOWN agenda
+        // a limpeza pra daqui a TEMPO_HOLD_LIMPAR_MS e a barra progress_clear
+        // enche nesse intervalo — o mesmo retorno visual que o gesto de mão
+        // aberta já dá. Soltar antes cancela o agendamento e vale como toque.
         binding.btnDeleteLetter.setOnClickListener {
-            librasAnalyzer?.limparFrase()
-        }
-        binding.btnDeleteLetter.setOnLongClickListener {
             librasAnalyzer?.apagarUltima()
+        }
+        binding.btnDeleteLetter.setOnTouchListener { view, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    view.isPressed = true
+                    toqueLixeiraConsumido = false
+                    iniciarProgressoHold()
+                    view.postDelayed(limparTudoRunnable, TEMPO_HOLD_LIMPAR_MS)
+                }
+
+                // Dedo arrastou pra fora: desiste do hold sem apagar nada. Sem
+                // isso a limpeza dispararia mesmo com o dedo longe do botão,
+                // já que o toque continua sendo entregue a esta view.
+                MotionEvent.ACTION_MOVE -> {
+                    val dentro = event.x >= 0f && event.y >= 0f &&
+                        event.x <= view.width && event.y <= view.height
+                    if (!dentro && !toqueLixeiraConsumido) {
+                        toqueLixeiraConsumido = true
+                        view.isPressed = false
+                        cancelarHoldLimpar(view)
+                    }
+                }
+
+                MotionEvent.ACTION_UP -> {
+                    view.isPressed = false
+                    cancelarHoldLimpar(view)
+                    // performClick em vez de chamar apagarUltima direto: mantém
+                    // o caminho de acessibilidade, que ativa a view por clique.
+                    if (!toqueLixeiraConsumido) view.performClick()
+                }
+
+                MotionEvent.ACTION_CANCEL -> {
+                    view.isPressed = false
+                    cancelarHoldLimpar(view)
+                }
+
+                else -> return@setOnTouchListener false
+            }
             true
         }
 
+        // Duas metades da conversa, dois historicos. O botao do topo abre o
+        // que foi SINALIZADO; o de dentro da tela de resposta abre o que foi
+        // RESPONDIDO. Antes uma lista so misturava os dois e obrigava a
+        // garimpar pra achar o que se procurava.
         binding.btnHistory.setOnClickListener {
-            HistoryBottomSheet.newInstance(historyStore.entries)
-                .also { sheet ->
-                    sheet.onClearConversation = { historyStore.limpar() }
-                }
-                .show(childFragmentManager, "history")
+            abrirHistorico("LIBRAS", "Libras")
         }
+        binding.btnReplyHistory.setOnClickListener {
+            abrirHistorico("RESPOSTA", "Respostas")
+        }
+    }
+
+    private fun abrirHistorico(origem: String, titulo: String) {
+        HistoryBottomSheet.newInstance(historyStore.entriesDe(origem), titulo)
+            .also { sheet ->
+                sheet.onClearConversation = { historyStore.limpar(origem) }
+            }
+            .show(childFragmentManager, "history_$origem")
     }
 
     private fun updateModeButtons() {
@@ -664,39 +797,36 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         binding.btnModeBody.alpha = 1f
     }
 
-    private fun updateWordSuggestions(frase: String) {
-        if (modoAtual != LibrasAnalyzer.Modo.ALFABETO) {
-            hideSuggestions()
-            return
-        }
+    // ── Hold da lixeira ────────────────────────────────────────────────────
 
-        val sugestoes = WordSuggestionEngine.sugerir(frase)
-
-        val botoes = listOf(binding.btnSuggestion1, binding.btnSuggestion2, binding.btnSuggestion3)
-        botoes.forEachIndexed { index, botao ->
-            val palavra = sugestoes.getOrNull(index)
-            botao.text = palavra.orEmpty()
-            botao.tag = palavra
-            botao.isVisible = palavra != null
-        }
-        binding.suggestionsRow.isVisible = sugestoes.isNotEmpty()
-    }
-
-    private fun hideSuggestions() {
-        binding.suggestionsRow.isVisible = false
-        listOf(binding.btnSuggestion1, binding.btnSuggestion2, binding.btnSuggestion3).forEach { botao ->
-            botao.text = ""
-            botao.tag = null
+    /** Enche progress_clear ao longo dos 3s, pra o hold ter fim visível. */
+    private fun iniciarProgressoHold() {
+        holdAnimator?.cancel()
+        val barra = _binding?.progressClear ?: return
+        barra.progress = 0
+        barra.isVisible = true
+        holdAnimator = ValueAnimator.ofInt(0, 100).apply {
+            duration = TEMPO_HOLD_LIMPAR_MS
+            addUpdateListener { anim ->
+                _binding?.progressClear?.progress = anim.animatedValue as Int
+            }
+            start()
         }
     }
 
-    private fun applySuggestionFrom(botao: TextView) {
-        val palavra = botao.tag as? String ?: return
-        librasAnalyzer?.aplicarSugestao(palavra)
-        hideSuggestions()
+    private fun pararProgressoHold() {
+        holdAnimator?.cancel()
+        holdAnimator = null
+        _binding?.progressClear?.isVisible = false
+    }
+
+    private fun cancelarHoldLimpar(view: View) {
+        view.removeCallbacks(limparTudoRunnable)
+        pararProgressoHold()
     }
 
     private fun startSpeechReply() {
+        voltandoDeActivityNossa = true
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(
                 RecognizerIntent.EXTRA_LANGUAGE_MODEL,
@@ -717,14 +847,40 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         }
     }
 
+    /**
+     * Deixa visivel o estado do painel no proprio botao: fechado ele e um
+     * contorno dourado (acao disponivel), aberto ele fica preenchido, porque
+     * ali o toque ja nao abre nada -- guarda a resposta e fecha.
+     */
+    private fun atualizarBotaoResponder() {
+        val aberto = binding.replyPanel.isVisible
+        fecharRespostaNoVoltar.isEnabled = aberto
+        // Com a resposta aberta ninguem esta sinalizando: o que a camera
+        // reconhecer ali e acidente, e entrava na frase sendo falado em voz alta.
+        librasAnalyzer?.pausado = aberto
+        binding.btnReply.setBackgroundResource(
+            if (aberto) R.drawable.vf_bg_action_primary_on else R.drawable.vf_bg_action_primary
+        )
+        binding.btnReply.imageTintList = ColorStateList.valueOf(
+            ContextCompat.getColor(
+                requireContext(),
+                // Fechado: branco, como todo icone de botao do app. Aberto: escuro,
+                // porque o fundo passa a ser dourado preenchido.
+                if (aberto) R.color.text_on_gold else R.color.text_primary
+            )
+        )
+    }
+
     private fun openReplyPanel(focus: Boolean = false) {
         if (isLandscapeHudCompact()) {
             binding.replyPanel.isVisible = false
+            painelRespostaAberto = false
             Toast.makeText(requireContext(), "Resposta ocultada no HUD compacto", Toast.LENGTH_SHORT).show()
             return
         }
         binding.replyPanel.isVisible = true
-        val respostaAtual = binding.tvReply.text?.toString().orEmpty()
+        painelRespostaAberto = true
+        atualizarBotaoResponder()
         if (binding.etReply.text.isNullOrBlank() && respostaAtual.isNotBlank()) {
             binding.etReply.setText(respostaAtual)
             binding.etReply.setSelection(respostaAtual.length)
@@ -734,6 +890,8 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
 
     private fun focusReplyText() {
         binding.replyPanel.isVisible = true
+        painelRespostaAberto = true
+        atualizarBotaoResponder()
         binding.etReply.requestFocus()
         val imm = requireContext().getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
         imm.showSoftInput(binding.etReply, InputMethodManager.SHOW_IMPLICIT)
@@ -746,41 +904,31 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
 
     private fun closeReplyPanel() {
         binding.replyPanel.isVisible = false
+        painelRespostaAberto = false
+        atualizarBotaoResponder()
         binding.etReply.clearFocus()
         hideKeyboard()
     }
 
+    /**
+     * Espelha o campo na bolha e no historico. Campo vazio significa "nao ha
+     * resposta", e nao "feche tudo": quem fecha e quem sai.
+     */
     private fun saveReplyToScreen(): Boolean {
         val texto = binding.etReply.text?.toString().orEmpty().trim()
         if (texto.isBlank()) {
-            clearReply()
+            esvaziarResposta()
             return false
         }
-        binding.tvReply.text = texto
-        binding.replyBubble.isVisible = true
+        respostaAtual = texto
         historyStore.registrarMensagemResposta(texto)
         return true
     }
 
-    private fun clearReply() {
+    /** Apaga a resposta em todos os lugares onde ela existe, sem mexer no painel. */
+    private fun esvaziarResposta() {
         historyStore.removerRespostaAtual()
-        binding.etReply.setText("")
-        binding.tvReply.text = ""
-        binding.replyBubble.isVisible = false
-        closeReplyPanel()
-    }
-
-    private fun speakReply(textoManual: String? = null) {
-        if (textoManual != null) {
-            binding.etReply.setText(textoManual)
-            binding.etReply.setSelection(textoManual.length)
-        }
-        if (!saveReplyToScreen()) {
-            Toast.makeText(requireContext(), "Digite ou grave uma resposta", Toast.LENGTH_SHORT).show()
-            return
-        }
-        val texto = binding.tvReply.text.toString()
-        tts?.speak(texto, TextToSpeech.QUEUE_FLUSH, null, "reply")
+        respostaAtual = ""
     }
 
     // ── Callbacks ──────────────────────────────────────────────────────────
@@ -851,16 +999,17 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
             fraseBase = frase
             if (isLandscapeHudCompact()) {
                 binding.phraseBubble.isVisible = false
-                hideSuggestions()
                 fraseAnterior = frase
                 return@runOnUiThread
             }
             binding.tvPhrase.text = fraseExibida()
             binding.phraseBubble.isVisible = frase.isNotBlank()
-            updateWordSuggestions(frase)
 
-            // TTS: fala o que acabou de entrar (regra e casos em PhraseOutput).
-            val fala = PhraseOutput.trechoParaFalar(frase, fraseAnterior)
+            // TTS: fala o que acabou de entrar. O trecho e a pronúncia dele
+            // são decididos no PhraseOutput — textoParaVoz é o que garante que
+            // o motor de voz não leia "AV" como "avenida".
+            val trecho = PhraseOutput.trechoParaFalar(frase, fraseAnterior)
+            val fala = PhraseOutput.textoParaVoz(trecho)
             if (frase.length > fraseAnterior.length) {
                 if (fala.isNotBlank()) {
                     tts?.speak(fala, TextToSpeech.QUEUE_FLUSH, null, null)
@@ -918,6 +1067,9 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
     private fun onGestoLimpar(progresso: Float) {
         activity?.runOnUiThread {
             if (_binding == null) return@runOnUiThread
+            // Um hold na lixeira está usando a mesma barra: não deixa o gesto
+            // de mão aberta sobrescrever o progresso dele.
+            if (holdAnimator != null) return@runOnUiThread
             binding.progressClear.isVisible = progresso > 0f
             binding.progressClear.progress  = (progresso * 100).toInt()
             if (progresso == 0f) {
@@ -987,6 +1139,9 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
     override fun onDestroyView() {
         super.onDestroyView()
         landscapeHud = null
+        _binding?.btnDeleteLetter?.removeCallbacks(limparTudoRunnable)
+        holdAnimator?.cancel()
+        holdAnimator = null
         try {
             closeAnalyzerSafely()
         } catch (e: Exception) {

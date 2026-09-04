@@ -101,6 +101,34 @@ internal class ConversationHistoryStore(private val context: Context) {
         salvar()
     }
 
+    /**
+     * As mensagens de uma origem so ("LIBRAS" ou "RESPOSTA").
+     *
+     * As duas metades da conversa sao consultadas em momentos diferentes: o que
+     * a pessoa sinalizou se confere no modo de leitura, e o que foi respondido
+     * se confere de dentro da propria tela de resposta. Misturar as duas numa
+     * lista so obrigava a garimpar. O campo `source` ja existia em cada entrada,
+     * entao separar e filtrar -- nao ha dado novo a guardar.
+     */
+    fun entriesDe(source: String): List<HistoryEntry> = _entries.filter { it.source == source }
+
+    /** Limpa so uma das metades, preservando a outra. */
+    fun limpar(source: String) {
+        _entries.removeAll { it.source == source }
+        if (source == "LIBRAS") {
+            ultimaMensagemLibras = ""
+            indiceLibrasAtual = -1
+        } else {
+            indiceRespostaAtual = -1
+        }
+        // Os indices apontam pra posicoes que mudaram com a remocao; recalcular
+        // um a um seria fragil, e perder o "continuar editando a ultima" custa
+        // menos que apagar a entrada errada depois.
+        indiceLibrasAtual = -1
+        indiceRespostaAtual = -1
+        salvar()
+    }
+
     private fun limitar() {
         while (_entries.size > 80) {
             _entries.removeAt(0)

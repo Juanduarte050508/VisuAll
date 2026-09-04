@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Camada da frente do ícone adaptativo.
+
+    Antes isto era PNG (mipmap-*/ic_launcher_foreground.png) com a arte inteira,
+    o nome "VisuAll" e o fundo preto chapado embutidos. Três problemas de uma
+    vez, e é por isso que o ícone saía torto no aparelho:
+
+      1. Um foreground adaptativo é desenhado num canvas de 108dp do qual o
+         launcher mostra só os 72dp centrais, e garante apenas os 66dp de dentro
+         deles — o resto é folga pra máscara e pra animação de parallax. Os PNGs
+         tinham o tamanho do ícone LEGADO (48 a 192 px), então eram esticados e
+         o texto saía cortado pela máscara.
+      2. Com o preto opaco dentro da própria camada da frente, a cor de fundo
+         (ic_launcher_background) nunca aparecia e sobrava um quadrado preto
+         atrás da máscara.
+      3. Nome do app dentro do ícone é redundante: o launcher já escreve
+         "VisuAll" embaixo, e a 48dp aquele texto era ilegível de qualquer jeito.
+
+    Agora a marca é vetor (nítida em qualquer densidade), transparente, sem texto
+    e inteira dentro dos 66dp centrais. A espiral do desenho antigo virou íris
+    cheia: traço fino de espiral empasta a 48dp, que é o tamanho em que o ícone
+    é realmente visto. A seta virou sobrancelha — desenhada saindo da amêndoa,
+    ela fazia o conjunto ler como o símbolo de Marte; e a sobrancelha diz algo
+    sobre o app, que usa justamente o marcador de sobrancelha pra pergunta.
+
+    minSdk é 26, então TODO aparelho suportado passa por aqui; os PNGs legados
+    em mipmap-* só existem pra contextos fora do launcher.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Olho: contorno em amêndoa, centrado em 54,54. -->
+    <path
+        android:pathData="M30,54 Q54,28 78,54 Q54,80 30,54 Z"
+        android:strokeColor="#F5C842"
+        android:strokeWidth="6.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+    <!-- Íris cheia (dois arcos = círculo), no dourado escuro da paleta. -->
+    <path
+        android:pathData="M46,54 A8,8 0 1,0 62,54 A8,8 0 1,0 46,54 Z"
+        android:fillColor="#E8A020" />
+
+    <!-- Sobrancelha: dá assimetria e tira o ícone do lugar de "olho genérico". -->
+    <path
+        android:pathData="M36,34 Q54,24 72,34"
+        android:strokeColor="#F5C842"
+        android:strokeWidth="5"
+        android:strokeLineCap="round" />
+</vector>

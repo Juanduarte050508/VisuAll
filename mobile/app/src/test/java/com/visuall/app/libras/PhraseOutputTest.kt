@@ -64,12 +64,11 @@ class PhraseOutputTest {
     }
 
     @Test
-    fun `sugestao aplicada fala a palavra sugerida e nao a frase toda`() {
+    fun `frase reescrita que fecha palavra fala so a ultima e nao a frase toda`() {
         // O caso que mais podia dar errado: a frase nova NÃO é a antiga mais um
-        // pedaço, porque a sugestão reescreveu a última palavra. Um
-        // removePrefix simples devolveria a frase inteira e o app falaria tudo.
-        // Toda sugestão deixa espaço no fim (ver SentenceBuilder), e é isso que
-        // salva este caminho.
+        // pedaço, porque o fim dela foi reescrito. Um removePrefix simples
+        // devolveria a frase inteira e o app falaria tudo. É o teste de
+        // espaço-no-fim que salva este caminho.
         assertEquals("CASA", PhraseOutput.trechoParaFalar("MINHA CASA ", "MINHA CAS"))
     }
 
@@ -97,5 +96,56 @@ class PhraseOutputTest {
     fun `espaco em frase vazia nao tenta falar`() {
         // " " cresceu em relação a "", mas não há palavra pra anunciar.
         assertEquals("", PhraseOutput.trechoParaFalar(" ", ""))
+    }
+
+    // ── Pronúncia (textoParaVoz) ───────────────────────────────────────────
+    //
+    // O motor de voz normaliza o texto que recebe e expande abreviação sozinho.
+    // Quem soletra em Libras está escrevendo LETRAS: nada do que sai daqui pode
+    // dar margem pra ele adivinhar uma palavra que a pessoa não escreveu.
+
+    @Test
+    fun `letra sozinha e falada pelo nome`() {
+        assertEquals("vê", PhraseOutput.textoParaVoz("V"))
+        assertEquals("agá", PhraseOutput.textoParaVoz("H"))
+    }
+
+    @Test
+    fun `letra que e abreviacao conhecida nao vira a palavra expandida`() {
+        // Sem isso o motor lia "R" como "rua" e "N" como "número".
+        assertEquals("erre", PhraseOutput.textoParaVoz("R"))
+        assertEquals("ene", PhraseOutput.textoParaVoz("N"))
+    }
+
+    @Test
+    fun `AV e soletrado e nao lido como avenida`() {
+        // O caso que motivou tudo isto.
+        assertEquals("á, vê", PhraseOutput.textoParaVoz("AV"))
+    }
+
+    @Test
+    fun `outras abreviacoes comuns tambem sao soletradas`() {
+        assertEquals("cá, eme", PhraseOutput.textoParaVoz("KM"))
+        assertEquals("dê, erre", PhraseOutput.textoParaVoz("DR"))
+        assertEquals("tê, é, ele", PhraseOutput.textoParaVoz("TEL"))
+    }
+
+    @Test
+    fun `palavra de verdade continua sendo falada como palavra`() {
+        assertEquals("casa", PhraseOutput.textoParaVoz("CASA"))
+        assertEquals("banheiro", PhraseOutput.textoParaVoz("BANHEIRO"))
+    }
+
+    @Test
+    fun `palavra vai em minusculas porque caixa alta vira sigla`() {
+        // "OBRIGADO" em caixa alta é o que faz o motor tratar o token como
+        // sigla e soletrar sozinho, do jeito errado.
+        assertEquals("obrigado", PhraseOutput.textoParaVoz("OBRIGADO"))
+    }
+
+    @Test
+    fun `trecho vazio nao vira fala`() {
+        assertEquals("", PhraseOutput.textoParaVoz(""))
+        assertEquals("", PhraseOutput.textoParaVoz("   "))
     }
 }

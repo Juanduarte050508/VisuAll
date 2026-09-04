@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Modo video: o anel segue dourado como o resto do app; o miolo vermelho e
+     cor semantica (gravacao), nao decoracao, e por isso escapa do padrao. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item>
         <shape android:shape="oval">
-            <stroke android:width="3dp" android:color="@color/text_primary"/>
+            <stroke android:width="3dp" android:color="@color/gold_light"/>
             <solid android:color="#00000000"/>
         </shape>
     </item>

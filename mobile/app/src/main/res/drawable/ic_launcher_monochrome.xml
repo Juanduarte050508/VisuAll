@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Mesma marca do ic_launcher_foreground em uma cor só: é a camada que o
+    Android 13+ usa no ícone temático, pintando o desenho com a cor tirada do
+    papel de parede. O sistema aplica o tint por cima, então o branco daqui é só
+    o veículo da forma — o que importa é a silhueta.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <path
+        android:pathData="M30,54 Q54,28 78,54 Q54,80 30,54 Z"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="6.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+    <path
+        android:pathData="M46,54 A8,8 0 1,0 62,54 A8,8 0 1,0 46,54 Z"
+        android:fillColor="#FFFFFF" />
+
+    <path
+        android:pathData="M36,34 Q54,24 72,34"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="5"
+        android:strokeLineCap="round" />
+</vector>

@@ -13,6 +13,217 @@ Formato: **Constante(s)** — valor atual — decisão e por quê — status.
 
 ## Não lançado
 
+- **A câmera continuava reconhecendo com o modo resposta aberto** — enquanto
+  alguém responde, ninguém está sinalizando: a câmera fica apontada para
+  qualquer coisa, e o que ela reconhecia por acidente entrava na frase e era
+  falado em voz alta. `LibrasAnalyzer` ganhou um `pausado` (`@Volatile`, porque
+  quem liga é a thread da UI e quem lê é a do executor de análise) que faz
+  `analyze()` fechar o `ImageProxy` e voltar sem inferência. Pausar em vez de
+  desvincular a câmera é deliberado: desvincular apagaria a preview e recarregaria
+  os modelos na volta — foi exatamente o que causava a tela piscando preto. A
+  pausa é reaplicada quando o analyzer é recriado num rebind. Status: **corrigido**.
+
+- **Duas lixeiras na mesma tela, com significados diferentes** — a de apagar
+  letra e a de apagar resposta, mesmo ícone, empilhadas. A segunda vivia dentro
+  da bolha da resposta, que perdeu a função quando o modo resposta virou tela
+  cheia: quem é lido de longe é a tela cheia, o texto continua guardado no campo
+  e reabrir o `RESPONDER` já traz tudo de volta. A bolha saiu inteira, e com ela
+  a lixeira duplicada e a caixa que sobrava na câmera depois de fechar a resposta.
+  O texto da resposta virou estado do fragmento (`respostaAtual`) em vez de morar
+  numa view. Status: **corrigido**.
+
+- **O anel da lixeira aparecia cortado** — `btn_delete_letter` subiu para 48dp na
+  padronização dos botões, mas o `feedback_row` que o contém continuou com 44dp
+  de altura: sobravam 2dp de corte em cima e embaixo, bem em cima do anel dourado.
+  A linha acompanhou o botão. Status: **corrigido**.
+
+- **Ícones saíam cinza em vez de branco** — `ic_voice_reply` e `ic_hands` usavam
+  `?attr/colorControlNormal` como `fillColor`, e no tema escuro esse atributo
+  resolve para um branco **com alpha**. Um tint aplicado por cima preserva o
+  alpha da origem, então o ícone renderizava translúcido — cinza sobre o fundo
+  preto — enquanto o `ic_flip`, que usa `@color/text_primary` opaco, saía branco.
+  Não era o tint da view: era a opacidade do desenho. Fixado branco opaco nos
+  dois, deixando o tint mandar só na cor. Status: **corrigido**.
+
+- **Botões de ícone com três tamanhos diferentes** — `RESPONDER` tinha 48dp,
+  girar câmera e histórico 42dp, apagar letra 40dp. Um padrão visual com três
+  tamanhos não é padrão. Todos foram para 48dp, que é o mínimo tocável
+  acessível — a uniformização sobe o menor em vez de encolher o maior.
+  Status: **ativo**.
+
+- **A bolha da resposta voltou a ser compacta** — ela tinha subido para 20sp em
+  negrito com até 5 linhas quando a bolha **era** a superfície de leitura. Com o
+  modo resposta em tela cheia isso mudou de dono: quem é lido de longe é a tela
+  cheia, e a bolha voltou ao papel de aviso de que existe uma resposta guardada
+  (tocar nela reabre a tela cheia). Um bloco grande ali só tomava a câmera.
+  Status: **corrigido**.
+
+- **Dois históricos, um por metade da conversa** — o que foi sinalizado e o que
+  foi respondido são consultados em momentos diferentes e por pessoas diferentes;
+  uma lista só misturando os dois obrigava a garimpar. O botão do topo abre o
+  histórico de Libras, e um botão novo dentro da tela de resposta abre o das
+  respostas. Cada um limpa só a sua metade. Não houve dado novo a guardar: o
+  campo `source` já existia em cada entrada, então bastou filtrar. Status: **ativo**.
+
+- **Folha do histórico reorganizada** — as três ações ficavam **acima** da lista,
+  com pesos iguais, e a única dourada era `COMPARTILHAR`: a ênfase visual caía na
+  ação menos usada, enquanto `LIMPAR`, que não tem desfazer, ficava no meio das
+  outras duas com a mesma aparência e a um toque de distância. Agora o conteúdo
+  vem primeiro e as ações depois; copiar e compartilhar são dois botões iguais no
+  rodapé, e limpar é um ícone separado por um espaço, com confirmação antes de
+  apagar. A etiqueta de origem em cada linha saiu junto com o alinhamento
+  esquerda/direita: cada folha mostra uma origem só, então repetir isso linha a
+  linha era ruído que o título já resolve. Status: **ativo**.
+
+- **Modo resposta virou tela cheia** — era uma caixa flutuante ancorada acima do
+  `modes_row`, e ela cobria a moldura vermelha de detecção bem no meio da tela:
+  quem responde perdia de vista o retorno de que o app está enxergando a mão. O
+  texto também tinha 15sp em três linhas, pequeno demais para ser lido do outro
+  lado de um balcão — e ler do outro lado é justamente o propósito do modo. Em
+  tela cheia os dois problemas somem por construção: não há o que cobrir, porque
+  a câmera não está em jogo enquanto se responde (quem sinaliza não está
+  sinalizando nesse momento), e o texto ocupa a tela inteira. O campo de edição
+  **é** a área de exibição — o mesmo texto que se digita é o que a pessoa surda
+  lê, em vez de duas telas para um texto só. Os botões viraram `FALAR` (microfone),
+  `LIMPAR` e `PRONTO`; sair é o `X` do canto, ação separada de propósito, porque
+  `PRONTO` esconde o teclado e **deixa** o texto à mostra: é o momento de virar o
+  celular. Status: **ativo**.
+
+- **A tela piscava preto ao voltar do reconhecedor de fala** — `onResume` sempre
+  chamava `scheduleBindCamera`, e `bindCamera()` faz `provider.unbindAll()` antes
+  de vincular de novo: a preview perde a superfície e fica preta até o primeiro
+  quadro novo chegar. Voltar do microfone não muda nada na câmera, então esse
+  religamento só produzia o flash — e ainda recriava o analyzer, recarregando os
+  modelos. O CameraX religa sozinho pelo lifecycle quando a activity volta para
+  STARTED, então basta não atrapalhar: uma flag marca a ida para uma activity
+  nossa e o `onResume` seguinte pula o rebind. Status: **corrigido**.
+
+- **O "voltar" do sistema saía do modo Libras inteiro** — com a resposta ocupando
+  a tela toda, apertar voltar é o gesto natural para sair dela; sem tratamento,
+  o `popBackStack` levava de volta para a câmera e a sessão de Libras se perdia.
+  Um `OnBackPressedCallback` ligado ao estado do painel fecha só a resposta. O
+  mesmo vale para o `Done` do teclado, que antes fechava o painel e agora faz o
+  que o `PRONTO` faz. Status: **corrigido**.
+
+- **Guardar a resposta deixou de ser destrutivo** — `saveReplyToScreen()` com o
+  campo vazio chamava `clearReply()`, que apaga a resposta do histórico **e fecha
+  o painel**. Guardar e fechar são decisões diferentes, e misturá-las fazia botões
+  de "guardar" fecharem a tela sem aviso. Agora campo vazio só significa "não há
+  resposta": limpa o que estava guardado e devolve `false`, sem mexer no painel.
+  Status: **corrigido**.
+
+- **Leitura da resposta em voz alta removida** — a resposta existe para ser LIDA
+  por quem não ouve. O app repetia em voz alta o que a pessoa acabava de falar no
+  microfone, o que não entrega a mensagem a ninguém. Saíram a fala automática
+  depois do reconhecimento, o botão `OUVIR` e a função `speakReply` inteira. O
+  TextToSpeech continua só nas letras reconhecidas em Libras. Status: **ativo**.
+
+- **`tv_mode_label` colidia com o chip `LINHAS`** — o rótulo "Modo Libras" estava
+  ancorado em `Start_toStartOf="parent"` e `End_toEndOf="parent"`, ou seja
+  centralizado na TELA INTEIRA, ignorando os vizinhos. Enquanto o chip coubesse
+  na folga, passava despercebido; num aparelho onde "LINHAS: ON" fique mais largo
+  (fonte do sistema maior, densidade ou tamanho de tela diferentes) os dois se
+  encavalam. Não é bug de um modelo: é o layout não ter restrição nenhuma entre
+  eles. Agora o rótulo é `0dp` preso entre `btn_lines` e `btn_history`, o que
+  torna a colisão impossível — se faltar espaço ele encolhe e reticencia, em vez
+  de escrever por cima. O `maxWidth` fixo de 150dp saiu junto, que era a tentativa
+  anterior de conter o problema pelo lado errado. Status: **corrigido**.
+
+- **Padrão visual dos botões: anel dourado + conteúdo branco** — cada família
+  resolvia isso do seu jeito: obturador dourado cheio, botão do VisuAll dourado
+  cheio com ícone escuro, galeria com anel de 1dp a 40% de opacidade
+  (praticamente invisível), controles do modo Libras com anel de 1dp, e o girar
+  câmera da tela de câmera sem anel nenhum, entre dois botões que tinham. Agora
+  todo botão de ícone é fundo escuro + anel dourado de 2dp (3dp no obturador, que
+  é maior) + conteúdo em `text_primary`. Exceção única: o vermelho do obturador
+  em modo vídeo e do botão de parar gravação, que é cor semântica, não decoração.
+  O que se perde: o botão do VisuAll não salta mais pelo preenchimento dourado —
+  o que o mantém achável é a posição fixa e isolada no canto superior direito.
+  Status: **ativo**.
+
+- **`OUVIR` (antigo `FALAR`) não falava e apagava a resposta** — `speakReply()`
+  decidia se havia texto pelo retorno de `saveReplyToScreen()`, cujo caminho de
+  falha é `clearReply()`: com o campo vazio o botão fechava o painel, removia a
+  resposta do histórico (`removerRespostaAtual`) e saía sem falar nada. Era isso
+  o "o botão só sai do modo resposta e nada acontece" — e, se já houvesse
+  resposta guardada, ela sumia no processo. Agora o texto é lido direto do campo
+  e o campo vazio só mostra o aviso, sem efeito colateral. Status: **corrigido**.
+
+- **Botão `DIGITAR` removido do painel de resposta** — tocar na própria caixa de
+  texto já abre o teclado, então o botão era um segundo caminho pra mesma coisa
+  ocupando um terço da linha. `focusReplyText()` continua existindo, usado ao
+  tocar na bolha da resposta. Status: **ativo**.
+
+- **Hierarquia do painel de resposta invertida** — o microfone (`btn_reply_audio`)
+  era o único em cinza enquanto `DIGITAR` e a leitura em voz alta ficavam em
+  dourado preenchido: a ênfase visual apontava pro caminho menos usado, quando
+  falar e ver o texto transcrito é o que o ouvinte faz na prática. Agora o
+  microfone é o único preenchido e ganhou ícone; `OUVIR` e `OK` viraram contorno.
+  A linha passou de 36dp pra 48dp, o mínimo tocável acessível. Status: **ativo**.
+
+- **`RESPONDER` virou botão de ícone de 48dp** — era um `TextView` com a palavra
+  escrita, preso entre a borda da tela e o `modes_row`, que ocupa 234dp
+  centrados: sobravam ~43dp de largura, e é por isso que o `autoSizeMinTextSize`
+  descia até 7sp. A palavra nunca teve espaço ali. Como ícone ele espelha o
+  `btn_flip` do outro lado, o alvo cresce de 40dp pra 48dp e o rótulo vive no
+  `tooltipText`/`contentDescription`, onde dá pra ler. O fundo saiu do
+  `vf_bg_mode_inactive` (o mesmo dos botões de modo, que fazia a ação parecer um
+  terceiro modo desligado) pra um contorno dourado de 2dp, e fica preenchido
+  enquanto o painel está aberto, porque ali o toque já não abre nada — guarda a
+  resposta e fecha. Status: **ativo**.
+
+- **Atalho de voz no `RESPONDER`** — responder por voz custava dois toques (abrir
+  o painel, depois achar o microfone dentro dele) sendo o caminho mais comum de
+  quem ouve. Segurar o botão vai direto pro reconhecimento de fala, pulando o
+  painel. Aqui o toque longo padrão do Android (~500ms) serve, diferente da
+  lixeira: atalho quer ser rápido, e limpar a frase quer ser difícil de disparar
+  sem querer. Status: **ativo**.
+
+- **`vf_bg_action_btn` virou `ripple`** — era um `shape` estático, então o
+  `isPressed` que o hold da lixeira liga não mudava nada na tela e o botão não
+  dava retorno algum de toque. Mesmo desenho, agora com ripple; vale pra lixeira,
+  giro de câmera e histórico. Status: **ativo**.
+
+- **`TEMPO_HOLD_LIMPAR_MS`** — 3000 ms — a lixeira fazia o contrário do que se
+  espera dela: um toque limpava a frase inteira e o toque longo é que apagava
+  uma letra. Errar o alvo custava a frase toda. Agora toque apaga a última
+  letra/sinal e segurar 3 s limpa tudo, com a `progress_clear` enchendo durante
+  o hold — a mesma barra que o gesto de mão aberta já usa. O tempo é menor que o
+  daquele gesto (`TEMPO_PRA_LIMPAR_CORPO`, 5 s), onde a espera longa existe pra
+  não confundir limpeza com sinal sendo feito; no botão não há essa dúvida. O
+  hold é cronometrado à mão
+  (`setOnTouchListener` + `postDelayed`) porque o toque longo do Android dispara
+  em ~500 ms e não há API pra alongar esse valor. Status: **ativo**.
+
+- **Sugestão de palavras removida** — o `WordSuggestionEngine` propunha palavras
+  a cada letra reconhecida, competindo com a leitura da própria frase justamente
+  enquanto ela estava sendo escrita. Saíram o motor, a linha de botões nos dois
+  layouts (retrato e paisagem), `LibrasAnalyzer.aplicarSugestao` e
+  `SentenceBuilder.aplicarSugestao` — nada de meio-termo, pra não sobrar caminho
+  morto que volte a aparecer. A `phrase_bubble` foi reancorada em `modes_row`
+  (retrato) e `action_row` (paisagem), que era onde a linha removida se
+  ancorava. Status: **ativo**.
+
+- **`PhraseOutput.textoParaVoz`** — o TextToSpeech normaliza o texto que recebe
+  e expande abreviação por conta própria: soletrar A-V e fechar a palavra saía
+  falado como "avenida", "R" virava "rua", "KM" virava "quilômetro". Quem
+  soletra em Libras está escrevendo LETRAS, então nada pode dar margem pro motor
+  adivinhar palavra que a pessoa não escreveu. A regra agora tem três degraus:
+  letra sozinha vira o nome dela ("V" → "vê"); palavra que está na lista de
+  abreviações é soletrada; qualquer outra é falada em minúsculas — a caixa alta
+  é o que faz o motor tratar o token como sigla. Status: **corrigido**.
+
+- **Ícone adaptativo virou vetor** — o `ic_launcher_foreground` era PNG com a
+  arte inteira, o nome "VisuAll" e o fundo preto chapado embutidos, nos tamanhos
+  do ícone LEGADO (48 a 192 px). Um foreground adaptativo é desenhado num canvas
+  de 108 dp do qual o launcher mostra os 72 dp centrais: os PNGs eram esticados,
+  o texto saía cortado pela máscara e o preto opaco na camada da frente anulava
+  o `ic_launcher_background`. Agora é `drawable/ic_launcher_foreground.xml`,
+  vetor transparente e sem texto, com a marca dentro dos 66 dp garantidos, mais
+  uma camada `monochrome` pro ícone temático do Android 13+. A espiral virou
+  íris cheia (traço fino empasta a 48 dp) e a seta virou sobrancelha — saindo da
+  amêndoa, ela fazia o conjunto ler como o símbolo de Marte. Status: **ativo**.
+
 - **Repositorio dividido em `mobile/` e `computer/`** — o app Android ficou
   isolado em `mobile/`; backend de PC, scripts de treino, fixtures e modelos
   Python foram agrupados em `computer/`. Caminhos de CI, scripts e testes foram

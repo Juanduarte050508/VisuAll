@@ -69,23 +69,6 @@ internal class SentenceBuilder {
         letraRepetidaPendente = ""
     }
 
-    /**
-     * Troca a última palavra pela sugestão escolhida, deixando um espaço no fim
-     * pra a próxima palavra já começar limpa. Devolve false se a sugestão for
-     * vazia.
-     */
-    fun aplicarSugestao(palavra: String): Boolean {
-        val sugestao = palavra.trim()
-        if (sugestao.isBlank()) return false
-        // substringBeforeLast com valor padrão "" é o que faz a frase de uma
-        // palavra só ser substituída por inteiro, em vez de a sugestão ser
-        // grudada nela.
-        val prefixo = frase.substringBeforeLast(" ", missingDelimiterValue = "")
-        frase = if (prefixo.isBlank()) "$sugestao " else "$prefixo $sugestao "
-        letraRepetidaPendente = ""
-        return true
-    }
-
     /** Apaga o último caractere. Devolve false se a frase já estava vazia. */
     fun apagarUltima(): Boolean {
         if (frase.isEmpty()) return false
