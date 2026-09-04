@@ -443,8 +443,24 @@ class LibrasAnalyzer(
         return videoTimestamp
     }
 
+    /**
+      * Enquanto o modo resposta esta aberto ninguem esta sinalizando: a camera
+      * fica apontada pra qualquer coisa e o que ela reconhece por acidente
+      * entra na frase e e falado em voz alta. Pausar aqui, e nao desvincular a
+      * camera, e de proposito -- desvincular apaga a preview e recarrega os
+      * modelos ao voltar. Volatile porque quem liga e a thread da UI e quem le
+      * e a thread do executor de analise.
+      */
+     @Volatile
+     var pausado = false
+
     @ExperimentalGetImage
     override fun analyze(imageProxy: ImageProxy) {
+      if (pausado) {
+          // Fechar e obrigatorio: sem isso o CameraX para de entregar quadros.
+          imageProxy.close()
+          return
+      }
       // rawBitmap/preparedBitmap precisam existir fora do try para o finally
       // poder reciclá-los (variável declarada dentro do try não é visível lá).
       val frameStartNs = SystemClock.elapsedRealtimeNanos()

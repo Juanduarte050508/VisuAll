@@ -110,6 +110,11 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
     // HUD mexe na visibilidade das views e precisa saber ao que voltar.
     private var painelRespostaAberto = false
 
+    // Texto da resposta atual. Vivia no tv_reply da bolha; com a bolha fora da
+    // tela ele passa a ser estado do fragmento, sem view espelhando.
+    private var respostaAtual = ""
+
+
     // Acabamos de abrir uma activity nossa (o reconhecedor de fala)? Se sim, o
     // onResume seguinte nao deve religar a camera. Ver o comentario no onResume.
     private var voltandoDeActivityNossa = false
@@ -407,6 +412,9 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
                     return@post
                 }
                 librasAnalyzer = newAnalyzer
+                // O analyzer e recriado a cada bind; sem isto, um religamento
+                // com a resposta aberta voltaria reconhecendo.
+                newAnalyzer.pausado = painelRespostaAberto
                 boundAnalysis.setAnalyzer(cameraExecutor, newAnalyzer)
                 sincronizarAlfabeto(newAnalyzer)
                 bindInProgress = false
@@ -539,7 +547,6 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         // onResume chama este metodo dentro de um post(), ou seja DEPOIS de o
         // resultado da fala ja ter preenchido a caixa. A conversa na tela
         // precisa durar ate alguem apagar, nao ate a proxima troca de layout.
-        binding.replyBubble.isVisible = visible && !binding.tvReply.text.isNullOrBlank()
         binding.phraseBubble.isVisible = visible && fraseBase.isNotBlank()
         binding.replyPanel.isVisible = visible && painelRespostaAberto
         atualizarBotaoResponder()
@@ -630,14 +637,6 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         binding.btnReply.setOnLongClickListener {
             startSpeechReply()
             true
-        }
-
-        binding.replyBubble.setOnClickListener {
-            openReplyPanel(focus = true)
-        }
-
-        binding.btnReplyClear.setOnClickListener {
-            clearReply()
         }
 
         binding.btnConfirmLetter.setOnClickListener {
@@ -755,13 +754,24 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
             true
         }
 
+        // Duas metades da conversa, dois historicos. O botao do topo abre o
+        // que foi SINALIZADO; o de dentro da tela de resposta abre o que foi
+        // RESPONDIDO. Antes uma lista so misturava os dois e obrigava a
+        // garimpar pra achar o que se procurava.
         binding.btnHistory.setOnClickListener {
-            HistoryBottomSheet.newInstance(historyStore.entries)
-                .also { sheet ->
-                    sheet.onClearConversation = { historyStore.limpar() }
-                }
-                .show(childFragmentManager, "history")
+            abrirHistorico("LIBRAS", "Libras")
         }
+        binding.btnReplyHistory.setOnClickListener {
+            abrirHistorico("RESPOSTA", "Respostas")
+        }
+    }
+
+    private fun abrirHistorico(origem: String, titulo: String) {
+        HistoryBottomSheet.newInstance(historyStore.entriesDe(origem), titulo)
+            .also { sheet ->
+                sheet.onClearConversation = { historyStore.limpar(origem) }
+            }
+            .show(childFragmentManager, "history_$origem")
     }
 
     private fun updateModeButtons() {
@@ -845,6 +855,9 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
     private fun atualizarBotaoResponder() {
         val aberto = binding.replyPanel.isVisible
         fecharRespostaNoVoltar.isEnabled = aberto
+        // Com a resposta aberta ninguem esta sinalizando: o que a camera
+        // reconhecer ali e acidente, e entrava na frase sendo falado em voz alta.
+        librasAnalyzer?.pausado = aberto
         binding.btnReply.setBackgroundResource(
             if (aberto) R.drawable.vf_bg_action_primary_on else R.drawable.vf_bg_action_primary
         )
@@ -868,7 +881,6 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         binding.replyPanel.isVisible = true
         painelRespostaAberto = true
         atualizarBotaoResponder()
-        val respostaAtual = binding.tvReply.text?.toString().orEmpty()
         if (binding.etReply.text.isNullOrBlank() && respostaAtual.isNotBlank()) {
             binding.etReply.setText(respostaAtual)
             binding.etReply.setSelection(respostaAtual.length)
@@ -908,8 +920,7 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
             esvaziarResposta()
             return false
         }
-        binding.tvReply.text = texto
-        binding.replyBubble.isVisible = true
+        respostaAtual = texto
         historyStore.registrarMensagemResposta(texto)
         return true
     }
@@ -917,14 +928,7 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
     /** Apaga a resposta em todos os lugares onde ela existe, sem mexer no painel. */
     private fun esvaziarResposta() {
         historyStore.removerRespostaAtual()
-        binding.tvReply.text = ""
-        binding.replyBubble.isVisible = false
-    }
-
-    private fun clearReply() {
-        esvaziarResposta()
-        binding.etReply.setText("")
-        closeReplyPanel()
+        respostaAtual = ""
     }
 
     // ── Callbacks ──────────────────────────────────────────────────────────

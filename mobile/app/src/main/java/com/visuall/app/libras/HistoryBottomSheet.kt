@@ -6,13 +6,12 @@ import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.os.Parcelable
-import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
@@ -35,6 +34,17 @@ data class HistoryEntry(
 }
 
 // ── Bottom Sheet ───────────────────────────────────────────────────────────
+//
+// Uma folha por metade da conversa: o que foi sinalizado e o que foi respondido
+// sao consultados em momentos diferentes e por pessoas diferentes, entao cada
+// uma abre da sua propria tela. O titulo diz qual esta aberta.
+//
+// A ordem dos elementos e deliberada: conteudo primeiro, acoes depois. Antes as
+// tres acoes ficavam ACIMA da lista, e a destrutiva (limpar) dividia peso e
+// aparencia com copiar, enquanto compartilhar era a unica dourada -- a enfase
+// visual caia na acao menos usada e a perigosa ficava a um toque de distancia
+// no meio das outras. Agora copiar e compartilhar sao dois botoes iguais no
+// rodape e limpar e um icone separado, com confirmacao.
 class HistoryBottomSheet : BottomSheetDialogFragment() {
 
     private var _binding: DialogHistoryBinding? = null
@@ -43,16 +53,18 @@ class HistoryBottomSheet : BottomSheetDialogFragment() {
 
     companion object {
         private const val ARG_WORDS = "words"
+        private const val ARG_TITULO = "titulo"
 
-        fun newInstance(words: List<HistoryEntry>): HistoryBottomSheet {
+        fun newInstance(words: List<HistoryEntry>, titulo: String): HistoryBottomSheet {
             return HistoryBottomSheet().also { sheet ->
                 sheet.arguments = Bundle().apply {
-                    // Cópia defensiva: em processo único, um Bundle guarda a
-                    // MESMA referência da lista (não serializa de verdade até
+                    // Copia defensiva: em processo unico, um Bundle guarda a
+                    // MESMA referencia da lista (nao serializa de verdade ate
                     // cruzar um processo). Sem isso, letras reconhecidas
-                    // enquanto o histórico está aberto mudam a lista por
+                    // enquanto o historico esta aberto mudam a lista por
                     // baixo do RecyclerView sem notifyDataSetChanged().
                     putParcelableArrayList(ARG_WORDS, ArrayList(words))
+                    putString(ARG_TITULO, titulo)
                 }
             }
         }
@@ -71,32 +83,44 @@ class HistoryBottomSheet : BottomSheetDialogFragment() {
 
         @Suppress("DEPRECATION")
         val words = arguments?.getParcelableArrayList<HistoryEntry>(ARG_WORDS) ?: arrayListOf()
+        val titulo = arguments?.getString(ARG_TITULO).orEmpty()
 
+        binding.tvHistoryTitle.text = titulo
         binding.rvHistory.layoutManager = LinearLayoutManager(requireContext())
         binding.rvHistory.adapter = HistoryAdapter(words)
-        updateEmptyState(words.isEmpty())
+        updateEmptyState(words)
 
-        binding.btnCopyConversation.setOnClickListener {
-            copiarConversa(words)
-        }
-
-        binding.btnShareConversation.setOnClickListener {
-            compartilharConversa(words)
-        }
+        binding.btnCopyConversation.setOnClickListener { copiarConversa(words) }
+        binding.btnShareConversation.setOnClickListener { compartilharConversa(words) }
 
         binding.btnClearConversation.setOnClickListener {
             if (words.isEmpty()) return@setOnClickListener
-            onClearConversation?.invoke()
-            words.clear()
-            binding.rvHistory.adapter = HistoryAdapter(words)
-            updateEmptyState(empty = true)
-            Toast.makeText(requireContext(), "Conversa limpa", Toast.LENGTH_SHORT).show()
+            // Apagar o historico nao tem desfazer, e o botao fica ao lado de
+            // dois inofensivos. Uma pergunta e barata perto de perder a conversa.
+            AlertDialog.Builder(requireContext())
+                .setTitle("Apagar este historico?")
+                .setMessage("As ${words.size} mensagens de \"$titulo\" serao removidas. Nao da pra desfazer.")
+                .setNegativeButton("Cancelar", null)
+                .setPositiveButton("Apagar") { _, _ ->
+                    onClearConversation?.invoke()
+                    words.clear()
+                    binding.rvHistory.adapter = HistoryAdapter(words)
+                    updateEmptyState(words)
+                    Toast.makeText(requireContext(), "Historico apagado", Toast.LENGTH_SHORT).show()
+                }
+                .show()
         }
     }
 
-    private fun updateEmptyState(empty: Boolean) {
+    private fun updateEmptyState(words: List<HistoryEntry>) {
+        val empty = words.isEmpty()
         binding.tvEmpty.visibility = if (empty) View.VISIBLE else View.GONE
         binding.rvHistory.visibility = if (empty) View.GONE else View.VISIBLE
+        binding.tvHistoryCount.text = when (words.size) {
+            0 -> ""
+            1 -> "1 mensagem"
+            else -> "${words.size} mensagens"
+        }
         binding.shareActions.alpha = if (empty) 0.35f else 1f
         binding.btnCopyConversation.isEnabled = !empty
         binding.btnShareConversation.isEnabled = !empty
@@ -110,7 +134,7 @@ class HistoryBottomSheet : BottomSheetDialogFragment() {
         val clipboard = requireContext()
             .getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         clipboard.setPrimaryClip(ClipData.newPlainText("Conversa VisuAll", texto))
-        Toast.makeText(requireContext(), "Conversa copiada", Toast.LENGTH_SHORT).show()
+        Toast.makeText(requireContext(), "Copiado", Toast.LENGTH_SHORT).show()
     }
 
     private fun compartilharConversa(items: List<HistoryEntry>) {
@@ -121,17 +145,17 @@ class HistoryBottomSheet : BottomSheetDialogFragment() {
             type = "text/plain"
             putExtra(Intent.EXTRA_TEXT, texto)
         }
-        startActivity(Intent.createChooser(intent, "Compartilhar conversa"))
+        startActivity(Intent.createChooser(intent, "Compartilhar"))
     }
 
     private fun formatarConversa(items: List<HistoryEntry>): String {
         if (items.isEmpty()) return ""
+        val titulo = arguments?.getString(ARG_TITULO).orEmpty()
         return buildString {
-            appendLine("Conversa VisuAll")
+            appendLine("VisuAll — $titulo")
             appendLine()
             items.forEach { item ->
-                val origem = if (item.source == "RESPOSTA") "Resposta" else "Libras"
-                appendLine("[${item.formattedTime()}] $origem: ${item.word}")
+                appendLine("[${item.formattedTime()}] ${item.word}")
             }
         }.trim()
     }
@@ -143,15 +167,15 @@ class HistoryBottomSheet : BottomSheetDialogFragment() {
 }
 
 // ── Adapter ────────────────────────────────────────────────────────────────
+//
+// A etiqueta de origem em cada item saiu: como cada folha mostra uma origem so,
+// repeti-la linha a linha era ruido -- o titulo da folha ja diz de quem e.
 class HistoryAdapter(private val items: List<HistoryEntry>) :
     RecyclerView.Adapter<HistoryAdapter.VH>() {
 
     inner class VH(view: View) : RecyclerView.ViewHolder(view) {
-        val root: LinearLayout = view.findViewById(R.id.history_item_root)
-        val header: LinearLayout = view.findViewById(R.id.history_header)
         val tvWord: TextView = view.findViewById(R.id.tv_word)
         val tvTime: TextView = view.findViewById(R.id.tv_time)
-        val tvSource: TextView = view.findViewById(R.id.tv_source)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
@@ -165,21 +189,10 @@ class HistoryAdapter(private val items: List<HistoryEntry>) :
         val item = items[items.size - 1 - position]
         holder.tvWord.text = item.word
         holder.tvTime.text = item.formattedTime()
-        holder.tvSource.text = if (item.source == "RESPOSTA") "VOZ/TEXTO" else "LIBRAS"
-
-        if (item.source == "RESPOSTA") {
-            holder.root.gravity = Gravity.END
-            holder.header.gravity = Gravity.CENTER_VERTICAL or Gravity.END
-            holder.tvSource.setBackgroundResource(R.drawable.vf_bg_mode_active)
-            holder.tvSource.setTextColor(0xFF070707.toInt())
-            holder.tvWord.setBackgroundResource(R.drawable.vf_bg_reply_text)
-        } else {
-            holder.root.gravity = Gravity.START
-            holder.header.gravity = Gravity.CENTER_VERTICAL or Gravity.START
-            holder.tvSource.setBackgroundResource(R.drawable.vf_bg_mode_inactive)
-            holder.tvSource.setTextColor(0xFFF5F1E8.toInt())
-            holder.tvWord.setBackgroundResource(R.drawable.vf_bg_phrase)
-        }
+        holder.tvWord.setBackgroundResource(
+            if (item.source == "RESPOSTA") R.drawable.vf_bg_reply_text
+            else R.drawable.vf_bg_phrase
+        )
     }
 
     override fun getItemCount() = items.size

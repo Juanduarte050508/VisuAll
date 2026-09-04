@@ -13,6 +13,68 @@ Formato: **Constante(s)** — valor atual — decisão e por quê — status.
 
 ## Não lançado
 
+- **A câmera continuava reconhecendo com o modo resposta aberto** — enquanto
+  alguém responde, ninguém está sinalizando: a câmera fica apontada para
+  qualquer coisa, e o que ela reconhecia por acidente entrava na frase e era
+  falado em voz alta. `LibrasAnalyzer` ganhou um `pausado` (`@Volatile`, porque
+  quem liga é a thread da UI e quem lê é a do executor de análise) que faz
+  `analyze()` fechar o `ImageProxy` e voltar sem inferência. Pausar em vez de
+  desvincular a câmera é deliberado: desvincular apagaria a preview e recarregaria
+  os modelos na volta — foi exatamente o que causava a tela piscando preto. A
+  pausa é reaplicada quando o analyzer é recriado num rebind. Status: **corrigido**.
+
+- **Duas lixeiras na mesma tela, com significados diferentes** — a de apagar
+  letra e a de apagar resposta, mesmo ícone, empilhadas. A segunda vivia dentro
+  da bolha da resposta, que perdeu a função quando o modo resposta virou tela
+  cheia: quem é lido de longe é a tela cheia, o texto continua guardado no campo
+  e reabrir o `RESPONDER` já traz tudo de volta. A bolha saiu inteira, e com ela
+  a lixeira duplicada e a caixa que sobrava na câmera depois de fechar a resposta.
+  O texto da resposta virou estado do fragmento (`respostaAtual`) em vez de morar
+  numa view. Status: **corrigido**.
+
+- **O anel da lixeira aparecia cortado** — `btn_delete_letter` subiu para 48dp na
+  padronização dos botões, mas o `feedback_row` que o contém continuou com 44dp
+  de altura: sobravam 2dp de corte em cima e embaixo, bem em cima do anel dourado.
+  A linha acompanhou o botão. Status: **corrigido**.
+
+- **Ícones saíam cinza em vez de branco** — `ic_voice_reply` e `ic_hands` usavam
+  `?attr/colorControlNormal` como `fillColor`, e no tema escuro esse atributo
+  resolve para um branco **com alpha**. Um tint aplicado por cima preserva o
+  alpha da origem, então o ícone renderizava translúcido — cinza sobre o fundo
+  preto — enquanto o `ic_flip`, que usa `@color/text_primary` opaco, saía branco.
+  Não era o tint da view: era a opacidade do desenho. Fixado branco opaco nos
+  dois, deixando o tint mandar só na cor. Status: **corrigido**.
+
+- **Botões de ícone com três tamanhos diferentes** — `RESPONDER` tinha 48dp,
+  girar câmera e histórico 42dp, apagar letra 40dp. Um padrão visual com três
+  tamanhos não é padrão. Todos foram para 48dp, que é o mínimo tocável
+  acessível — a uniformização sobe o menor em vez de encolher o maior.
+  Status: **ativo**.
+
+- **A bolha da resposta voltou a ser compacta** — ela tinha subido para 20sp em
+  negrito com até 5 linhas quando a bolha **era** a superfície de leitura. Com o
+  modo resposta em tela cheia isso mudou de dono: quem é lido de longe é a tela
+  cheia, e a bolha voltou ao papel de aviso de que existe uma resposta guardada
+  (tocar nela reabre a tela cheia). Um bloco grande ali só tomava a câmera.
+  Status: **corrigido**.
+
+- **Dois históricos, um por metade da conversa** — o que foi sinalizado e o que
+  foi respondido são consultados em momentos diferentes e por pessoas diferentes;
+  uma lista só misturando os dois obrigava a garimpar. O botão do topo abre o
+  histórico de Libras, e um botão novo dentro da tela de resposta abre o das
+  respostas. Cada um limpa só a sua metade. Não houve dado novo a guardar: o
+  campo `source` já existia em cada entrada, então bastou filtrar. Status: **ativo**.
+
+- **Folha do histórico reorganizada** — as três ações ficavam **acima** da lista,
+  com pesos iguais, e a única dourada era `COMPARTILHAR`: a ênfase visual caía na
+  ação menos usada, enquanto `LIMPAR`, que não tem desfazer, ficava no meio das
+  outras duas com a mesma aparência e a um toque de distância. Agora o conteúdo
+  vem primeiro e as ações depois; copiar e compartilhar são dois botões iguais no
+  rodapé, e limpar é um ícone separado por um espaço, com confirmação antes de
+  apagar. A etiqueta de origem em cada linha saiu junto com o alinhamento
+  esquerda/direita: cada folha mostra uma origem só, então repetir isso linha a
+  linha era ruído que o título já resolve. Status: **ativo**.
+
 - **Modo resposta virou tela cheia** — era uma caixa flutuante ancorada acima do
   `modes_row`, e ela cobria a moldura vermelha de detecção bem no meio da tela:
   quem responde perdia de vista o retorno de que o app está enxergando a mão. O

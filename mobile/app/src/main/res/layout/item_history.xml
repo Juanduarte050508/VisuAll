@@ -1,52 +1,36 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    Item do historico: hora e o texto.
+
+    A etiqueta de origem ("LIBRAS" / "VOZ-TEXTO") saiu junto com o alinhamento
+    esquerda-direita: cada folha mostra uma origem so, entao repetir isso linha
+    a linha era ruido que o titulo da folha ja resolve.
+-->
 <LinearLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/history_item_root"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
-    android:gravity="start"
-    android:paddingVertical="9dp">
+    android:paddingVertical="7dp">
 
-    <LinearLayout
-        android:id="@+id/history_header"
-        android:layout_width="match_parent"
-        android:layout_height="24dp"
-        android:gravity="center_vertical"
-        android:orientation="horizontal">
-
-        <TextView
-            android:id="@+id/tv_source"
-            android:layout_width="wrap_content"
-            android:layout_height="22dp"
-            android:gravity="center"
-            android:minWidth="76dp"
-            android:paddingHorizontal="10dp"
-            android:textColor="@color/text_primary"
-            android:textSize="9sp"
-            android:textStyle="bold" />
-
-        <TextView
-            android:id="@+id/tv_time"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="10dp"
-            android:layout_weight="1"
-            android:gravity="end"
-            android:textColor="#666666"
-            android:textSize="12sp" />
-    </LinearLayout>
+    <TextView
+        android:id="@+id/tv_time"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="4dp"
+        android:layout_marginBottom="4dp"
+        android:textColor="@color/text_muted"
+        android:textSize="11sp" />
 
     <TextView
         android:id="@+id/tv_word"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
-        android:background="@drawable/vf_bg_reply_text"
-        android:maxWidth="300dp"
-        android:paddingHorizontal="14dp"
-        android:paddingVertical="10dp"
+        android:background="@drawable/vf_bg_phrase"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="11dp"
         android:textColor="@color/text_primary"
-        android:textSize="15sp" />
+        android:textSize="16sp" />
 
 </LinearLayout>

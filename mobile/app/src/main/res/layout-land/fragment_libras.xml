@@ -161,58 +161,9 @@
         android:textSize="10sp"
         android:textStyle="bold"
         android:visibility="gone"
-        app:layout_constraintBottom_toTopOf="@id/reply_bubble"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent" />
-
-    <FrameLayout
-        android:id="@+id/reply_bubble"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_marginHorizontal="28dp"
-        android:layout_marginBottom="8dp"
-        android:background="@drawable/vf_bg_reply_text"
-        android:visibility="gone"
         app:layout_constraintBottom_toTopOf="@id/phrase_bubble"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent">
-
-        <ImageView
-            android:id="@+id/iv_reply_source"
-            android:layout_width="28dp"
-            android:layout_height="28dp"
-            android:layout_gravity="start|center_vertical"
-            android:layout_marginStart="13dp"
-            android:contentDescription="Resposta por voz ou texto"
-            android:src="@drawable/ic_voice_reply"
-            app:tint="#E8A020" />
-
-        <TextView
-            android:id="@+id/tv_reply"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:ellipsize="end"
-            android:gravity="center"
-            android:maxLines="3"
-            android:minHeight="42dp"
-            android:paddingStart="54dp"
-            android:paddingEnd="54dp"
-            android:paddingVertical="10dp"
-            android:textColor="#F5F1E8"
-            android:textSize="15sp" />
-
-        <ImageView
-            android:id="@+id/btn_reply_clear"
-            android:layout_width="30dp"
-            android:layout_height="30dp"
-            android:layout_gravity="end|center_vertical"
-            android:layout_marginEnd="12dp"
-            android:background="@drawable/vf_bg_action_btn"
-            android:contentDescription="Apagar resposta"
-            android:padding="7dp"
-            android:src="@drawable/ic_delete"
-            app:tint="#E8A020" />
-    </FrameLayout>
+        app:layout_constraintEnd_toEndOf="parent" />
 
     <FrameLayout
         android:id="@+id/phrase_bubble"
@@ -312,6 +263,26 @@
             android:textStyle="bold"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toBottomOf="@id/btn_reply_exit" />
+
+        <!--
+            Historico das RESPOSTAS, so delas. O botao do modo de leitura abre o
+            historico do que foi sinalizado; este abre o do que foi respondido.
+            Sao consultados em momentos diferentes, entao cada um vive na tela
+            onde faz sentido.
+        -->
+        <ImageView
+            android:id="@+id/btn_reply_history"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:layout_marginEnd="12dp"
+            android:background="@drawable/vf_bg_action_btn"
+            android:contentDescription="Historico das respostas"
+            android:padding="13dp"
+            android:src="@drawable/ic_history"
+            app:tint="@color/text_primary"
+            app:layout_constraintEnd_toStartOf="@id/btn_reply_exit"
+            app:layout_constraintTop_toTopOf="@id/btn_reply_exit"
             app:layout_constraintBottom_toBottomOf="@id/btn_reply_exit" />
 
         <ImageView
