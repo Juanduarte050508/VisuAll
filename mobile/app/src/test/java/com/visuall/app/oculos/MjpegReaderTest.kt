@@ -30,6 +30,48 @@ class MjpegReaderTest {
     // o leitor concorda comigo sobre o formato -- nao que ele concorda com o
     // que vai chegar dos oculos.
 
+    /**
+     * O CameraWebServer de fabrica manda a fronteira DEPOIS de cada quadro, e
+     * nao antes. E o contrario do que diz o formato multipart -- navegador
+     * tolera --, e o nosso firmware nao faz isso: manda antes, como o mock.
+     *
+     * Mas o mundo esta cheio de firmware derivado do exemplo de fabrica, e o
+     * primeiro reflexo de quem trava na bancada e gravar o exemplo pra ver se
+     * a placa presta. Se o app engasgasse nesse formato, esse teste inocente
+     * apontaria pro lugar errado.
+     *
+     * Perde o primeiro quadro, e isso e esperado: nao ha fronteira nenhuma
+     * antes dele pra o leitor se ancorar. Um quadro em quinze por segundo.
+     */
+    @Test
+    fun `aguenta o formato de fabrica, com a fronteira depois do quadro`() {
+        val fixture = javaClass.getResourceAsStream("/mjpeg_mock.bin")!!.readBytes()
+
+        // Tira os JPEGs da fixture (que esta no formato do mock)...
+        val originais = mutableListOf<ByteArray>()
+        val deOrigem = leitor(fixture)
+        while (true) originais.add(deOrigem.proximoQuadro() ?: break)
+        assertEquals("a fixture tem 3 quadros", 3, originais.size)
+
+        // ...e remonta na ordem do firmware de fabrica.
+        val saida = java.io.ByteArrayOutputStream()
+        for (jpeg in originais) {
+            saida.write(
+                ("Content-Type: image/jpeg\r\n" +
+                    "Content-Length: ${jpeg.size}\r\n\r\n").toByteArray())
+            saida.write(jpeg)
+            saida.write(("\r\n--$boundary\r\n").toByteArray())
+        }
+
+        val r = leitor(saida.toByteArray())
+        val lidos = mutableListOf<ByteArray>()
+        while (true) lidos.add(r.proximoQuadro() ?: break)
+
+        assertEquals("perde so o primeiro, por nao ter fronteira antes dele", 2, lidos.size)
+        assertArrayEquals("e o que sobra tem de sair intacto", originais[1], lidos[0])
+        assertArrayEquals(originais[2], lidos[1])
+    }
+
     @Test
     fun `le os quadros gravados do mock`() {
         val dados = javaClass.getResourceAsStream("/mjpeg_mock.bin")!!.readBytes()
@@ -121,6 +163,22 @@ class MjpegReaderTest {
     }
 
     // ---- boundaryDe -------------------------------------------------------
+
+    /**
+     * O cabecalho EXATO que o nosso firmware manda, copiado de
+     * esp32/firmware/oculos_camera/oculos_camera.ino.
+     *
+     * Sem espaco depois do ponto-e-virgula, ao contrario do mock. As duas
+     * formas sao validas, e nenhum teste cobria esta: se o parser exigisse o
+     * espaco, tudo passaria aqui, tudo funcionaria com o mock, e a falha so
+     * apareceria no dia em que a placa fosse ligada pela primeira vez -- o
+     * pior dia possivel pra descobrir.
+     */
+    @Test
+    fun `o cabecalho que a placa manda, sem espaco depois do ponto-e-virgula`() {
+        assertEquals(boundary,
+            MjpegReader.boundaryDe("multipart/x-mixed-replace;boundary=$boundary"))
+    }
 
     @Test
     fun `boundary entre aspas`() {

@@ -20,9 +20,9 @@ protocolo**. É o que o mock faz.
 | # | Etapa | Depende da placa? |
 |---|---|---|
 | 1 | Mock MJPEG no PC | não — **pronto** |
-| 2 | `NetworkStreamSource` no app | não |
-| 3 | Forçar o Wi-Fi sem internet (`bindProcessToNetwork`) | não |
-| 4 | Compilar o firmware | não (só gravar precisa) |
+| 2 | `NetworkStreamSource` no app | não — **pronto** |
+| 3 | Forçar o Wi-Fi sem internet | não — **pronto**, ver `RedeDosOculos` |
+| 4 | Compilar o firmware | não — **pronto**, ver `firmware/` |
 | 5 | Suportes impressos em 3D | não |
 
 O Wokwi não ajuda aqui: ele não simula câmera (nem OV2640 nem OV5640) e o modo
