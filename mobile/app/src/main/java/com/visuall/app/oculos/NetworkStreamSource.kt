@@ -1,5 +1,6 @@
 package com.visuall.app.oculos
 
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.Log
@@ -25,13 +26,19 @@ import android.util.Log
  * a imagem continua sendo a de agora.
  */
 internal class NetworkStreamSource(
+    context: Context,
     private val url: String,
     /** Chamado na thread de analise, um quadro por vez. Recebe a posse do Bitmap. */
     private val aoQuadro: (Bitmap) -> Unit,
     private val aoEstado: (MjpegClient.Estado) -> Unit = {}
 ) {
     private val caixa = UltimoQuadro<ByteArray>()
-    private val cliente = MjpegClient(url)
+
+    // O stream sai POR ESTA rede, nao pela que o sistema achar melhor. Ver
+    // RedeDosOculos: o Wi-Fi da placa nao tem internet, e o padrao do Android
+    // e abandonar uma rede assim.
+    private val rede = RedeDosOculos(context)
+    private val cliente = MjpegClient(url, abrirConexao = rede::abrir)
     private var threadRede: Thread? = null
     private var threadAnalise: Thread? = null
 
@@ -47,6 +54,9 @@ internal class NetworkStreamSource(
 
     fun iniciar() {
         if (threadRede != null) return
+        // Antes das threads: o pedido leva um instante pra ser atendido, e o
+        // laco do cliente ja tenta de novo enquanto isso.
+        rede.ligar()
 
         threadAnalise = Thread({
             while (true) {
@@ -87,6 +97,9 @@ internal class NetworkStreamSource(
         threadAnalise?.join(PRAZO_PARADA_MS)
         threadRede = null
         threadAnalise = null
+        // Depois dos joins: enquanto as threads terminam, a rede ainda precisa
+        // estar de pe.
+        rede.desligar()
     }
 
     companion object {

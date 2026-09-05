@@ -31,6 +31,18 @@ class MensagemDeErroTest {
             fala.contains("ligados"))
     }
 
+    /**
+     * O motivo vem com maiusculas ("Wi-Fi") e a comparacao e feita em
+     * minusculas: casar os dois na mao e um erro que passa despercebido,
+     * porque a mensagem generica tambem "parece certa" na tela.
+     */
+    @Test
+    fun `rede dos oculos ainda nao encontrada`() {
+        val fala = MensagemDeErro.emPortugues(RedeDosOculos.SEM_REDE)
+        assertTrue("devia mandar conectar no Wi-Fi dos oculos: $fala",
+            fala.contains("Wi-Fi dos oculos"))
+    }
+
     @Test
     fun `celular na rede errada`() {
         val fala = MensagemDeErro.emPortugues("connect failed: ENETUNREACH (Network is unreachable)")

@@ -5,6 +5,7 @@ import java.io.IOException
 import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLConnection
 
 /**
  * Mantem uma conexao com o stream dos oculos e entrega os quadros, reconectando
@@ -21,7 +22,9 @@ import java.net.URL
  */
 internal class MjpegClient(
     private val url: String,
-    private val abrirConexao: (String) -> Conexao = ::abrirHttp,
+    // Lambda, e nao ::abrirHttp: com o parametro de onde a conexao sai, a
+    // referencia ao metodo deixou de ser de um tipo so.
+    private val abrirConexao: (String) -> Conexao = { abrirHttp(it) },
     /** Injetavel pra o teste nao dormir de verdade. */
     private val esperar: (Long) -> Unit = { Thread.sleep(it) }
 ) {
@@ -118,8 +121,19 @@ internal class MjpegClient(
             override fun close() = http.disconnect()
         }
 
-        fun abrirHttp(url: String): Conexao {
-            val http = (URL(url).openConnection() as HttpURLConnection).apply {
+        /**
+         * @param conectar de onde a conexao sai. O padrao usa a rede que o
+         *   sistema escolher; a [RedeDosOculos] passa a rede dos oculos aqui,
+         *   que e o que impede o pedido de sair pelos dados moveis quando o
+         *   Wi-Fi da placa nao tem internet. Fica como parametro, e nao como
+         *   um `if` la dentro, pra que o resto -- timeouts, codigo HTTP,
+         *   cabecalhos -- exista uma vez so pros dois caminhos.
+         */
+        fun abrirHttp(
+            url: String,
+            conectar: (URL) -> URLConnection = { it.openConnection() }
+        ): Conexao {
+            val http = (conectar(URL(url)) as HttpURLConnection).apply {
                 connectTimeout = TIMEOUT_CONEXAO_MS
                 readTimeout = TIMEOUT_LEITURA_MS
                 // O stream nao acaba nunca: manter viva uma conexao dessas no

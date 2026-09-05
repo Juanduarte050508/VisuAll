@@ -27,6 +27,11 @@ internal object MensagemDeErro {
             "unreachable" in m || "enetunreach" in m || "no route" in m ->
                 "O celular nao alcanca essa rede. Confira o Wi-Fi."
 
+            // Pedimos a rede dos oculos e o sistema ainda nao entregou
+            // nenhuma. Quase sempre o celular nem esta no Wi-Fi certo.
+            RedeDosOculos.SEM_REDE.lowercase() in m ->
+                "Conecte o celular ao Wi-Fi dos oculos."
+
             "unable to resolve host" in m || "unknownhost" in m ->
                 "Endereco invalido. Use o numero do IP, como 192.168.4.1."
 

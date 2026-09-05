@@ -113,6 +113,33 @@ class MjpegPontaAPontaTest {
         }
     }
 
+    /**
+     * A conexao sai por onde mandarem, e nao pela rede que o sistema escolher.
+     *
+     * E esse o mecanismo inteiro da etapa do Wi-Fi sem internet: a
+     * RedeDosOculos passa a rede da placa neste mesmo parametro. Se abrirHttp
+     * voltasse a usar o caminho padrao, nada quebraria em teste nenhum -- so
+     * na rua, com o pedido saindo pelos dados moveis.
+     */
+    @Test(timeout = 15_000)
+    fun `abre a conexao por onde mandarem, nao pelo caminho padrao`() {
+        val fixture = javaClass.getResourceAsStream("/mjpeg_mock.bin")!!.readBytes()
+        ServidorDeTeste("multipart/x-mixed-replace; boundary=$boundary", fixture).use { servidor ->
+            val pedidos = mutableListOf<String>()
+            val endereco = "http://127.0.0.1:${servidor.porta}/stream"
+
+            MjpegClient.abrirHttp(endereco) { url ->
+                pedidos.add(url.toString())
+                url.openConnection()
+            }.use { conexao ->
+                assertEquals("tinha que ter passado por quem eu dei", 1, pedidos.size)
+                assertEquals(endereco, pedidos.first())
+                assertTrue("e a conexao aberta ali e a que foi usada: ${conexao.contentType}",
+                    conexao.contentType!!.contains("multipart"))
+            }
+        }
+    }
+
     @Test(timeout = 15_000)
     fun `endereco que responde HTML vira erro que diz o que veio`() {
         // O engano mais comum na montagem: apontar pro endereco errado, ou

@@ -1232,6 +1232,7 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
 
         fonteOculos?.parar()
         fonteOculos = NetworkStreamSource(
+            context = requireContext().applicationContext,
             url = enderecoOculos(),
             aoQuadro = { quadro ->
                 // Duas copias porque os dois consumidores tem donos diferentes:
