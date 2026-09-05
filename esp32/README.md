@@ -111,3 +111,74 @@ adb shell "cat /proc/net/tcp /proc/net/tcp6 | grep 1F90"
 
 Se o `nc` traz bytes e a tela continua preta, o problema é do app pra dentro —
 não da rede.
+
+## Como testar o Wi-Fi sem internet sem derrubar a internet de ninguém
+
+A etapa 3 existe porque o Android abandona uma rede sem internet. Para testar
+isso parecia ser preciso tirar o cabo de internet do roteador — o que deixa a
+casa inteira offline, e não dá para fazer sempre que se mexe no código.
+
+Não é preciso. O Android decide se uma rede "tem internet" tentando alcançar um
+endereço de teste assim que conecta. Apontando esse teste para um endereço que
+não existe, o celular conclui que aquele Wi-Fi não presta — **só naquele
+aparelho**, e sem tocar no roteador.
+
+`192.0.2.1` é reservado para documentação: não existe na internet, então a
+sonda não tem como ser respondida.
+
+```powershell
+# fazer o celular achar que o Wi-Fi nao tem internet
+adb shell "settings put global captive_portal_http_url http://192.0.2.1/generate_204"
+adb shell "settings put global captive_portal_https_url https://192.0.2.1/generate_204"
+adb shell "settings put global captive_portal_fallback_url http://192.0.2.1/gen_204"
+adb shell "settings put global captive_portal_other_fallback_urls http://192.0.2.1/gen_204"
+adb shell "cmd wifi set-wifi-enabled disabled"; adb shell "cmd wifi set-wifi-enabled enabled"
+
+# desfazer
+adb shell "settings delete global captive_portal_http_url"
+adb shell "settings delete global captive_portal_https_url"
+adb shell "settings delete global captive_portal_fallback_url"
+adb shell "settings delete global captive_portal_other_fallback_urls"
+adb shell "cmd wifi set-wifi-enabled disabled"; adb shell "cmd wifi set-wifi-enabled enabled"
+adb shell "cmd wifi start-scan"      # às vezes precisa disto para ele reconectar
+```
+
+A internet continua existindo; o celular é que passa a acreditar que não. Para
+o mecanismo que estamos testando dá no mesmo: o que faz o Android fugir da rede
+é ela perder a marca `VALIDATED`, e ela perde do mesmo jeito nos dois casos.
+
+### O que medir
+
+Estas três linhas contam a história inteira. Com o desvio aplicado:
+
+```
+$ adb shell "dumpsys connectivity | grep -m1 'Active default network'"
+Active default network: 158        # 158 = MOBILE[LTE], nao o Wi-Fi
+
+$ adb shell "ip route get 192.168.15.10"
+192.168.15.10 via 100.75.48.1 dev rmnet0    # rmnet0 = dados moveis
+
+$ adb logcat -s RedeDosOculos
+I RedeDosOculos: usando a rede 161 para o stream      # 161 = o Wi-Fi
+```
+
+O celular manda tudo pela operadora, e o app manda o stream pelo Wi-Fi mesmo
+assim. Isso é a etapa 3 funcionando.
+
+O controle negativo dispensa o app: uma conexão qualquer feita pelo shell do
+próprio celular usa a rede padrão, igual a um app sem a correção.
+
+```powershell
+adb shell "printf 'GET / HTTP/1.0
+
+' | timeout 8 nc 192.168.15.10 8080 | head -c 120"
+```
+
+Com o Wi-Fi validado, isso devolve a página do mock. Com o desvio aplicado,
+devolve nada — que é exatamente o que aconteceria com os óculos sem a etapa 3.
+
+### Um detalhe que atrapalha
+
+A tela do celular bloqueia por inatividade no meio do teste e o `input tap`
+para de achar os botões. `adb shell "svc power stayon usb"` mantém a tela acesa
+enquanto estiver no cabo; `svc power stayon false` devolve ao normal.
