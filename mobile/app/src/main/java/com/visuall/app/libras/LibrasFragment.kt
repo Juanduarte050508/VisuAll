@@ -54,6 +54,7 @@ import com.visuall.app.databinding.FragmentLibrasBinding
 import com.visuall.app.oculos.MensagemDeErro
 import com.visuall.app.oculos.MjpegClient
 import com.visuall.app.oculos.NetworkStreamSource
+import com.visuall.app.ui.EncaixeDeQuadro
 import com.visuall.app.ui.ScanFrameView
 import com.visuall.app.ui.compose.LibrasLandscapeHud
 import java.util.Locale
@@ -1217,6 +1218,11 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         // esses dois precisam do preview_view.
         binding.previewView.visibility = View.INVISIBLE
         binding.ivOculos.isVisible = true
+        // A ImageView dos oculos usa fitCenter: a imagem 4:3 cabe inteira e
+        // sobram faixas em cima e embaixo. O desenho dos landmarks precisa
+        // saber disso, senao mapeia como se a imagem enchesse a tela e joga o
+        // esqueleto centenas de pixels acima da mao.
+        binding.landmarkOverlay.setEncaixe(EncaixeDeQuadro.Modo.INTEIRA)
         binding.btnOculos.alpha = 1f
         binding.landmarkOverlay.clear()
 
@@ -1288,6 +1294,8 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         fonteOculos = null
         binding.ivOculos.setImageDrawable(null)
         binding.ivOculos.isVisible = false
+        // De volta pra PreviewView, que e fillCenter.
+        binding.landmarkOverlay.setEncaixe(EncaixeDeQuadro.Modo.CORTANDO)
         binding.previewView.isVisible = true
         binding.btnOculos.alpha = 0.6f
         binding.landmarkOverlay.clear()

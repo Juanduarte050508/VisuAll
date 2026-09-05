@@ -12,6 +12,7 @@ Uso:
     python mock_esp32_cam.py                 # webcam, se houver; senao sintetico
     python mock_esp32_cam.py video.mp4       # um video em loop
     python mock_esp32_cam.py --sintetico     # forca o gerador, sem camera
+    python mock_esp32_cam.py --espelho       # so pra testar apontando pra si
     python mock_esp32_cam.py --porta 8081
 
 No navegador (PC ou celular):
@@ -129,6 +130,18 @@ class FonteSintetica:
         pass
 
 
+# Espelhar NAO imita os oculos: existe so pro banco de testes.
+#
+# Nos oculos prontos quem usa e o ouvinte, e a camera aponta pra quem sinaliza
+# -- ela ve outra pessoa de frente, igual a camera traseira do celular, que o
+# app nao espelha. Uma webcam de PC aponta pra VOCE, entao e a unica situacao
+# em que falta o espelho, e sinalizar se vendo sem espelho e desconfortavel.
+#
+# Ligado, o quadro deixa de ser o que os oculos mandariam. Se um sinal so
+# funciona com isto ligado, o resultado nao vale: desligue e refaca.
+ESPELHO = False
+
+
 class Difusor:
     """Uma thread le a camera; todos os clientes consomem o ultimo quadro dela.
 
@@ -175,6 +188,8 @@ class Difusor:
                 imagem = fonte.quadro()
                 if imagem is None:
                     break
+                if ESPELHO:
+                    imagem = cv2.flip(imagem, 1)
                 ok, buf = cv2.imencode(
                     ".jpg", imagem, [int(cv2.IMWRITE_JPEG_QUALITY), QUALIDADE_JPEG])
                 if ok:
@@ -282,7 +297,13 @@ def main():
     p.add_argument("--porta", type=int, default=8080)
     p.add_argument("--sintetico", action="store_true",
                    help="nao usa camera nenhuma, gera os quadros")
+    p.add_argument("--espelho", action="store_true",
+                   help="espelha a imagem; so pra quem testa apontando a webcam "
+                        "pra si mesmo. Os oculos NAO fazem isso")
     args = p.parse_args()
+
+    global ESPELHO
+    ESPELHO = args.espelho
 
     def criar_fonte():
         if args.sintetico:
@@ -307,6 +328,10 @@ def main():
 
     servidor = ThreadingHTTPServer(("0.0.0.0", args.porta), Handler)
     print("Mock ESP32-CAM  --  fonte: %s" % Handler.difusor.descricao)
+    if ESPELHO:
+        print("  *** ESPELHO LIGADO -- a imagem NAO e a que os oculos mandariam.")
+        print("      Serve pra sinalizar se vendo. Nao tire conclusao de")
+        print("      reconhecimento com isto ligado.")
     print("  %dx%d a %d quadros/s, JPEG qualidade %d"
           % (LARGURA, ALTURA, FPS, QUALIDADE_JPEG))
     print("")

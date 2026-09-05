@@ -9,11 +9,15 @@ import android.view.View
 
 /**
  * Desenha as linhas de reconhecimento (esqueleto da mão e do corpo) por cima
- * do preview da câmera. Recebe landmarks normalizados (0..1) no MESMO espaço
- * do preview (imagem já rotacionada e espelhada como a câmera frontal mostra),
- * então basta mapear com a mesma lógica FILL_CENTER que a PreviewView usa
- * (app:scaleType="fillCenter"): a View fica cheia e o excesso do sensor é
- * recortado nas sobras.
+ * da imagem. Recebe landmarks normalizados (0..1) no MESMO espaço da imagem
+ * (já rotacionada e espelhada como a fonte mostra), e mapeia para a área que a
+ * imagem de fato ocupa na tela.
+ *
+ * Essa área depende de COMO a imagem foi encaixada, e há duas no app: a câmera
+ * do celular usa `fillCenter` (enche a View e corta o excesso) e a imagem dos
+ * óculos usa `fitCenter` (cabe inteira, com faixas nas sobras). Usar a conta de
+ * uma para a outra não dá erro nenhum — desenha o esqueleto longe da mão, que
+ * foi o que aconteceu quando os óculos entraram. Ver [setEncaixe].
  *
  * A proporção do conteúdo NÃO é fixa — ela vem do analyzer a cada frame
  * (muda entre retrato e paisagem), então o desenho acompanha a imagem real.
@@ -86,31 +90,35 @@ class LandmarkOverlayView @JvmOverloads constructor(
         postInvalidate()
     }
 
-    // Mapeamento FILL_CENTER: cobre a View inteira, centralizado, recortando
-    // o excesso — igual ao app:scaleType="fillCenter" da PreviewView.
+    // Como a imagem está encaixada na View. O padrão é o da câmera do
+    // celular, que é a fonte que existia antes dos óculos.
+    private var encaixe = EncaixeDeQuadro.Modo.CORTANDO
+
     private var dispW = 0f
     private var dispH = 0f
     private var offX = 0f
     private var offY = 0f
 
+    /**
+     * Diz como a fonte atual está sendo exibida, para o desenho cair em cima
+     * dela. Precisa acompanhar o `scaleType` da View que mostra a imagem:
+     * `fillCenter` da PreviewView é [EncaixeDeQuadro.Modo.CORTANDO],
+     * `fitCenter` da ImageView dos óculos é [EncaixeDeQuadro.Modo.INTEIRA].
+     */
+    internal fun setEncaixe(modo: EncaixeDeQuadro.Modo) {
+        if (encaixe == modo) return
+        encaixe = modo
+        postInvalidate()
+    }
+
     private fun recomputeMapping() {
-        val vw = width.toFloat()
-        val vh = height.toFloat()
-        if (vw <= 0f || vh <= 0f) return
-        val viewAspect = vw / vh
-        if (viewAspect > contentAspect) {
-            // View mais larga que o conteúdo: cobre pela largura e recorta em cima/baixo.
-            dispW = vw
-            dispH = vw / contentAspect
-            offX = 0f
-            offY = (vh - dispH) / 2f
-        } else {
-            // View mais estreita/alta: cobre pela altura e recorta nas laterais.
-            dispH = vh
-            dispW = vh * contentAspect
-            offY = 0f
-            offX = (vw - dispW) / 2f
-        }
+        val area = EncaixeDeQuadro.calcular(
+            width.toFloat(), height.toFloat(), contentAspect, encaixe)
+        if (area.largura <= 0f || area.altura <= 0f) return
+        offX = area.esquerda
+        offY = area.topo
+        dispW = area.largura
+        dispH = area.altura
     }
 
     private fun mapX(nx: Float) = offX + nx * dispW
