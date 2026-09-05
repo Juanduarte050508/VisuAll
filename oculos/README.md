@@ -243,7 +243,31 @@ A resposta certa tem uma linha com o número do seu aparelho e a palavra
 `device`. Se disser `unauthorized`, a caixa de permissão não foi aceita no
 celular.
 
-### 3.2 — Compilar e instalar
+### 3.2 — Dizer onde está o SDK do Android
+
+**Este passo é obrigatório num clone novo, e é onde quase todo mundo tropeça.**
+
+O arquivo que aponta para o SDK (`mobile/local.properties`) **não vai para o
+git** de propósito: o caminho é diferente em cada máquina. Sem ele o gradle
+para com:
+
+```
+SDK location not found. Define a valid SDK location with an ANDROID_HOME
+environment variable or by setting the sdk.dir path in your project's
+local properties file
+```
+
+Há dois jeitos de resolver. **O mais fácil:** abra a pasta `mobile` no Android
+Studio uma vez e espere ele terminar de carregar. Ele cria o arquivo sozinho, e
+depois disso a linha de comando funciona para sempre.
+
+**Pelo terminal**, se preferir:
+
+```powershell
+$env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
+```
+
+### 3.3 — Compilar e instalar
 
 ```powershell
 cd mobile
@@ -259,7 +283,11 @@ Studio:
 $env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
 ```
 
-E rode de novo. Essa linha vale só para a janela aberta; abrindo outra, repita.
+E rode de novo.
+
+> As duas linhas de `$env:` valem só para a janela do PowerShell que está
+> aberta. Fechou e abriu outra, precisa repetir. (Ou abra no Android Studio,
+> que não precisa de nenhuma delas.)
 
 Depois de compilar:
 
@@ -267,7 +295,8 @@ Depois de compilar:
 & $adb install -r app\build\outputs\apk\debug\app-debug.apk
 ```
 
-Tem que responder `Success`.
+Tem que responder `Success`. O APK do modo de depuração tem uns 316 MB — é
+grande porque carrega os modelos de reconhecimento dentro dele.
 
 > Também dá para fazer tudo isso abrindo a pasta `mobile` no Android Studio e
 > clicando no botão de play. É a mesma coisa.
