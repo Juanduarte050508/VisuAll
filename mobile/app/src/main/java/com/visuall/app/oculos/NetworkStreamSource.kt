@@ -28,6 +28,12 @@ import android.util.Log
 internal class NetworkStreamSource(
     context: Context,
     private val url: String,
+    /**
+     * Rede dos oculos. Null (o caso do mock no PC) usa o Wi-Fi em que o
+     * celular ja esta. Ver [EnderecoDosOculos.ehAPlaca].
+     */
+    ssidOculos: String? = null,
+    senhaOculos: String? = null,
     /** Chamado na thread de analise, um quadro por vez. Recebe a posse do Bitmap. */
     private val aoQuadro: (Bitmap) -> Unit,
     private val aoEstado: (MjpegClient.Estado) -> Unit = {}
@@ -37,7 +43,7 @@ internal class NetworkStreamSource(
     // O stream sai POR ESTA rede, nao pela que o sistema achar melhor. Ver
     // RedeDosOculos: o Wi-Fi da placa nao tem internet, e o padrao do Android
     // e abandonar uma rede assim.
-    private val rede = RedeDosOculos(context)
+    private val rede = RedeDosOculos(context, ssidOculos, senhaOculos)
     private val cliente = MjpegClient(url, abrirConexao = rede::abrir)
     private var threadRede: Thread? = null
     private var threadAnalise: Thread? = null

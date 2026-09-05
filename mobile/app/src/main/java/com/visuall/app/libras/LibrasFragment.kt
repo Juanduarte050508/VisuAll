@@ -21,6 +21,7 @@ import android.hardware.camera2.CaptureRequest
 import android.util.Log
 import android.util.Range
 import android.view.MotionEvent
+import android.view.WindowManager
 import android.view.Surface
 import android.view.LayoutInflater
 import android.view.View
@@ -51,6 +52,7 @@ import androidx.fragment.app.Fragment
 import androidx.navigation.fragment.findNavController
 import com.visuall.app.R
 import com.visuall.app.databinding.FragmentLibrasBinding
+import com.visuall.app.oculos.EnderecoDosOculos
 import com.visuall.app.oculos.MensagemDeErro
 import com.visuall.app.oculos.MjpegClient
 import com.visuall.app.oculos.NetworkStreamSource
@@ -103,6 +105,17 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
 
     /** Ultima falha ja avisada, pra o laco de reconexao nao repetir o aviso. */
     private var ultimoAvisoOculos: String? = null
+
+    /** Tela escurecida e surda a toques, com o reconhecimento rodando. */
+    private var telaBloqueada = false
+    private var yInicialDestrave = 0f
+
+    // Com o celular no bolso o gesto de voltar dispara sozinho na borda da
+    // tela. Deixar passar tiraria a pessoa do modo oculos no meio de uma
+    // conversa -- e ela so ia descobrir ao tirar o celular do bolso.
+    private val ignorarVoltarBloqueado = object : OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() = Unit
+    }
 
     private val historyStore by lazy { ConversationHistoryStore(requireContext().applicationContext) }
 
@@ -189,6 +202,10 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         }
         requireActivity().onBackPressedDispatcher
             .addCallback(viewLifecycleOwner, fecharRespostaNoVoltar)
+        // Depois do de cima: o ultimo registrado tem prioridade, e enquanto a
+        // tela esta travada nada mais deve responder ao voltar.
+        requireActivity().onBackPressedDispatcher
+            .addCallback(viewLifecycleOwner, ignorarVoltarBloqueado)
         setupButtons()
         updateModeButtons()
     }
@@ -553,6 +570,9 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         binding.btnReply.visibility = visibility
         binding.btnFlip.visibility = visibility
         binding.btnOculos.visibility = visibility
+        // So existe dentro do modo oculos; fora dele nao ha o que travar.
+        binding.btnBloquear.visibility =
+            if (visible && usandoOculos) View.VISIBLE else View.GONE
         binding.controlsRow?.visibility = visibility
         binding.chipResult.visibility = if (visible) View.INVISIBLE else View.GONE
         binding.progressConfidence.visibility = if (visible) View.INVISIBLE else View.GONE
@@ -735,6 +755,9 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
             else if (enderecoOculos().isBlank()) pedirEnderecoOculos()
             else ligarOculos()
         }
+        binding.btnBloquear.setOnClickListener { bloquearTela() }
+        binding.oculosLock.setOnTouchListener { capa, evento -> aoTocarNaCapa(capa, evento) }
+
         binding.btnOculos.setOnLongClickListener {
             pedirEnderecoOculos()
             true
@@ -1162,6 +1185,12 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
     // A troca e so de FONTE. Nada do reconhecimento muda: os quadros vao pro
     // mesmo LibrasAnalyzer.analisarQuadro que a camera do celular alimenta.
 
+    /** Brilho da tela travada. Zero cravado alguns aparelhos leem como "automatico". */
+    private val BRILHO_TRAVADO = 0.01f
+
+    /** Quanto da altura da tela o dedo precisa subir pra destravar. */
+    private val FRACAO_DESTRAVE = 0.22f
+
     private fun prefsOculos() =
         requireContext().getSharedPreferences("oculos", Context.MODE_PRIVATE)
 
@@ -1177,7 +1206,13 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         }
         AlertDialog.Builder(requireContext())
             .setTitle("Endereco dos oculos")
-            .setMessage("O endereco do stream. Com o mock no PC, e o IP dele com /stream no fim.")
+            .setMessage(
+                "Endereco do stream.\n\n" +
+                    "Oculos: ${EnderecoDosOculos.URL}\n" +
+                    "O app entra na rede ${EnderecoDosOculos.REDE} sozinho, e o " +
+                    "celular continua na rede de casa pro resto.\n\n" +
+                    "Mock no PC: o IP do PC com /stream no fim. Ai o app usa o " +
+                    "Wi-Fi em que o celular ja esta.")
             .setView(campo)
             .setPositiveButton("Conectar") { _, _ ->
                 val url = campo.text.toString().trim()
@@ -1193,6 +1228,7 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         // demora e nao pode acontecer na thread da interface. Se ainda nao
         // existe, e porque a camera acabou de abrir -- pedir pra tentar de novo
         // e melhor que congelar a tela carregando modelo aqui.
+        val endereco = enderecoOculos()
         val analyzer = librasAnalyzer
         if (analyzer == null) {
             Toast.makeText(requireContext(),
@@ -1223,6 +1259,11 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         // saber disso, senao mapeia como se a imagem enchesse a tela e joga o
         // esqueleto centenas de pixels acima da mao.
         binding.landmarkOverlay.setEncaixe(EncaixeDeQuadro.Modo.INTEIRA)
+        binding.btnBloquear.isVisible = true
+        // A tela nao pode apagar. Apagando, o Android para a activity: o
+        // reconhecimento morre e a conexao com os oculos cai junto. Quem quiser
+        // guardar o celular no bolso usa o cadeado, que escurece sem apagar.
+        manterTelaAcesa(true)
         binding.btnOculos.alpha = 1f
         binding.landmarkOverlay.clear()
 
@@ -1231,16 +1272,32 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         analyzer.setEspelhamento(false)
 
         fonteOculos?.parar()
+        // Apontando pra placa, o app pede pro Android entrar na rede dela --
+        // so pro app, sem tirar o celular da rede de casa. Apontando pro mock,
+        // usa o Wi-Fi em que o celular ja esta.
+        val naPlaca = EnderecoDosOculos.ehAPlaca(endereco)
         fonteOculos = NetworkStreamSource(
             context = requireContext().applicationContext,
-            url = enderecoOculos(),
+            url = endereco,
+            ssidOculos = if (naPlaca) EnderecoDosOculos.REDE else null,
+            senhaOculos = if (naPlaca) EnderecoDosOculos.SENHA else null,
             aoQuadro = { quadro ->
                 // Duas copias porque os dois consumidores tem donos diferentes:
                 // o analisarQuadro RECICLA o bitmap que recebe, e a tela precisa
                 // do dela viva ate o proximo quadro chegar.
-                val paraTela = quadro.copy(android.graphics.Bitmap.Config.ARGB_8888, false)
-                view?.post {
-                    if (usandoOculos && _binding != null) binding.ivOculos.setImageBitmap(paraTela)
+                // Com a tela travada ninguem esta olhando. Pular a copia
+                // corta uns 300 KB por quadro, treze vezes por segundo, mais um
+                // redesenho de tela inteira -- e o unico gasto que da pra tirar
+                // sem parar de entender os sinais.
+                if (!telaBloqueada) {
+                    val paraTela = quadro.copy(android.graphics.Bitmap.Config.ARGB_8888, false)
+                    view?.post {
+                        if (usandoOculos && _binding != null && !telaBloqueada) {
+                            binding.ivOculos.setImageBitmap(paraTela)
+                        } else {
+                            paraTela.recycle()
+                        }
+                    }
                 }
                 // rotacao 0: a camera fica fixa na armacao, ao contrario da do
                 // celular, que informa a rotacao a cada quadro.
@@ -1266,7 +1323,7 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         if (!usandoOculos || _binding == null) return
         when (estado) {
             is MjpegClient.Estado.Conectando ->
-                onFeedback("PROCURANDO OS OCULOS", LibrasAnalyzer.FEEDBACK_NEUTRO)
+                onFeedback("PROCURANDO OCULOS", LibrasAnalyzer.FEEDBACK_NEUTRO)
 
             is MjpegClient.Estado.Recebendo -> {
                 // Nao anuncia nada: a imagem aparecendo ja e o aviso, e no
@@ -1288,9 +1345,69 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         }
     }
 
+    // ── Tela travada (modo oculos) ───────────────────────────────────────
+    //
+    // Pra que serve: no uso de verdade o celular vai pro bolso e os oculos
+    // continuam vendo. A tela precisa continuar ACESA -- apagando, o Android
+    // para a activity e o reconhecimento junto --, mas uma tela acesa no bolso
+    // aceita toque e gasta bateria. Travada, ela fica preta, surda e barata.
+
+    private fun bloquearTela() {
+        if (!usandoOculos || telaBloqueada || _binding == null) return
+        telaBloqueada = true
+        binding.oculosLock.isVisible = true
+        // Coberto pela capa, mas o Android nao sabe disso e redesenharia a cada
+        // quadro assim mesmo.
+        binding.landmarkOverlay.visibility = View.INVISIBLE
+        ignorarVoltarBloqueado.isEnabled = true
+        // Preto numa tela OLED e pixel desligado; com o brilho no minimo, o
+        // custo de manter a tela acesa cai pra perto de nada.
+        ajustarBrilho(BRILHO_TRAVADO)
+    }
+
+    private fun desbloquearTela() {
+        if (!telaBloqueada) return
+        telaBloqueada = false
+        _binding?.oculosLock?.isVisible = false
+        _binding?.landmarkOverlay?.visibility = View.VISIBLE
+        ignorarVoltarBloqueado.isEnabled = false
+        ajustarBrilho(WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE)
+    }
+
+    /**
+     * Destrava com um arrasto pra cima, e engole todo o resto.
+     *
+     * Arrasto, e nao toque: no bolso, um toque acontece sozinho o tempo todo.
+     * Um movimento longo e deliberado, nao.
+     */
+    private fun aoTocarNaCapa(capa: View, evento: MotionEvent): Boolean {
+        when (evento.actionMasked) {
+            MotionEvent.ACTION_DOWN -> yInicialDestrave = evento.rawY
+            MotionEvent.ACTION_UP -> {
+                val subiu = yInicialDestrave - evento.rawY
+                if (subiu >= capa.height * FRACAO_DESTRAVE) desbloquearTela()
+            }
+        }
+        return true
+    }
+
+    private fun ajustarBrilho(valor: Float) {
+        val janela = activity?.window ?: return
+        janela.attributes = janela.attributes.apply { screenBrightness = valor }
+    }
+
+    private fun manterTelaAcesa(manter: Boolean) {
+        val janela = activity?.window ?: return
+        if (manter) janela.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        else janela.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    }
+
     private fun desligarOculos() {
         usandoOculos = false
         ultimoAvisoOculos = null
+        desbloquearTela()
+        manterTelaAcesa(false)
+        _binding?.btnBloquear?.isVisible = false
         fonteOculos?.parar()
         fonteOculos = null
         binding.ivOculos.setImageDrawable(null)
@@ -1322,6 +1439,10 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
 
     override fun onDestroyView() {
         super.onDestroyView()
+        // Brilho e tela acesa sao da JANELA, nao do fragmento: sem devolver
+        // aqui, sair do modo Libras deixaria o app inteiro escuro e sem apagar.
+        desbloquearTela()
+        manterTelaAcesa(false)
         // Antes de tudo: as threads dos oculos seguram uma referencia ao
         // analyzer, e ele e fechado logo abaixo.
         fonteOculos?.parar()

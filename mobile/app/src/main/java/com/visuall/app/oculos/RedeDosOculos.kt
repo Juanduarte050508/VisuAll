@@ -5,6 +5,8 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import android.net.wifi.WifiNetworkSpecifier
+import android.os.Build
 import android.util.Log
 import java.io.IOException
 import java.net.URL
@@ -27,7 +29,15 @@ import java.net.URL
  * internet -- a sintese de voz, qualquer coisa que precise sair. Aqui so a
  * conexao do stream muda de caminho, que e a unica que precisa.
  */
-internal class RedeDosOculos(context: Context) {
+internal class RedeDosOculos(
+    context: Context,
+    /**
+     * Rede a conectar. Null usa o Wi-Fi em que o celular ja esta -- que e o
+     * caso do mock rodando no PC.
+     */
+    private val ssid: String? = null,
+    private val senha: String? = null
+) {
 
     private val gerente = context.applicationContext
         .getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -43,14 +53,31 @@ internal class RedeDosOculos(context: Context) {
     fun ligar() {
         if (inscricao != null) return
 
-        val pedido = NetworkRequest.Builder()
+        val construtor = NetworkRequest.Builder()
             .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
             // A linha que faz a diferenca. Com internet como requisito, o
             // pedido nunca casa com os oculos. Sem ela como requisito, casa
             // com qualquer Wi-Fi -- com ou sem internet -- que e o que
             // queremos: o mesmo codigo serve pro mock em casa e pra placa.
             .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-            .build()
+
+        // Nomear a rede muda o que o sistema faz: em vez de usar o Wi-Fi em
+        // que o celular ja esta, o Android pergunta se pode conectar nos
+        // oculos e conecta SO PRO APP. O celular continua na rede de casa (ou
+        // nos dados) pra todo o resto -- ninguem fica sem internet por estar
+        // usando os oculos, e nao e preciso passear pelas configuracoes do
+        // Android antes de usar.
+        //
+        // Existe a partir do Android 10. Abaixo disso o pedido segue generico
+        // e a pessoa entra na rede dos oculos pelas configuracoes, como antes.
+        if (ssid != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val alvo = WifiNetworkSpecifier.Builder().setSsid(ssid)
+            if (!senha.isNullOrEmpty()) alvo.setWpa2Passphrase(senha)
+            construtor.setNetworkSpecifier(alvo.build())
+            Log.i(TAG, "vou pedir pra conectar na rede \"$ssid\"")
+        }
+
+        val pedido = construtor.build()
 
         val cb = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
@@ -69,7 +96,9 @@ internal class RedeDosOculos(context: Context) {
             }
 
             override fun onUnavailable() {
-                Log.w(TAG, "o sistema nao encontrou nenhum Wi-Fi")
+                // Com uma rede nomeada isto quer dizer: a placa nao esta no ar,
+                // ou a pessoa recusou a caixa de confirmacao do Android.
+                Log.w(TAG, "o sistema nao entregou rede nenhuma")
             }
         }
 

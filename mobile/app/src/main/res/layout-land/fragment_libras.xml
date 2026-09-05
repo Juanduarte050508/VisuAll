@@ -751,6 +751,23 @@
         o endereco. Fora do controls_row porque aquele FrameLayout tem 64dp e
         ja tem o botao de girar no centro.
     -->
+    <!-- Par do btn_bloquear do retrato; o app roda travado em retrato, mas o
+         view binding exige a view nos dois layouts pra nao virar opcional. -->
+    <ImageView
+        android:id="@+id/btn_bloquear"
+        android:layout_width="52dp"
+        android:layout_height="52dp"
+        android:layout_marginBottom="12dp"
+        android:background="@drawable/vf_bg_action_btn"
+        android:contentDescription="Escurecer a tela"
+        android:padding="12dp"
+        android:src="@drawable/ic_cadeado"
+        android:visibility="gone"
+        app:tint="@color/text_primary"
+        app:layout_constraintBottom_toTopOf="@id/btn_oculos"
+        app:layout_constraintStart_toStartOf="@id/btn_oculos"
+        app:layout_constraintEnd_toEndOf="@id/btn_oculos" />
+
     <ImageView
         android:id="@+id/btn_oculos"
         android:layout_width="52dp"
@@ -811,6 +828,43 @@
             android:contentDescription="Girar camera"
             android:padding="12dp"
             android:src="@drawable/ic_flip" />
+    </FrameLayout>
+
+    <FrameLayout
+        android:id="@+id/oculos_lock"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:background="#FF000000"
+        android:clickable="true"
+        android:elevation="32dp"
+        android:focusable="true"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <TextView
+            android:id="@+id/tv_lock_titulo"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal|bottom"
+            android:layout_marginBottom="64dp"
+            android:letterSpacing="0.1"
+            android:text="VISUALL OUVINDO"
+            android:textColor="#5A5A5A"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tv_lock_dica"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal|bottom"
+            android:layout_marginBottom="40dp"
+            android:text="arraste para cima para destravar"
+            android:textColor="#3D3D3D"
+            android:textSize="13sp" />
     </FrameLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

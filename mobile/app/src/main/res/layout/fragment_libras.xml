@@ -132,6 +132,28 @@
         app:layout_constraintTop_toTopOf="@id/btn_lines"
         app:layout_constraintBottom_toBottomOf="@id/btn_lines"
         app:layout_constraintStart_toEndOf="@id/btn_lines"
+        app:layout_constraintEnd_toStartOf="@id/btn_bloquear" />
+
+    <!--
+        Escurece a tela sem parar o reconhecimento. So aparece no modo oculos,
+        porque so ali faz sentido: o celular vai pro bolso e a tela precisa
+        continuar acesa (senao o Android para o app), mas nao pode aceitar
+        toque nem gastar bateria mostrando imagem que ninguem esta olhando.
+    -->
+    <ImageView
+        android:id="@+id/btn_bloquear"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_marginEnd="8dp"
+        android:background="@drawable/vf_bg_action_btn"
+        android:contentDescription="Escurecer a tela"
+        android:elevation="8dp"
+        android:padding="13dp"
+        android:src="@drawable/ic_cadeado"
+        android:visibility="gone"
+        app:tint="@color/text_primary"
+        app:layout_constraintTop_toTopOf="@id/btn_exit_libras"
+        app:layout_constraintBottom_toBottomOf="@id/btn_exit_libras"
         app:layout_constraintEnd_toStartOf="@id/btn_oculos" />
 
     <!--
@@ -601,5 +623,59 @@
         app:layout_constraintTop_toTopOf="@id/modes_row"
         app:layout_constraintBottom_toBottomOf="@id/modes_row"
         app:layout_constraintEnd_toEndOf="parent" />
+
+    <!--
+        A capa do modo bloqueado.
+
+        Preta de verdade (#FF000000), nao escura: nesta tela OLED um pixel
+        preto fica desligado, e a tela e de longe o que mais gasta bateria com
+        o celular no bolso. Junto com o brilho no minimo, o custo de manter a
+        tela acesa cai pra perto de nada — e ela PRECISA ficar acesa, senao o
+        Android para o app e a conexao com os oculos cai junto.
+
+        clickable engole os toques, que e metade do motivo de existir. O
+        elevation e maior que o do reply_panel (24dp) pra ficar mesmo por cima
+        de tudo.
+    -->
+    <FrameLayout
+        android:id="@+id/oculos_lock"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:background="#FF000000"
+        android:clickable="true"
+        android:elevation="32dp"
+        android:focusable="true"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <!--
+            A unica coisa acesa. Cinza bem escuro: legivel no escuro, e quase
+            nao acende pixel.
+        -->
+        <TextView
+            android:id="@+id/tv_lock_titulo"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal|bottom"
+            android:layout_marginBottom="104dp"
+            android:letterSpacing="0.1"
+            android:text="VISUALL OUVINDO"
+            android:textColor="#5A5A5A"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tv_lock_dica"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal|bottom"
+            android:layout_marginBottom="72dp"
+            android:text="arraste para cima para destravar"
+            android:textColor="#3D3D3D"
+            android:textSize="13sp" />
+    </FrameLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>
