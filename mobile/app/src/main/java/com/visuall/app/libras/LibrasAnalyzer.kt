@@ -461,6 +461,37 @@ class LibrasAnalyzer(
           imageProxy.close()
           return
       }
+      try {
+          analisarQuadro(
+              imageProxy.toBitmap(),
+              imageProxy.imageInfo.rotationDegrees.toFloat(),
+              espelharImagem
+          )
+      } finally {
+          // Fora do analisarQuadro de proposito: quem abriu o ImageProxy fecha.
+          // A fonte de rede nao tem ImageProxy nenhum pra fechar.
+          imageProxy.close()
+      }
+    }
+
+    /**
+     * Analisa UM quadro, venha de onde vier.
+     *
+     * Existe separado do [analyze] porque a camera do celular deixou de ser a
+     * unica fonte: os oculos com ESP32 entregam JPEG por Wi-Fi, decodificado em
+     * Bitmap pelo NetworkStreamSource. Da conversao pra ca o reconhecimento e
+     * identico, entao ele nao precisa saber quem mandou a imagem -- e nada
+     * abaixo desta linha muda por causa dos oculos.
+     *
+     * Toma posse do [quadro]: recicla no fim. Nao use o Bitmap depois de chamar.
+     *
+     * @param rotacaoGraus quanto girar pra pessoa ficar em pe. A camera do
+     *   celular informa isso por quadro; os oculos tem posicao fixa na armacao.
+     * @param espelhar espelha na horizontal, pra casar com o dataset de treino
+     *   (a camera frontal precisa; uma camera que aponta pra fora, nao).
+     */
+    fun analisarQuadro(quadro: Bitmap, rotacaoGraus: Float, espelhar: Boolean) {
+      if (pausado) return
       // rawBitmap/preparedBitmap precisam existir fora do try para o finally
       // poder reciclá-los (variável declarada dentro do try não é visível lá).
       val frameStartNs = SystemClock.elapsedRealtimeNanos()
@@ -474,10 +505,8 @@ class LibrasAnalyzer(
         // usado — reciclar aqui libera a memória nativa do bitmap na hora, em
         // vez de esperar o coletor de lixo (a alocação de 1-2 bitmaps por
         // frame de câmera é uma fonte real de pressão de GC).
-        val raw = imageProxy.toBitmap()
-        rawBitmap = raw
-        val prepared = prepararBitmap(
-            raw, imageProxy.imageInfo.rotationDegrees.toFloat(), espelharImagem)
+        rawBitmap = quadro
+        val prepared = prepararBitmap(quadro, rotacaoGraus, espelhar)
         preparedBitmap = prepared
         val mpImage = BitmapImageBuilder(prepared).build()
         // Corrige o x para a proporção 4:3 do treino (quadro retrato -> 4:3).
@@ -601,7 +630,6 @@ class LibrasAnalyzer(
         registrarPerf(frameStartNs, handCount)
         if (rawBitmap !== preparedBitmap) rawBitmap?.recycle()
         preparedBitmap?.recycle()
-        imageProxy.close()
       }
     }
 
