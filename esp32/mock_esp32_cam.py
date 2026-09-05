@@ -52,6 +52,11 @@ def _abre_captura(fonte):
         if cap.isOpened():
             return cap
         cap.release()   # driver que nao fala DirectShow: cai no padrao
+        # Avisa antes de bloquear: o padrao pode demorar quase dois minutos, e
+        # sem esta linha o mock parece travado justamente na hora em que ja deu
+        # errado uma vez.
+        print("  o DirectShow recusou a camera; tentando o backend padrao "
+              "(pode levar ~1 min)...", flush=True)
     return cv2.VideoCapture(fonte)
 
 
@@ -64,6 +69,20 @@ class FonteWebcam:
             raise RuntimeError("nao consegui abrir %r" % (fonte,))
         self.captura.set(cv2.CAP_PROP_FRAME_WIDTH, LARGURA)
         self.captura.set(cv2.CAP_PROP_FRAME_HEIGHT, ALTURA)
+        # Puxa um quadro AQUI, antes de dizer que deu certo. Uma webcam ja
+        # ocupada por outro programa abre sem reclamar e so devolve nada na
+        # leitura -- e a essa altura o erro ja virou "a fonte nao entregou
+        # quadro", que nao aponta pra causa nenhuma. Aconteceu de verdade: uma
+        # segunda copia deste mock rodando ao mesmo tempo que a primeira.
+        ok, _ = self.captura.read()
+        if not ok:
+            self.captura.release()
+            raise RuntimeError(
+                "abri %r mas ela nao entrega imagem -- quase sempre e outro "
+                "programa segurando a webcam: outra copia deste mock, Teams, "
+                "Meet, o app Camera do Windows" % (fonte,))
+        if not isinstance(fonte, int):
+            self.captura.set(cv2.CAP_PROP_POS_FRAMES, 0)   # devolve o quadro de teste
         self.descricao = "webcam" if fonte == 0 else str(fonte)
 
     def quadro(self):
@@ -168,8 +187,13 @@ class Difusor:
         finally:
             fonte.fecha()
 
-    def espera_primeiro(self, prazo=25.0):
-        """Bloqueia ate o primeiro quadro. Levanta se a fonte nem abriu."""
+    def espera_primeiro(self, prazo=120.0):
+        """Bloqueia ate o primeiro quadro. Levanta se a fonte nem abriu.
+
+        O prazo e generoso de proposito: o backend padrao do Windows levou 98
+        segundos pra abrir a webcam nesta maquina. Um prazo curto desistiria de
+        uma camera que ia funcionar.
+        """
         self._pronto.wait(prazo)
         if self.erro:
             raise self.erro
@@ -276,7 +300,9 @@ def main():
         print("abrindo a webcam...", flush=True)
     Handler.difusor = Difusor(criar_fonte)
     if not Handler.difusor.espera_primeiro():
-        print("a fonte nao entregou nenhum quadro; abortando.")
+        print("nenhum quadro em %d segundos; abortando." % 120)
+        print("  tente:  python mock_esp32_cam.py --sintetico")
+        print("  (nao usa camera nenhuma e serve pra testar o app do mesmo jeito)")
         return 1
 
     servidor = ThreadingHTTPServer(("0.0.0.0", args.porta), Handler)

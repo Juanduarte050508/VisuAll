@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Libera HTTP sem criptografia.
+
+    Por que foi preciso: desde o Android 9 (API 28) o sistema BLOQUEIA trafego
+    em claro por padrao. O sintoma nao e um erro de rede comum — vem
+    "Cleartext HTTP traffic to <ip> not permitted", com a conexao morrendo
+    antes de sair do aparelho, entao nada aparece do lado do servidor e a
+    tentacao e procurar o defeito no firewall ou no cabo.
+
+    Por que e aceitavel aqui, e nao uma preguica:
+
+    1. Este app faz UMA requisicao de rede na vida inteira — o stream MJPEG da
+       camera dos oculos (ver MjpegClient). Nao ha login, nem token, nem API,
+       nem nada com HTTPS que esta permissao pudesse enfraquecer.
+
+    2. Do outro lado esta um ESP32-S3. Ele nao faz TLS a 15 quadros por
+       segundo; o handshake e a cifra comeriam a CPU que codifica o JPEG. HTTP
+       nao e uma escolha nossa, e o unico protocolo que aquela placa fala nessa
+       taxa.
+
+    3. O caminho e um Wi-Fi ponto a ponto: os oculos criam a propria rede
+       (SoftAP, com senha WPA2) e o celular entra nela. O trafego nao passa por
+       roteador de casa nem chega na internet — e a placa e o celular, so.
+
+    Escopo: liberado pra tudo de proposito. O endereco dos oculos e digitado
+    pela pessoa e muda de rede pra rede (192.168.4.1 na placa, o IP do PC
+    quando se testa com o esp32/mock_esp32_cam.py). Prender a lista a um IP
+    faria o app quebrar sozinho na proxima rede, e nao ha o que proteger.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

@@ -64,3 +64,50 @@ exibir os do ESP32 do mesmo jeito. Se a barra congela, o stream travou.
 linha e **todo o resto do pipeline trabalha só com o Bitmap**. A fonte de rede
 não precisa tocar em nada do reconhecimento: basta entregar `Bitmap` no mesmo
 ponto em que o CameraX entrega hoje.
+
+## Duas armadilhas que custaram caro
+
+As duas se manifestam do mesmo jeito — **tela preta, nenhum erro** — e as duas
+estão longe de onde o sintoma aparece. Ficam registradas porque nenhuma delas
+se descobre lendo o código.
+
+**O Android bloqueia HTTP sem criptografia.** Desde o Android 9 (API 28), e o
+app é targetSdk 34. A conexão morre dentro do aparelho, antes de virar pacote:
+do lado do PC não chega nada, e a tentação é caçar firewall e cabo. Resolvido
+em `mobile/app/src/main/res/xml/network_security_config.xml`, ligado pelo
+`android:networkSecurityConfig` no manifesto. Um ESP32 não faz TLS a 15
+quadros/s, então HTTP não é escolha nossa — o comentário do arquivo explica por
+que isso não é preguiça.
+
+**`isVisible = false` é `View.GONE`, e GONE colapsa no ConstraintLayout.** A
+`iv_oculos` (a imagem dos óculos) e o desenho dos landmarks têm largura e
+altura `0dp` presas às quatro bordas da `preview_view`. Ao ligar os óculos, a
+preview era escondida com `isVisible = false` — que é GONE, não INVISIBLE — e
+no ConstraintLayout um view GONE vira um ponto: quem está preso a ele encolhe
+junto. Os dois viravam 0×0.
+
+O sintoma foi cruel: o stream chegava, a conexão TCP estava aberta, o
+reconhecimento rodava a 13 quadros/s (o mock manda 15), e a tela ficava preta.
+Não havia erro porque não havia erro — a imagem era desenhada num retângulo de
+tamanho zero. O que fechou o diagnóstico foi olhar `/proc/net/tcp` no celular e
+achar a conexão ESTABLISHED: com dado chegando e nada na tela, o problema só
+podia ser de layout.
+
+## Como conferir cada elo, do celular
+
+Quando não aparecer imagem, vale medir em vez de adivinhar. O celular tem
+`nc`, então dá pra falar HTTP na mão e ver até onde se chega:
+
+```bash
+# o celular alcança o PC? (ping não serve: o Windows bloqueia ICMP)
+adb shell "printf 'GET / HTTP/1.0\r\n\r\n' | timeout 6 nc 192.168.15.10 8080 | head -c 220"
+
+# o /stream entrega bytes de verdade?
+adb shell "printf 'GET /stream HTTP/1.0\r\n\r\n' | timeout 4 nc 192.168.15.10 8080 | wc -c"
+
+# o app está mesmo conectado? (1F90 = porta 8080; estado 01 = ESTABLISHED)
+adb shell "cat /proc/net/tcp /proc/net/tcp6 | grep 1F90"
+```
+
+Se o `nc` traz bytes e a tela continua preta, o problema é do app pra dentro —
+não da rede.

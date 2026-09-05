@@ -51,6 +51,7 @@ import androidx.fragment.app.Fragment
 import androidx.navigation.fragment.findNavController
 import com.visuall.app.R
 import com.visuall.app.databinding.FragmentLibrasBinding
+import com.visuall.app.oculos.MensagemDeErro
 import com.visuall.app.oculos.MjpegClient
 import com.visuall.app.oculos.NetworkStreamSource
 import com.visuall.app.ui.ScanFrameView
@@ -98,6 +99,9 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
     // desvinculado e os quadros passam a vir da rede -- ver ligarOculos().
     private var fonteOculos: NetworkStreamSource? = null
     private var usandoOculos = false
+
+    /** Ultima falha ja avisada, pra o laco de reconexao nao repetir o aviso. */
+    private var ultimoAvisoOculos: String? = null
 
     private val historyStore by lazy { ConversationHistoryStore(requireContext().applicationContext) }
 
@@ -1199,7 +1203,19 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         // Solta a camera do celular: sem isto ela continua ligada gastando
         // bateria e entregando quadros que ninguem quer.
         cameraProvider?.unbindAll()
-        binding.previewView.isVisible = false
+        // INVISIBLE, nao GONE, e a diferenca entre funcionar e nao funcionar.
+        //
+        // iv_oculos e landmark_overlay tem largura e altura 0dp amarradas as
+        // QUATRO bordas do preview_view. No ConstraintLayout um view GONE
+        // colapsa num ponto, e quem esta preso a ele colapsa junto: os dois
+        // viravam 0x0. O stream continuava chegando, o reconhecimento
+        // continuava rodando a 13 quadros/s, e a tela ficava preta -- sem erro
+        // nenhum, porque erro nao houve; a imagem era desenhada num retangulo
+        // de tamanho zero.
+        //
+        // INVISIBLE nao desenha mas mantem as medidas, que e exatamente o que
+        // esses dois precisam do preview_view.
+        binding.previewView.visibility = View.INVISIBLE
         binding.ivOculos.isVisible = true
         binding.btnOculos.alpha = 1f
         binding.landmarkOverlay.clear()
@@ -1223,22 +1239,51 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
                 // celular, que informa a rotacao a cada quadro.
                 librasAnalyzer?.analisarQuadro(quadro, 0f, false) ?: quadro.recycle()
             },
-            aoEstado = { estado ->
-                val (texto, nivel) = when (estado) {
-                    is MjpegClient.Estado.Conectando ->
-                        "PROCURANDO OS OCULOS" to LibrasAnalyzer.FEEDBACK_NEUTRO
-                    is MjpegClient.Estado.Recebendo ->
-                        "OCULOS CONECTADOS" to LibrasAnalyzer.FEEDBACK_BOM
-                    is MjpegClient.Estado.Erro ->
-                        "OCULOS: ${estado.motivo}" to LibrasAnalyzer.FEEDBACK_ALERTA
-                }
-                view?.post { if (usandoOculos) onFeedback(texto, nivel) }
-            }
+            aoEstado = { estado -> view?.post { mostrarEstadoOculos(estado) } }
         ).also { it.iniciar() }
+    }
+
+    /**
+     * O que a pessoa ve enquanto os oculos conectam, caem e voltam.
+     *
+     * Falha NAO vai pro chip de feedback, e isso e o principal aqui. Duas
+     * razoes, as duas vistas na tela: aquele chip e do reconhecimento
+     * ("CENTRALIZE A MAO"), e um texto de rede em vermelho ali se le como se a
+     * mao estivesse errada; e o motivo cru era comprido o bastante pra esticar
+     * a linha do chip e empurrar a lixeira pra fora do celular.
+     *
+     * Falha vira aviso passageiro, em portugues, dizendo o que fazer. O motivo
+     * cru vai pro logcat, que e onde ele serve.
+     */
+    private fun mostrarEstadoOculos(estado: MjpegClient.Estado) {
+        if (!usandoOculos || _binding == null) return
+        when (estado) {
+            is MjpegClient.Estado.Conectando ->
+                onFeedback("PROCURANDO OS OCULOS", LibrasAnalyzer.FEEDBACK_NEUTRO)
+
+            is MjpegClient.Estado.Recebendo -> {
+                // Nao anuncia nada: a imagem aparecendo ja e o aviso, e no
+                // quadro seguinte o proprio reconhecimento ocupa o chip.
+                ultimoAvisoOculos = null
+                onFeedback("", LibrasAnalyzer.FEEDBACK_NEUTRO)
+            }
+
+            is MjpegClient.Estado.Erro -> {
+                Log.w("Oculos", "falha na conexao: ${estado.motivo}")
+                val aviso = MensagemDeErro.emPortugues(estado.motivo)
+                // O laco tenta de novo a cada poucos segundos; sem esta guarda
+                // seria um aviso atras do outro, pra sempre.
+                if (aviso != ultimoAvisoOculos) {
+                    ultimoAvisoOculos = aviso
+                    Toast.makeText(requireContext(), aviso, Toast.LENGTH_LONG).show()
+                }
+            }
+        }
     }
 
     private fun desligarOculos() {
         usandoOculos = false
+        ultimoAvisoOculos = null
         fonteOculos?.parar()
         fonteOculos = null
         binding.ivOculos.setImageDrawable(null)

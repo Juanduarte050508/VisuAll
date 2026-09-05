@@ -132,6 +132,35 @@
         app:layout_constraintTop_toTopOf="@id/btn_lines"
         app:layout_constraintBottom_toBottomOf="@id/btn_lines"
         app:layout_constraintStart_toEndOf="@id/btn_lines"
+        app:layout_constraintEnd_toStartOf="@id/btn_oculos" />
+
+    <!--
+        Troca entre a camera do celular e a dos oculos: toque alterna, toque
+        longo abre o endereco. O endereco fica no toque longo porque se digita
+        uma vez e a troca acontece toda hora.
+
+        Estava ancorado a esquerda do btn_flip, embaixo, e ali NAO CABE: o par
+        ALFABETO/CORPO ocupa 234dp centrados, o girar-camera come os 60dp da
+        direita, e o que sobrava era exatamente o lugar onde ja estava escrito
+        CORPO — o botao aparecia por cima da palavra.
+
+        No topo tambem e onde ele pertence: escolher DE ONDE vem a imagem e da
+        mesma familia que LINHAS e o historico (o que a tela mostra), e nao das
+        acoes sobre a frase, que sao as de baixo.
+    -->
+    <ImageView
+        android:id="@+id/btn_oculos"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_marginEnd="8dp"
+        android:background="@drawable/vf_bg_action_btn"
+        android:contentDescription="Usar a camera dos oculos"
+        android:elevation="8dp"
+        android:padding="13dp"
+        android:src="@drawable/ic_oculos"
+        app:tint="@color/text_primary"
+        app:layout_constraintTop_toTopOf="@id/btn_exit_libras"
+        app:layout_constraintBottom_toBottomOf="@id/btn_exit_libras"
         app:layout_constraintEnd_toStartOf="@id/btn_history" />
 
     <ImageView
@@ -220,6 +249,7 @@
             android:maxLines="1"
             android:ellipsize="end"
             android:minWidth="154dp"
+            android:maxWidth="160dp"
             android:paddingHorizontal="16dp"
             android:text="CENTRALIZE A MAO"
             android:textColor="@color/text_primary"
@@ -558,25 +588,6 @@
         app:layout_constraintTop_toTopOf="@id/modes_row"
         app:layout_constraintBottom_toBottomOf="@id/modes_row"
         app:layout_constraintStart_toStartOf="parent" />
-
-    <!--
-        Toque troca entre a camera do celular e a dos oculos; toque longo abre
-        o endereco. O endereco fica no toque longo porque muda uma vez e a
-        troca acontece toda hora.
-    -->
-    <ImageView
-        android:id="@+id/btn_oculos"
-        android:layout_width="48dp"
-        android:layout_height="48dp"
-        android:layout_marginEnd="12dp"
-        android:background="@drawable/vf_bg_action_btn"
-        android:contentDescription="Usar a camera dos oculos"
-        android:padding="13dp"
-        android:src="@drawable/ic_oculos"
-        app:tint="@color/text_primary"
-        app:layout_constraintTop_toTopOf="@id/modes_row"
-        app:layout_constraintBottom_toBottomOf="@id/modes_row"
-        app:layout_constraintEnd_toStartOf="@id/btn_flip" />
 
     <ImageView
         android:id="@+id/btn_flip"
