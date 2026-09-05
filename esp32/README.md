@@ -23,7 +23,7 @@ protocolo**. É o que o mock faz.
 | 2 | `NetworkStreamSource` no app | não — **pronto** |
 | 3 | Forçar o Wi-Fi sem internet | não — **pronto**, ver `RedeDosOculos` |
 | 4 | Compilar o firmware | não — **pronto**, ver `firmware/` |
-| 5 | Suportes impressos em 3D | não |
+| 5 | ~~Suportes impressos em 3D~~ | descartado: a montagem vai ser feita à mão, sem impressão 3D |
 
 O Wokwi não ajuda aqui: ele não simula câmera (nem OV2640 nem OV5640) e o modo
 AP simulado não aceita conexão de um celular real — ou seja, não valida
