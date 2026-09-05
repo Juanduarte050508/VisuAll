@@ -18,6 +18,25 @@
         app:layout_constraintEnd_toEndOf="parent" />
 
     <!--
+        A imagem que chega dos oculos por Wi-Fi. Ocupa exatamente o mesmo lugar
+        da preview e so uma das duas fica visivel por vez: assim o desenho dos
+        landmarks, que se prende as bordas da preview, cai certo nas duas
+        fontes sem nenhum ajuste.
+    -->
+    <ImageView
+        android:id="@+id/iv_oculos"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:background="@color/background"
+        android:contentDescription="Imagem dos oculos"
+        android:scaleType="fitCenter"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="@id/preview_view"
+        app:layout_constraintBottom_toBottomOf="@id/preview_view"
+        app:layout_constraintStart_toStartOf="@id/preview_view"
+        app:layout_constraintEnd_toEndOf="@id/preview_view" />
+
+    <!--
         Desenho dos landmarks: fica colado na preview (mesmas bordas) para o
         traco cair exatamente sobre a mao/corpo mostrados na camera.
     -->
@@ -539,6 +558,25 @@
         app:layout_constraintTop_toTopOf="@id/modes_row"
         app:layout_constraintBottom_toBottomOf="@id/modes_row"
         app:layout_constraintStart_toStartOf="parent" />
+
+    <!--
+        Toque troca entre a camera do celular e a dos oculos; toque longo abre
+        o endereco. O endereco fica no toque longo porque muda uma vez e a
+        troca acontece toda hora.
+    -->
+    <ImageView
+        android:id="@+id/btn_oculos"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_marginEnd="12dp"
+        android:background="@drawable/vf_bg_action_btn"
+        android:contentDescription="Usar a camera dos oculos"
+        android:padding="13dp"
+        android:src="@drawable/ic_oculos"
+        app:tint="@color/text_primary"
+        app:layout_constraintTop_toTopOf="@id/modes_row"
+        app:layout_constraintBottom_toBottomOf="@id/modes_row"
+        app:layout_constraintEnd_toStartOf="@id/btn_flip" />
 
     <ImageView
         android:id="@+id/btn_flip"

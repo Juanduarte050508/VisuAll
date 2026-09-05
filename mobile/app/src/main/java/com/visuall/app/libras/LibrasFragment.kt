@@ -27,7 +27,9 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
+import android.widget.EditText
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 
@@ -49,6 +51,8 @@ import androidx.fragment.app.Fragment
 import androidx.navigation.fragment.findNavController
 import com.visuall.app.R
 import com.visuall.app.databinding.FragmentLibrasBinding
+import com.visuall.app.oculos.MjpegClient
+import com.visuall.app.oculos.NetworkStreamSource
 import com.visuall.app.ui.ScanFrameView
 import com.visuall.app.ui.compose.LibrasLandscapeHud
 import java.util.Locale
@@ -89,6 +93,11 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
     private var pendingBind = false
 
     private var lensFacing = CameraSelector.LENS_FACING_FRONT
+
+    // Camera dos oculos (ESP32 por Wi-Fi). Quando ligada, o CameraX e
+    // desvinculado e os quadros passam a vir da rede -- ver ligarOculos().
+    private var fonteOculos: NetworkStreamSource? = null
+    private var usandoOculos = false
 
     private val historyStore by lazy { ConversationHistoryStore(requireContext().applicationContext) }
 
@@ -538,6 +547,7 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         binding.modesRow.visibility = visibility
         binding.btnReply.visibility = visibility
         binding.btnFlip.visibility = visibility
+        binding.btnOculos.visibility = visibility
         binding.controlsRow?.visibility = visibility
         binding.chipResult.visibility = if (visible) View.INVISIBLE else View.GONE
         binding.progressConfidence.visibility = if (visible) View.INVISIBLE else View.GONE
@@ -711,6 +721,18 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
                 CameraSelector.LENS_FACING_BACK
             else CameraSelector.LENS_FACING_FRONT
             scheduleBindCamera(180L)
+        }
+
+        binding.btnOculos.setOnClickListener {
+            if (usandoOculos) desligarOculos()
+            // Sem endereco gravado nao ha o que conectar; pedir na hora e
+            // melhor que ligar e falhar sem dizer por que.
+            else if (enderecoOculos().isBlank()) pedirEnderecoOculos()
+            else ligarOculos()
+        }
+        binding.btnOculos.setOnLongClickListener {
+            pedirEnderecoOculos()
+            true
         }
 
         // Toque: apaga só a última letra/sinal. Segurar 3s: limpa a frase toda.
@@ -1130,6 +1152,105 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
     // popBackStack()/navigate() disparam onDestroyView() do fragmento, que já
     // faz essa limpeza. Fazer duas vezes era redundante e o código antigo
     // ainda arriscava a mesma race condition se a ordem das chamadas mudasse.
+    // ── Camera dos oculos (ESP32 por Wi-Fi) ──────────────────────────────
+    //
+    // A troca e so de FONTE. Nada do reconhecimento muda: os quadros vao pro
+    // mesmo LibrasAnalyzer.analisarQuadro que a camera do celular alimenta.
+
+    private fun prefsOculos() =
+        requireContext().getSharedPreferences("oculos", Context.MODE_PRIVATE)
+
+    private fun enderecoOculos(): String =
+        prefsOculos().getString("url", "").orEmpty()
+
+    private fun pedirEnderecoOculos() {
+        val campo = EditText(requireContext()).apply {
+            // Enquanto a placa nao chega, o endereco e o do mock rodando no PC
+            // (esp32/mock_esp32_cam.py). Depois vira o IP do proprio ESP32.
+            setText(enderecoOculos().ifBlank { "http://192.168.15.10:8080/stream" })
+            setSelection(text.length)
+        }
+        AlertDialog.Builder(requireContext())
+            .setTitle("Endereco dos oculos")
+            .setMessage("O endereco do stream. Com o mock no PC, e o IP dele com /stream no fim.")
+            .setView(campo)
+            .setPositiveButton("Conectar") { _, _ ->
+                val url = campo.text.toString().trim()
+                prefsOculos().edit().putString("url", url).apply()
+                if (url.isNotBlank()) ligarOculos()
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun ligarOculos() {
+        // O analyzer nasce junto com a camera e carrega os modelos, o que
+        // demora e nao pode acontecer na thread da interface. Se ainda nao
+        // existe, e porque a camera acabou de abrir -- pedir pra tentar de novo
+        // e melhor que congelar a tela carregando modelo aqui.
+        val analyzer = librasAnalyzer
+        if (analyzer == null) {
+            Toast.makeText(requireContext(),
+                "Espere a camera abrir e tente de novo", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        usandoOculos = true
+        // Solta a camera do celular: sem isto ela continua ligada gastando
+        // bateria e entregando quadros que ninguem quer.
+        cameraProvider?.unbindAll()
+        binding.previewView.isVisible = false
+        binding.ivOculos.isVisible = true
+        binding.btnOculos.alpha = 1f
+        binding.landmarkOverlay.clear()
+
+        // Camera que aponta pra FORA, como a traseira do celular: nao espelha.
+        // A frontal espelha pra casar com o dataset, que foi gravado em selfie.
+        analyzer.setEspelhamento(false)
+
+        fonteOculos?.parar()
+        fonteOculos = NetworkStreamSource(
+            url = enderecoOculos(),
+            aoQuadro = { quadro ->
+                // Duas copias porque os dois consumidores tem donos diferentes:
+                // o analisarQuadro RECICLA o bitmap que recebe, e a tela precisa
+                // do dela viva ate o proximo quadro chegar.
+                val paraTela = quadro.copy(android.graphics.Bitmap.Config.ARGB_8888, false)
+                view?.post {
+                    if (usandoOculos && _binding != null) binding.ivOculos.setImageBitmap(paraTela)
+                }
+                // rotacao 0: a camera fica fixa na armacao, ao contrario da do
+                // celular, que informa a rotacao a cada quadro.
+                librasAnalyzer?.analisarQuadro(quadro, 0f, false) ?: quadro.recycle()
+            },
+            aoEstado = { estado ->
+                val (texto, nivel) = when (estado) {
+                    is MjpegClient.Estado.Conectando ->
+                        "PROCURANDO OS OCULOS" to LibrasAnalyzer.FEEDBACK_NEUTRO
+                    is MjpegClient.Estado.Recebendo ->
+                        "OCULOS CONECTADOS" to LibrasAnalyzer.FEEDBACK_BOM
+                    is MjpegClient.Estado.Erro ->
+                        "OCULOS: ${estado.motivo}" to LibrasAnalyzer.FEEDBACK_ALERTA
+                }
+                view?.post { if (usandoOculos) onFeedback(texto, nivel) }
+            }
+        ).also { it.iniciar() }
+    }
+
+    private fun desligarOculos() {
+        usandoOculos = false
+        fonteOculos?.parar()
+        fonteOculos = null
+        binding.ivOculos.setImageDrawable(null)
+        binding.ivOculos.isVisible = false
+        binding.previewView.isVisible = true
+        binding.btnOculos.alpha = 0.6f
+        binding.landmarkOverlay.clear()
+        // Religa a camera do celular; o bind recria o analyzer com o
+        // espelhamento certo pra lente em uso.
+        scheduleBindCamera(120L)
+    }
+
     private fun exitLibrasMode() {
         if (!isAdded || view == null) return
         val navController = findNavController()
@@ -1147,6 +1268,10 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
 
     override fun onDestroyView() {
         super.onDestroyView()
+        // Antes de tudo: as threads dos oculos seguram uma referencia ao
+        // analyzer, e ele e fechado logo abaixo.
+        fonteOculos?.parar()
+        fonteOculos = null
         landscapeHud = null
         _binding?.btnDeleteLetter?.removeCallbacks(limparTudoRunnable)
         holdAnimator?.cancel()

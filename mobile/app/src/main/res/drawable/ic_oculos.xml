@@ -1,0 +1,48 @@
+<!--
+    Icone do botao que troca a camera do celular pela camera dos oculos.
+    Traco (nao preenchido) pra combinar com ic_flip e ic_history, que sao os
+    vizinhos dele na barra.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="?attr/colorControlNormal">
+
+    <!-- hastes -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M3,13.5 L5.5,7.5"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round"
+        android:strokeWidth="1.7" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M21,13.5 L18.5,7.5"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round"
+        android:strokeWidth="1.7" />
+
+    <!-- lente esquerda -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M6.5,10.5 m-3.5,0 a3.5,3.5 0 1,0 7,0 a3.5,3.5 0 1,0 -7,0"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.7" />
+
+    <!-- lente direita -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M17.5,10.5 m-3.5,0 a3.5,3.5 0 1,0 7,0 a3.5,3.5 0 1,0 -7,0"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.7" />
+
+    <!-- ponte -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M10,10 Q12,8.6 14,10"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round"
+        android:strokeWidth="1.7" />
+</vector>
