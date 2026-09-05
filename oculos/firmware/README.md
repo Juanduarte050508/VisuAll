@@ -1,7 +1,7 @@
 # Firmware dos óculos
 
 O que roda na placa: cria a própria rede Wi-Fi e serve a câmera em MJPEG, no
-mesmo formato do `esp32/mock_esp32_cam.py`. Do lado do app não muda nada além
+mesmo formato do `oculos/mock_esp32_cam.py`. Do lado do app não muda nada além
 do endereço.
 
 ```

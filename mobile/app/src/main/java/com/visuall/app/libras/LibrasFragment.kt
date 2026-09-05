@@ -1200,7 +1200,7 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
     private fun pedirEnderecoOculos() {
         val campo = EditText(requireContext()).apply {
             // Enquanto a placa nao chega, o endereco e o do mock rodando no PC
-            // (esp32/mock_esp32_cam.py). Depois vira o IP do proprio ESP32.
+            // (oculos/mock_esp32_cam.py). Depois vira o IP do proprio ESP32.
             setText(enderecoOculos().ifBlank { "http://192.168.15.10:8080/stream" })
             setSelection(text.length)
         }

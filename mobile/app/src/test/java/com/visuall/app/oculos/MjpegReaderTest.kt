@@ -25,7 +25,7 @@ class MjpegReaderTest {
 
     // ---- contra os bytes REAIS do mock ------------------------------------
     //
-    // A fixture foi gravada do proprio esp32/mock_esp32_cam.py, que imita o
+    // A fixture foi gravada do proprio oculos/mock_esp32_cam.py, que imita o
     // firmware. Testar so contra bytes que eu mesmo montei provaria apenas que
     // o leitor concorda comigo sobre o formato -- nao que ele concorda com o
     // que vai chegar dos oculos.
@@ -166,7 +166,7 @@ class MjpegReaderTest {
 
     /**
      * O cabecalho EXATO que o nosso firmware manda, copiado de
-     * esp32/firmware/oculos_camera/oculos_camera.ino.
+     * oculos/firmware/oculos_camera/oculos_camera.ino.
      *
      * Sem espaco depois do ponto-e-virgula, ao contrario do mock. As duas
      * formas sao validas, e nenhum teste cobria esta: se o parser exigisse o

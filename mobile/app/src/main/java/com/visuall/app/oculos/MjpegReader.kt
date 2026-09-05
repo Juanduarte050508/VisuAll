@@ -7,7 +7,7 @@ import java.io.InputStream
 /**
  * Le um stream MJPEG e devolve um JPEG por vez.
  *
- * O ESP32 (e o mock em esp32/mock_esp32_cam.py, que imita o mesmo firmware)
+ * O ESP32 (e o mock em oculos/mock_esp32_cam.py, que imita o mesmo firmware)
  * responde com `multipart/x-mixed-replace`: uma conexao HTTP que nunca fecha e
  * vai empurrando partes separadas por uma linha de fronteira. Cada parte e:
  *

@@ -1,7 +1,7 @@
 // Firmware dos oculos: ESP32-S3-CAM + OV5640.
 //
 // Faz uma coisa so -- cria a propria rede Wi-Fi e serve a camera em MJPEG no
-// mesmo formato que o esp32/mock_esp32_cam.py serve. Do lado do app nada muda:
+// mesmo formato que o oculos/mock_esp32_cam.py serve. Do lado do app nada muda:
 // so o endereco.
 //
 // A rede e criada PELA PLACA (SoftAP). Nao depende de roteador, de internet
@@ -9,7 +9,7 @@
 // qualquer lugar, inclusive onde nao ha Wi-Fi nenhum. O celular entra nesta
 // rede e fala direto com a placa.
 //
-// Gravar precisa da placa; compilar, nao. Ver esp32/README.md.
+// Gravar precisa da placa; compilar, nao. Ver oculos/README.md.
 
 #include <WiFi.h>
 #include "esp_camera.h"

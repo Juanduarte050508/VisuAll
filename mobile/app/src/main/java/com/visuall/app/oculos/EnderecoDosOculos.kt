@@ -6,7 +6,7 @@ import java.net.URI
  * O que se sabe de fabrica sobre os oculos, num lugar so.
  *
  * Estes valores tem par do outro lado, em
- * `esp32/firmware/oculos_camera/oculos_camera.ino`. Mudar aqui sem mudar la
+ * `oculos/firmware/oculos_camera/oculos_camera.ino`. Mudar aqui sem mudar la
  * (ou o contrario) faz o app procurar uma rede que nao existe.
  */
 internal object EnderecoDosOculos {

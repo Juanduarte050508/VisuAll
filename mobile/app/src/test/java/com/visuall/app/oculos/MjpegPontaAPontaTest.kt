@@ -18,7 +18,7 @@ import java.net.SocketException
  * imagem.
  *
  * O servidor sobe dentro do proprio teste e serve os bytes gravados do
- * esp32/mock_esp32_cam.py, entao nao depende de nada rodando por fora.
+ * oculos/mock_esp32_cam.py, entao nao depende de nada rodando por fora.
  *
  * ServerSocket na mao em vez de com.sun.net.httpserver, e as dimensoes lidas na
  * mao em vez de javax.imageio: teste de unidade de Android compila contra o

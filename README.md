@@ -6,6 +6,7 @@ Real-time Libras recognition split into two work areas:
 |---|---|
 | `mobile/` | Native Android app. It runs on-device with MediaPipe Tasks, ONNX Runtime and TFLite. |
 | `computer/` | Desktop Python backend, web frontend, model training tools, datasets, model files and shared contract fixtures. |
+| `oculos/` | Glasses camera: an ESP32-S3-CAM that streams over Wi-Fi to the phone, its firmware, and a PC stand-in to develop against without the board. |
 
 Files intentionally kept at the repository root:
 
@@ -66,3 +67,18 @@ computer\treino\RestaurarModelo.bat
 Training outputs are written directly into `mobile\app\src\main\assets\`, so rebuild the Android app after training.
 
 More details: [computer/README.md](computer/README.md) and [computer/treino/README.md](computer/treino/README.md).
+
+## Óculos
+
+A câmera dos óculos: um ESP32-S3-CAM preso na armação manda a imagem por Wi-Fi
+para o celular, que fica no bolso. Assim quem quer entender olha para a pessoa
+em vez de olhar para a tela.
+
+Dá para acompanhar tudo sem a placa — há um dublê que roda no PC e fala o mesmo
+protocolo que o firmware.
+
+```powershell
+python oculos\mock_esp32_cam.py
+```
+
+Passo a passo completo, do zero: [oculos/README.md](oculos/README.md).
