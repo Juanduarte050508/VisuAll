@@ -1,0 +1,47 @@
+<!--
+    Setas da tela travada: tres pontas empilhadas apontando pra cima, dizendo
+    de onde pra onde o dedo vai.
+
+    A opacidade cresce de cima pra baixo (0,18 / 0,32 / 0,50). O olho lê isso
+    como movimento subindo, e não como três desenhos iguais. A mais forte é a
+    de baixo porque é de lá que o gesto começa.
+
+    Cinza da mesma família do texto (#5A5A5A), e sempre bem apagado: esta tela
+    fica acesa dentro do bolso, e cada pixel aceso é bateria.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="52dp"
+    android:height="44dp"
+    android:viewportWidth="52"
+    android:viewportHeight="44">
+
+    <!-- de cima, a mais apagada -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M5,17 L26,3 L47,17"
+        android:strokeAlpha="0.18"
+        android:strokeColor="#5A5A5A"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2.4" />
+
+    <!-- do meio -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M5,29 L26,15 L47,29"
+        android:strokeAlpha="0.32"
+        android:strokeColor="#5A5A5A"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2.4" />
+
+    <!-- de baixo, de onde o dedo parte -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M5,41 L26,27 L47,41"
+        android:strokeAlpha="0.50"
+        android:strokeColor="#5A5A5A"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2.4" />
+</vector>

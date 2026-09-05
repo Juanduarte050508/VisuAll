@@ -561,7 +561,12 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         binding.btnExitLibras.visibility = visibility
         binding.tvLive?.visibility = visibility
         binding.btnLines.visibility = visibility
-        binding.tvModeLabel.visibility = visibility
+        // "Modo Libras" sai no modo oculos. Com o cadeado, sao cinco coisas
+        // disputando a barra de cima, e o rotulo era o que sobrava espremido --
+        // aparecia como "M..." ou "...", que nao informa nada. Ele e um rotulo
+        // de estado, e no modo oculos o estado ja esta dito pelos icones.
+        binding.tvModeLabel.visibility =
+            if (visible && !usandoOculos) View.VISIBLE else View.GONE
         binding.btnHistory.visibility = visibility
         binding.scanFrame.visibility = visibility
         binding.actionRow?.visibility = visibility
@@ -1260,6 +1265,7 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         // esqueleto centenas de pixels acima da mao.
         binding.landmarkOverlay.setEncaixe(EncaixeDeQuadro.Modo.INTEIRA)
         binding.btnBloquear.isVisible = true
+        binding.tvModeLabel.isVisible = false   // ver setPortraitHudVisible
         // A tela nao pode apagar. Apagando, o Android para a activity: o
         // reconhecimento morre e a conexao com os oculos cai junto. Quem quiser
         // guardar o celular no bolso usa o cadeado, que escurece sem apagar.
@@ -1408,6 +1414,7 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         desbloquearTela()
         manterTelaAcesa(false)
         _binding?.btnBloquear?.isVisible = false
+        _binding?.tvModeLabel?.isVisible = true
         fonteOculos?.parar()
         fonteOculos = null
         binding.ivOculos.setImageDrawable(null)

@@ -178,7 +178,7 @@
         android:background="@drawable/vf_bg_action_btn"
         android:contentDescription="Usar a camera dos oculos"
         android:elevation="8dp"
-        android:padding="13dp"
+        android:padding="9dp"
         android:src="@drawable/ic_oculos"
         app:tint="@color/text_primary"
         app:layout_constraintTop_toTopOf="@id/btn_exit_libras"
@@ -271,7 +271,7 @@
             android:maxLines="1"
             android:ellipsize="end"
             android:minWidth="154dp"
-            android:maxWidth="160dp"
+            android:maxWidth="210dp"
             android:paddingHorizontal="16dp"
             android:text="CENTRALIZE A MAO"
             android:textColor="@color/text_primary"
@@ -660,7 +660,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="center_horizontal|bottom"
-            android:layout_marginBottom="104dp"
+            android:layout_marginBottom="150dp"
             android:letterSpacing="0.1"
             android:text="VISUALL OUVINDO"
             android:textColor="#5A5A5A"
@@ -672,10 +672,24 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="center_horizontal|bottom"
-            android:layout_marginBottom="72dp"
-            android:text="arraste para cima para destravar"
+            android:layout_marginBottom="118dp"
+            android:text="deslize para desbloquear"
             android:textColor="#3D3D3D"
             android:textSize="13sp" />
+
+        <!--
+            As setas ficam ABAIXO do texto, e nao acima: elas marcam de onde o
+            dedo parte, nao para onde ele vai. Quem olha de relance ve a seta
+            perto da borda de baixo e ja sabe o gesto.
+        -->
+        <ImageView
+            android:id="@+id/iv_lock_setas"
+            android:layout_width="52dp"
+            android:layout_height="44dp"
+            android:layout_gravity="center_horizontal|bottom"
+            android:layout_marginBottom="56dp"
+            android:contentDescription="Deslize para cima para desbloquear"
+            android:src="@drawable/ic_setas_desbloquear" />
     </FrameLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>
