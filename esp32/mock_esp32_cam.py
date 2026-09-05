@@ -22,6 +22,7 @@ No navegador (PC ou celular):
 import argparse
 import socket
 import sys
+import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -37,11 +38,28 @@ QUALIDADE_JPEG = 88          # 0-100 do OpenCV; ~ o "quality 12" do esp_camera
 BOUNDARY = "123456789000000000000987654321"   # o mesmo do CameraWebServer
 
 
+def _abre_captura(fonte):
+    """Abre a camera pelo caminho rapido no Windows.
+
+    Medido nesta maquina: o backend padrao (MSMF) levou 98 SEGUNDOS pra abrir a
+    webcam; o DirectShow levou 1,5. Sem isto o mock parece travado -- foi
+    exatamente o que aconteceu na primeira vez que rodei aqui.
+
+    Arquivo de video nao passa por isso: o gargalo e so na camera.
+    """
+    if isinstance(fonte, int) and sys.platform == "win32":
+        cap = cv2.VideoCapture(fonte, cv2.CAP_DSHOW)
+        if cap.isOpened():
+            return cap
+        cap.release()   # driver que nao fala DirectShow: cai no padrao
+    return cv2.VideoCapture(fonte)
+
+
 class FonteWebcam:
     """Webcam ou arquivo de video, sempre em loop."""
 
     def __init__(self, fonte):
-        self.captura = cv2.VideoCapture(fonte)
+        self.captura = _abre_captura(fonte)
         if not self.captura.isOpened():
             raise RuntimeError("nao consegui abrir %r" % (fonte,))
         self.captura.set(cv2.CAP_PROP_FRAME_WIDTH, LARGURA)
@@ -57,6 +75,9 @@ class FonteWebcam:
             if not ok:
                 return None
         return cv2.resize(imagem, (LARGURA, ALTURA))
+
+    def fecha(self):
+        self.captura.release()
 
 
 class FonteSintetica:
@@ -76,9 +97,7 @@ class FonteSintetica:
     def quadro(self):
         self.n += 1
         img = np.zeros((ALTURA, LARGURA, 3), dtype=np.uint8)
-        # Fundo que muda de cor devagar, pra dar pra ver movimento.
         img[:] = (40, 30 + (self.n * 2) % 180, 60)
-        # Barra que atravessa a tela: se ela para, o stream parou.
         x = int((self.n * 4) % LARGURA)
         cv2.rectangle(img, (x, 0), (min(x + 20, LARGURA), ALTURA), (255, 255, 255), -1)
         cv2.putText(img, "MOCK ESP32-CAM", (8, 30),
@@ -87,22 +106,85 @@ class FonteSintetica:
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         return img
 
+    def fecha(self):
+        pass
 
-def abre_fonte(args):
-    if args.sintetico:
-        return FonteSintetica()
-    alvo = args.video if args.video else 0
-    try:
-        return FonteWebcam(alvo)
-    except RuntimeError as erro:
-        if args.video:
-            raise
-        print("  aviso: %s -- caindo pro gerador sintetico" % erro)
-        return FonteSintetica()
+
+class Difusor:
+    """Uma thread le a camera; todos os clientes consomem o ultimo quadro dela.
+
+    Duas razoes, as duas descobertas rodando isto de verdade:
+
+    1. No Windows o DirectShow fica preso a thread que criou a captura. O
+       ThreadingHTTPServer atende cada requisicao numa thread nova, entao ler a
+       camera de dentro do handler devolvia quadro vazio: o stream saia com o
+       cabecalho certo e ZERO bytes de imagem, que e um sintoma bem dificil de
+       ligar a causa.
+
+    2. Com o navegador do PC e o celular abertos ao mesmo tempo -- que e como a
+       gente testa -- dois handlers chamariam read() na mesma captura e
+       disputariam os quadros um do outro.
+
+    De quebra, codifica o JPEG uma vez por quadro em vez de uma vez por cliente.
+    """
+
+    def __init__(self, criar_fonte):
+        self._criar_fonte = criar_fonte
+        self._jpeg = None
+        self._trava = threading.Lock()
+        self._pronto = threading.Event()
+        self._parar = False
+        self.descricao = "?"
+        self.erro = None
+        self._thread = threading.Thread(target=self._laco, name="camera", daemon=True)
+        self._thread.start()
+
+    def _laco(self):
+        # A fonte e criada AQUI, nao no construtor: quem abre a camera precisa
+        # ser a mesma thread que vai le-la (ver o item 1 do docstring).
+        try:
+            fonte = self._criar_fonte()
+        except Exception as erro:            # noqa: BLE001 - vai pra tela
+            self.erro = erro
+            self._pronto.set()
+            return
+        self.descricao = fonte.descricao
+        intervalo = 1.0 / FPS
+        try:
+            while not self._parar:
+                inicio = time.time()
+                imagem = fonte.quadro()
+                if imagem is None:
+                    break
+                ok, buf = cv2.imencode(
+                    ".jpg", imagem, [int(cv2.IMWRITE_JPEG_QUALITY), QUALIDADE_JPEG])
+                if ok:
+                    with self._trava:
+                        self._jpeg = buf.tobytes()
+                    self._pronto.set()
+                sobra = intervalo - (time.time() - inicio)
+                if sobra > 0:
+                    time.sleep(sobra)
+        finally:
+            fonte.fecha()
+
+    def espera_primeiro(self, prazo=25.0):
+        """Bloqueia ate o primeiro quadro. Levanta se a fonte nem abriu."""
+        self._pronto.wait(prazo)
+        if self.erro:
+            raise self.erro
+        return self._jpeg is not None
+
+    def ultimo(self):
+        with self._trava:
+            return self._jpeg
+
+    def para(self):
+        self._parar = True
 
 
 class Handler(BaseHTTPRequestHandler):
-    fonte = None       # preenchido no main
+    difusor = None       # preenchido no main
 
     def do_GET(self):
         if self.path in ("/", "/index.html"):
@@ -134,29 +216,26 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
         intervalo = 1.0 / FPS
+        ultimo_enviado = None
         try:
             while True:
                 inicio = time.time()
-                imagem = self.fonte.quadro()
-                if imagem is None:
-                    break
-                ok, buf = cv2.imencode(
-                    ".jpg", imagem, [int(cv2.IMWRITE_JPEG_QUALITY), QUALIDADE_JPEG])
-                if not ok:
-                    continue
-                jpeg = buf.tobytes()
-
-                self.wfile.write(b"--" + BOUNDARY.encode() + b"\r\n")
-                self.wfile.write(b"Content-Type: image/jpeg\r\n")
-                self.wfile.write(b"Content-Length: %d\r\n\r\n" % len(jpeg))
-                self.wfile.write(jpeg)
-                self.wfile.write(b"\r\n")
-
+                jpeg = self.difusor.ultimo()
+                # Nao reenvia o mesmo quadro: se a camera ficou pra tras, segurar
+                # e melhor que gastar rede repetindo imagem identica.
+                if jpeg is not None and jpeg is not ultimo_enviado:
+                    ultimo_enviado = jpeg
+                    self.wfile.write(b"--" + BOUNDARY.encode() + b"\r\n")
+                    self.wfile.write(b"Content-Type: image/jpeg\r\n")
+                    self.wfile.write(b"Content-Length: %d\r\n\r\n" % len(jpeg))
+                    self.wfile.write(jpeg)
+                    self.wfile.write(b"\r\n")
                 sobra = intervalo - (time.time() - inicio)
                 if sobra > 0:
                     time.sleep(sobra)
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             pass       # o cliente fechou a aba; normal
+
 
     def log_message(self, formato, *args):
         pass           # senao imprime uma linha por quadro
@@ -181,22 +260,41 @@ def main():
                    help="nao usa camera nenhuma, gera os quadros")
     args = p.parse_args()
 
-    Handler.fonte = abre_fonte(args)
-    servidor = ThreadingHTTPServer(("0.0.0.0", args.porta), Handler)
+    def criar_fonte():
+        if args.sintetico:
+            return FonteSintetica()
+        alvo = args.video if args.video else 0
+        try:
+            return FonteWebcam(alvo)
+        except RuntimeError as erro:
+            if args.video:
+                raise
+            print("  aviso: %s -- caindo pro gerador sintetico" % erro, flush=True)
+            return FonteSintetica()
 
-    print("Mock ESP32-CAM  --  fonte: %s" % Handler.fonte.descricao)
-    print("  %dx%d a %d quadros/s, JPEG qualidade %d" %
-          (LARGURA, ALTURA, FPS, QUALIDADE_JPEG))
+    if not args.sintetico and not args.video:
+        print("abrindo a webcam...", flush=True)
+    Handler.difusor = Difusor(criar_fonte)
+    if not Handler.difusor.espera_primeiro():
+        print("a fonte nao entregou nenhum quadro; abortando.")
+        return 1
+
+    servidor = ThreadingHTTPServer(("0.0.0.0", args.porta), Handler)
+    print("Mock ESP32-CAM  --  fonte: %s" % Handler.difusor.descricao)
+    print("  %dx%d a %d quadros/s, JPEG qualidade %d"
+          % (LARGURA, ALTURA, FPS, QUALIDADE_JPEG))
     print("")
     print("  no proprio PC:  http://localhost:%d/" % args.porta)
     for ip in enderecos_locais():
         print("  no celular:     http://%s:%d/" % (ip, args.porta))
     print("")
-    print("Ctrl+C pra parar.")
+    print("Ctrl+C pra parar.", flush=True)
     try:
         servidor.serve_forever()
     except KeyboardInterrupt:
         print("\nParando.")
+    finally:
+        Handler.difusor.para()
     return 0
 
 
