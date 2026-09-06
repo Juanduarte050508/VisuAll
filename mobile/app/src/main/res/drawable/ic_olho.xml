@@ -1,0 +1,36 @@
+<!--
+    Icone do botao que troca a camera do celular pela camera dos oculos.
+
+    Ja foi um oculos, duas vezes. Traco fino primeiro: no tamanho real virava
+    rabisco. Silhueta cheia depois: legivel, mas o miolo branco das lentes
+    destoava de ic_flip, ic_history e ic_cadeado, que sao os vizinhos na barra
+    e nao tem area branca fechada nenhuma.
+
+    Agora e um OLHO, e nao um oculos, porque a placa nao e o acessorio: e a
+    vista. O botao escolhe DE ONDE vem a imagem, e olho diz isso sem depender
+    de reconhecer armacao e ponte em 30dp. Ganha de brinde a leitura que o
+    projeto ja usa por escrito, de que os oculos sao os olhos e o celular e o
+    cerebro.
+
+    Contorno vazado, com so a pupila cheia: o mesmo arranjo de ic_cadeado
+    (corpo em traco, segredo cheio), com a mesma espessura de 1,7.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <!-- contorno: uma amendoa, larga e baixa, como olho e -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M2,12 C5.2,6.9 8.6,4.8 12,4.8 C15.4,4.8 18.8,6.9 22,12 C18.8,17.1 15.4,19.2 12,19.2 C8.6,19.2 5.2,17.1 2,12 Z"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineJoin="round"
+        android:strokeWidth="1.7" />
+
+    <!-- pupila: e ela que faz a amendoa virar um olho, e nao uma folha -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12,12 m-2.4,0 a2.4,2.4 0 1,0 4.8,0 a2.4,2.4 0 1,0 -4.8,0" />
+</vector>

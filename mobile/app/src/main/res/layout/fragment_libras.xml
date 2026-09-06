@@ -179,7 +179,7 @@
         android:contentDescription="Usar a camera dos oculos"
         android:elevation="8dp"
         android:padding="9dp"
-        android:src="@drawable/ic_oculos"
+        android:src="@drawable/ic_olho"
         app:tint="@color/text_primary"
         app:layout_constraintTop_toTopOf="@id/btn_exit_libras"
         app:layout_constraintBottom_toBottomOf="@id/btn_exit_libras"
@@ -652,8 +652,29 @@
         app:layout_constraintEnd_toEndOf="parent">
 
         <!--
-            A unica coisa acesa. Cinza bem escuro: legivel no escuro, e quase
-            nao acende pixel.
+            As setas ficam ACIMA do texto, e grandes.
+
+            Estavam embaixo, pequenas, marcando de onde o dedo parte. Trocado:
+            elas apontam pra onde o dedo VAI, e chegar la significa passar por
+            cima do texto, entao o caminho tem que estar desenhado por cima do
+            texto. Empilhadas em 110dp de altura, o trio ja e o proprio
+            comprimento do gesto, e nao um enfeite ao lado dele.
+
+            Sao a unica instrucao que sobrevive a um olhar de relance no
+            escuro, por isso vem antes de tudo, no alto.
+        -->
+        <ImageView
+            android:id="@+id/iv_lock_setas"
+            android:layout_width="130dp"
+            android:layout_height="110dp"
+            android:layout_gravity="center_horizontal|bottom"
+            android:layout_marginBottom="186dp"
+            android:contentDescription="Deslize para cima para desbloquear"
+            android:src="@drawable/ic_setas_desbloquear" />
+
+        <!--
+            A unica coisa acesa alem das setas. Cinza bem escuro: legivel no
+            escuro, e quase nao acende pixel.
         -->
         <TextView
             android:id="@+id/tv_lock_titulo"
@@ -676,20 +697,6 @@
             android:text="deslize para desbloquear"
             android:textColor="#3D3D3D"
             android:textSize="13sp" />
-
-        <!--
-            As setas ficam ABAIXO do texto, e nao acima: elas marcam de onde o
-            dedo parte, nao para onde ele vai. Quem olha de relance ve a seta
-            perto da borda de baixo e ja sabe o gesto.
-        -->
-        <ImageView
-            android:id="@+id/iv_lock_setas"
-            android:layout_width="52dp"
-            android:layout_height="44dp"
-            android:layout_gravity="center_horizontal|bottom"
-            android:layout_marginBottom="56dp"
-            android:contentDescription="Deslize para cima para desbloquear"
-            android:src="@drawable/ic_setas_desbloquear" />
     </FrameLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

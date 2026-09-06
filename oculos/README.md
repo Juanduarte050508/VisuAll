@@ -309,8 +309,9 @@ Com o dublê rodando e o app instalado:
 
 1. Abra o **VisuAll** no celular
 2. Entre no **modo Libras**
-3. No alto da tela tem um **ícone de óculos** (fica entre "Modo Libras" e o
-   relógio de histórico). Toque nele.
+3. No alto da tela tem um **ícone de olho** (fica entre "Modo Libras" e o
+   relógio de histórico). Toque nele. É o olho porque é ele que escolhe de
+   onde vem a imagem: a câmera do celular ou a que está nos óculos.
 4. Como ainda não há endereço salvo, abre uma caixa de texto. Digite o endereço
    que o dublê mostrou, **com `/stream` no fim**:
 
@@ -325,9 +326,9 @@ Com o dublê rodando e o app instalado:
 A imagem da webcam do PC deve aparecer no celular, com o reconhecimento rodando
 em cima dela. Faça um sinal na frente da webcam e a letra sai no celular.
 
-Para voltar à câmera do celular, toque no mesmo ícone de óculos.
+Para voltar à câmera do celular, toque no mesmo ícone de olho.
 
-> **Para mudar o endereço depois**, segure o ícone de óculos (toque longo).
+> **Para mudar o endereço depois**, segure o ícone de olho (toque longo).
 > O endereço fica no toque longo porque se digita uma vez e a troca acontece
 > toda hora.
 
@@ -365,8 +366,9 @@ Por isso existe o **cadeado**, que aparece no alto da tela **só quando o modo
   ~300 KB por quadro, treze vezes por segundo
 - **O reconhecimento continua rodando normalmente**
 
-Para destravar: **arraste o dedo para cima**, de baixo para cima, uns 20% da
-altura da tela. Um toque não destrava, de propósito — no bolso, toque acontece
+Para desbloquear: **arraste o dedo para cima**, de baixo para cima, uns 20%
+da altura da tela. A tela mostra três setas grandes apontando para cima, e é
+esse o gesto. Um toque não desbloqueia, de propósito — no bolso, toque acontece
 sozinho o tempo todo; um movimento longo e deliberado não.
 
 ---

@@ -1,6 +1,6 @@
 <!--
     Icone do botao que escurece a tela no modo oculos.
-    Traco, como ic_oculos, ic_flip e ic_history, que sao os vizinhos na barra.
+    Traco, como ic_olho, ic_flip e ic_history, que sao os vizinhos na barra.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
