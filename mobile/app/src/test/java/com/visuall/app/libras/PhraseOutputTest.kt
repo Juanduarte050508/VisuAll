@@ -148,4 +148,40 @@ class PhraseOutputTest {
         assertEquals("", PhraseOutput.textoParaVoz(""))
         assertEquals("", PhraseOutput.textoParaVoz("   "))
     }
+
+    @Test
+    fun `no modo corpo fala so a palavra que entrou, nao a frase toda`() {
+        // A frase do corpo chega inteira e retraduzida a cada sinal, entao o
+        // que faz a voz nao repetir tudo e a comparacao com a anterior. O bug
+        // real nao estava aqui: era o LibrasFragment zerando a referencia a
+        // cada quadro sem gesto de limpar, e ai toda palavra nova chegava como
+        // se a frase estivesse comecando.
+        val passos = listOf(
+            "O computador",
+            "O computador ajuda",
+            "O computador ajuda a pessoa",
+            "O computador ajuda a pessoa surda",
+            "O computador ajuda a pessoa surda a conversar"
+        )
+        val falado = ArrayList<String>()
+        var anterior = ""
+        for (frase in passos) {
+            falado.add(PhraseOutput.textoParaVoz(PhraseOutput.trechoParaFalar(frase, anterior)))
+            anterior = frase
+        }
+        assertEquals(
+            listOf("o computador", "ajuda", "a pessoa", "surda", "a conversar"),
+            falado
+        )
+    }
+
+    @Test
+    fun `referencia zerada faz a voz repetir a frase inteira`() {
+        // O sintoma que o usuario ouviu, fixado aqui pra que a causa fique
+        // legivel: com a anterior em branco, o trecho e a frase toda.
+        assertEquals(
+            "O computador ajuda",
+            PhraseOutput.trechoParaFalar("O computador ajuda", "")
+        )
+    }
 }

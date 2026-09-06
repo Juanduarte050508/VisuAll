@@ -57,6 +57,7 @@ import com.visuall.app.oculos.MensagemDeErro
 import com.visuall.app.oculos.MjpegClient
 import com.visuall.app.oculos.NetworkStreamSource
 import com.visuall.app.ui.EncaixeDeQuadro
+import com.visuall.app.ui.ProporcaoDaCamera
 import com.visuall.app.ui.ScanFrameView
 import com.visuall.app.ui.compose.LibrasLandscapeHud
 import java.util.Locale
@@ -80,7 +81,14 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         // (LibrasAnalyzer.TEMPO_PRA_LIMPAR_CORPO, 5s): ali o tempo longo existe
         // pra nao confundir com um sinal sendo feito, e aqui nao ha essa
         // duvida -- o dedo esta no botao de proposito.
-        const val TEMPO_HOLD_LIMPAR_MS = 3_000L
+        //
+        // Era 3s, e 3s e tempo demais pra alguem descobrir sozinho que existe:
+        // segura um pouco, nao ve nada acontecer, solta. Quem testou concluiu
+        // que a lixeira nao apagava tudo. 1,2s ainda e mais que o dobro do
+        // toque longo padrao do Android (500ms), entao nao dispara por acaso,
+        // e e curto o bastante pra caber na paciencia de quem esta so
+        // apertando um botao.
+        const val TEMPO_HOLD_LIMPAR_MS = 1_200L
 
         // Espaco entre os botoes do alto. Ver espacarBarraDoTopo.
         const val ESPACO_BARRA_DP = 8
@@ -519,11 +527,46 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         }
     }
 
+    /**
+     * Usa no modo Libras a MESMA proporcao escolhida na tela da camera.
+     *
+     * Antes esta funcao so limpava a razao: a preview enchia o aparelho
+     * inteiro e o fillCenter dela cortava o que nao coubesse. Como o quadro
+     * que chega da camera e 4:3 e a tela e muito mais alta que isso, o corte
+     * era grande -- por volta de um terco da largura some num aparelho alto -- e
+     * o resultado parece imagem ampliada, que foi o que se viu no S26.
+     *
+     * Com 4:3 escolhido, a preview passa a ser uma caixa 3:4 centrada: o
+     * quadro aparece inteiro, sem corte e sem ampliacao, do mesmo jeito que na
+     * tela da camera. Com 16:9, segue enchendo a tela e cortando, que tambem e
+     * o que a tela da camera faz nesse modo.
+     *
+     * O que NAO muda e a analise: ela continua pedindo 4:3 sempre, porque e a
+     * geometria em que o modelo foi treinado (ver aspectX no LibrasAnalyzer).
+     * Enquadramento e gosto; mexer no quadro analisado seria mexer no
+     * reconhecimento.
+     *
+     * O desenho dos landmarks acompanha sozinho: o overlay esta presinho as
+     * bordas da preview e ja calcula em Modo.CORTANDO, que numa caixa 3:4 com
+     * conteudo 4:3 nao corta nada.
+     *
+     * So no retrato. O layout-land tem outro desenho, e uma caixa 3:4 no meio
+     * de uma tela deitada nao e o que se pede ali.
+     */
     private fun applyPreviewAspectRatio() {
         val params = binding.previewView.layoutParams
                 as? ConstraintLayout.LayoutParams ?: return
-        if (params.dimensionRatio != null) {
-            params.dimensionRatio = null
+        val retrato =
+            resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
+        val razao = if (retrato) {
+            ProporcaoDaCamera.razaoDaPreview(
+                ProporcaoDaCamera.ehQuatroPorTres(requireContext())
+            )
+        } else {
+            null
+        }
+        if (params.dimensionRatio != razao) {
+            params.dimensionRatio = razao
             binding.previewView.layoutParams = params
         } else {
             binding.previewView.requestLayout()
@@ -764,6 +807,10 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
             else if (enderecoOculos().isBlank()) pedirEnderecoOculos()
             else ligarOculos()
         }
+        // Enquanto a frase cresce a voz fala so o pedaco novo; aqui ela le a
+        // frase inteira, quando a pessoa decide que terminou.
+        binding.phraseBubble.setOnClickListener { falarFraseInteira() }
+
         binding.btnBloquear.setOnClickListener { bloquearTela() }
         binding.oculosLock.setOnTouchListener { capa, evento -> aoTocarNaCapa(capa, evento) }
 
@@ -1092,6 +1139,19 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
 
     private fun fraseExibida(): String = PhraseOutput.exibicao(fraseBase, interrogativoAtivo)
 
+    /**
+     * Le a frase inteira em voz alta.
+     *
+     * Passa pelo textoParaVoz igual ao trecho de cada sinal: e ele que baixa a
+     * caixa alta -- sem isso o motor trata a frase como sigla e soletra.
+     */
+    private fun falarFraseInteira() {
+        val fala = PhraseOutput.textoParaVoz(fraseExibida())
+        if (fala.isBlank()) return
+        tts?.speak(fala, TextToSpeech.QUEUE_FLUSH, null, null)
+        vibrateConfirmation()
+    }
+
     private fun onInterrogativoAtualizado(ativo: Boolean) {
         activity?.runOnUiThread {
             if (_binding == null) return@runOnUiThread
@@ -1140,10 +1200,21 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
             if (holdAnimator != null) return@runOnUiThread
             binding.progressClear.isVisible = progresso > 0f
             binding.progressClear.progress  = (progresso * 100).toInt()
-            if (progresso == 0f) {
-                // Frase foi limpa — reseta referência
-                fraseAnterior = ""
-            }
+            // Aqui havia um `if (progresso == 0f) fraseAnterior = ""`, com o
+            // comentário "frase foi limpa". Progresso zero NÃO quer dizer que
+            // a frase foi limpa: quer dizer que o gesto de limpar não está
+            // acontecendo — o que é verdade em quase todo quadro. E o modo
+            // corpo chama este callback a CADA quadro, então a referência do
+            // que já foi falado era zerada dezenas de vezes por segundo.
+            //
+            // Era isso que fazia a voz repetir a frase inteira a cada sinal
+            // novo: quando "O computador ajuda" chegava, a anterior já tinha
+            // virado "", e o trecho novo passava a ser a frase toda.
+            //
+            // Não é preciso zerar nada aqui. Quando a frase é limpa de
+            // verdade, chega um onFraseUpdate("") — e onFraseAtualizada já
+            // guarda "" como anterior no fim, sem falar nada, porque a frase
+            // encolheu.
         }
     }
 

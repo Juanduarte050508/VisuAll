@@ -847,8 +847,8 @@
         <!-- Mesma ordem do retrato: setas em cima, grandes, depois o texto. -->
         <ImageView
             android:id="@+id/iv_lock_setas"
-            android:layout_width="130dp"
-            android:layout_height="110dp"
+            android:layout_width="160dp"
+            android:layout_height="172dp"
             android:layout_gravity="center_horizontal|bottom"
             android:layout_marginBottom="88dp"
             android:contentDescription="Deslize para cima para desbloquear"

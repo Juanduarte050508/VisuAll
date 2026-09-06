@@ -29,6 +29,27 @@ class SentenceTranslatorTest {
     }
 
     @Test
+    fun `verbo depois de adjetivo tambem vira infinitivo se ja houve verbo`() {
+        // A frase da apresentacao. Saia "...surda conversa" porque a regra
+        // olhava so o token anterior (SURDO, um adjetivo) em vez de perguntar
+        // se algum verbo ja tinha entrado na frase.
+        assertEquals(
+            "O computador ajuda a pessoa surda a conversar",
+            SentenceTranslator.traduzirFrase(
+                listOf("COMPUTADOR", "AJUDAR", "PESSOA", "SURDO", "CONVERSAR")
+            )
+        )
+    }
+
+    @Test
+    fun `o primeiro verbo continua conjugado mesmo longe do sujeito`() {
+        assertEquals(
+            "A pessoa surda conversa",
+            SentenceTranslator.traduzirFrase(listOf("PESSOA", "SURDO", "CONVERSAR"))
+        )
+    }
+
+    @Test
     fun `token NEUTRO e ignorado`() {
         assertEquals("", SentenceTranslator.traduzirFrase(listOf("NEUTRO")))
         assertEquals("A pessoa", SentenceTranslator.traduzirFrase(listOf("NEUTRO", "PESSOA")))

@@ -301,11 +301,23 @@
             android:layout_height="48dp"
             android:layout_marginHorizontal="4dp"
             android:background="@drawable/vf_bg_action_btn"
-            android:contentDescription="Apagar ultima letra"
+            android:contentDescription="Apagar a ultima letra. Segure para apagar a frase toda"
+            android:tooltipText="Segure para apagar tudo"
             android:padding="13dp"
             android:src="@drawable/ic_delete" />
     </LinearLayout>
 
+    <!--
+        Tocar na frase faz a voz ler ELA INTEIRA.
+
+        Enquanto a frase cresce, a voz fala so o que entrou de novo, porque
+        ouvir a frase toda a cada sinal e o que a pessoa reclamou. Mas no fim,
+        quando a frase esta pronta, ler tudo de uma vez e justamente o que se
+        quer — e so a pessoa sabe quando chegou nesse ponto.
+
+        Fica no proprio balao, e nao num botao novo, porque o alvo e o texto
+        que se quer ouvir: nao ha o que aprender.
+    -->
     <FrameLayout
         android:id="@+id/phrase_bubble"
         android:layout_width="0dp"
@@ -313,6 +325,10 @@
         android:layout_marginHorizontal="28dp"
         android:layout_marginBottom="10dp"
         android:background="@drawable/vf_bg_phrase"
+        android:clickable="true"
+        android:focusable="true"
+        android:contentDescription="Toque para ouvir a frase inteira"
+        android:tooltipText="Ouvir a frase inteira"
         android:visibility="gone"
         app:layout_constraintBottom_toTopOf="@id/modes_row"
         app:layout_constraintStart_toStartOf="parent"
@@ -337,12 +353,32 @@
             android:maxLines="2"
             android:minHeight="42dp"
             android:paddingStart="54dp"
-            android:paddingEnd="16dp"
+            android:paddingEnd="50dp"
             android:paddingVertical="10dp"
             android:textColor="@color/text_primary"
             android:textSize="17sp" />
+
+        <!-- Diz que o balao toca. Sem ele o alvo existe mas ninguem descobre. -->
+        <ImageView
+            android:id="@+id/iv_phrase_speak"
+            android:layout_width="26dp"
+            android:layout_height="26dp"
+            android:layout_gravity="end|center_vertical"
+            android:layout_marginEnd="14dp"
+            android:contentDescription="Ouvir a frase inteira"
+            android:src="@drawable/ic_som"
+            app:tint="@color/gold_primary" />
     </FrameLayout>
 
+    <!--
+        Barra do apagar: enche enquanto o dedo segura a lixeira, e tambem
+        enquanto a mao aberta pede pra limpar.
+
+        Ficava ancorada acima do chip_result, la em cima da tela. O dedo esta
+        embaixo, na lixeira, e a unica resposta ao que ele faz aparecia longe
+        do campo de visao dele. Agora fica logo acima da propria fileira da
+        lixeira, onde o olho ja esta.
+    -->
     <ProgressBar
         android:id="@+id/progress_clear"
         style="@style/Widget.AppCompat.ProgressBar.Horizontal"
@@ -355,7 +391,7 @@
         android:progressTint="@color/feedback_alerta"
         android:progressBackgroundTint="#33FF6060"
         android:visibility="gone"
-        app:layout_constraintBottom_toTopOf="@id/chip_result"
+        app:layout_constraintBottom_toTopOf="@id/feedback_row"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
@@ -665,8 +701,8 @@
         -->
         <ImageView
             android:id="@+id/iv_lock_setas"
-            android:layout_width="130dp"
-            android:layout_height="110dp"
+            android:layout_width="160dp"
+            android:layout_height="172dp"
             android:layout_gravity="center_horizontal|bottom"
             android:layout_marginBottom="186dp"
             android:contentDescription="Deslize para cima para desbloquear"

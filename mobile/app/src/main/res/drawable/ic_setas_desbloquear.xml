@@ -1,54 +1,65 @@
 <!--
-    Setas da tela travada: tres pontas empilhadas apontando pra cima, dizendo
-    de onde pra onde o dedo vai.
+    Setas da tela travada: pontas empilhadas apontando pra cima, dizendo de
+    onde pra onde o dedo vai.
 
-    A opacidade cresce de cima pra baixo (0,18 / 0,32 / 0,50). O olho le isso
-    como movimento subindo, e nao como tres desenhos iguais. A mais forte e a
-    de baixo porque e de la que o gesto comeca.
+    Eram tres e viviam amontoadas na parte de baixo da tela. Agora sao QUATRO
+    e o conjunto tem 172dp de altura: o empilhamento sobe ate perto do meio do
+    aparelho, entao ele proprio ja e o comprimento do gesto, e nao um enfeite
+    acima do texto. Quem pega o celular no escuro precisa enxergar isso de
+    relance, sem ler nada.
+
+    A opacidade cresce de cima pra baixo (0,14 / 0,24 / 0,36 / 0,50). O olho le
+    isso como movimento subindo, e nao como quatro desenhos iguais. A mais
+    forte e a de baixo porque e de la que o dedo parte.
 
     Cinza da mesma familia do texto (#5A5A5A), e sempre bem apagado: esta tela
     fica acesa dentro do bolso, e cada pixel aceso e bateria.
 
-    O tamanho de fabrica e grande (130dp de largura) porque este desenho e a
-    unica instrucao da tela: quem pega o celular no escuro tem que enxergar o
-    gesto de relance, sem ler nada. A espessura caiu de 2,4 pra 1,5 no sistema
-    de coordenadas justamente porque a escala subiu: 1,5 aqui vira 3,75dp na
-    tela, mais grosso em pixel do que os 2,4dp de antes, mas mais fino em
-    proporcao, que e o que impede a seta grande de virar um bloco.
+    A espessura no sistema de coordenadas caiu pra 1,2 porque a escala subiu:
+    1,2 aqui vira 3,7dp na tela. Mais grosso em pixel do que antes, e mais fino
+    em proporcao, que e o que impede a seta grande de virar um bloco.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="130dp"
-    android:height="110dp"
+    android:width="160dp"
+    android:height="172dp"
     android:viewportWidth="52"
-    android:viewportHeight="44">
+    android:viewportHeight="56">
 
     <!-- de cima, a mais apagada -->
     <path
         android:fillColor="#00000000"
         android:pathData="M5,17 L26,3 L47,17"
-        android:strokeAlpha="0.18"
+        android:strokeAlpha="0.14"
         android:strokeColor="#5A5A5A"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:strokeWidth="1.5" />
+        android:strokeWidth="1.2" />
 
-    <!-- do meio -->
     <path
         android:fillColor="#00000000"
         android:pathData="M5,29 L26,15 L47,29"
-        android:strokeAlpha="0.32"
+        android:strokeAlpha="0.24"
         android:strokeColor="#5A5A5A"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:strokeWidth="1.5" />
+        android:strokeWidth="1.2" />
+
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M5,41 L26,27 L47,41"
+        android:strokeAlpha="0.36"
+        android:strokeColor="#5A5A5A"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="1.2" />
 
     <!-- de baixo, de onde o dedo parte -->
     <path
         android:fillColor="#00000000"
-        android:pathData="M5,41 L26,27 L47,41"
+        android:pathData="M5,53 L26,39 L47,53"
         android:strokeAlpha="0.50"
         android:strokeColor="#5A5A5A"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:strokeWidth="1.5" />
+        android:strokeWidth="1.2" />
 </vector>

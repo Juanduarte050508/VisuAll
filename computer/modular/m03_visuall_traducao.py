@@ -9,6 +9,7 @@ VOCABULARIO = {
 
 def traduzir_frase(palavras, interrogativo=False):
     partes, ult_gen, ult_tipo = [], None, None
+    ja_houve_verbo = False
     for i, p in enumerate(palavras):
         p = p.upper()
         if p == "NEUTRO":
@@ -29,7 +30,11 @@ def traduzir_frase(palavras, interrogativo=False):
             partes.append(v["fem"] if ult_gen == "f" else v["masc"])
             ult_tipo = "adj"
         elif t == "verbo":
-            partes.append(f"a {v['inf']}" if ult_tipo == "verbo" else v["conj"])
+            # 1o verbo conjugado; do 2o em diante infinitivo com "a".
+            # Olhar so o token anterior deixava "...surda conversa" em
+            # COMPUTADOR AJUDAR PESSOA SURDO CONVERSAR.
+            partes.append(f"a {v['inf']}" if ja_houve_verbo else v["conj"])
+            ja_houve_verbo = True
             ult_tipo = "verbo"
     if not partes:
         return ""

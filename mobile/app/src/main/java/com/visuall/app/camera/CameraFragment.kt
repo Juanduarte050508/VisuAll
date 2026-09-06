@@ -33,6 +33,7 @@ import androidx.camera.core.Preview
 import androidx.camera.core.ZoomState
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.AspectRatioStrategy
+import com.visuall.app.ui.ProporcaoDaCamera
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.MediaStoreOutputOptions
 import androidx.camera.video.Quality
@@ -141,6 +142,8 @@ class CameraFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         cameraExecutor = Executors.newSingleThreadExecutor()
+        // A escolha e da pessoa, nao da sessao: volta como estava.
+        is4to3 = ProporcaoDaCamera.ehQuatroPorTres(requireContext())
         view.post {
             applyHudLayout()
             applyAspectRatioToPreview()
@@ -435,6 +438,7 @@ class CameraFragment : Fragment() {
                     },
                     onAspectRatioClick = {
                         is4to3 = !is4to3
+                        ProporcaoDaCamera.guardar(requireContext(), is4to3)
                         ratioLabel = aspectRatioLabel()
                         bindCamera()
                     }
@@ -673,9 +677,12 @@ class CameraFragment : Fragment() {
             findNavController().navigate(R.id.action_camera_to_libras)
         }
 
-        // Botão aspect ratio: alterna entre 4:3 e 16:9
+        // Botão aspect ratio: alterna entre 4:3 e 16:9.
+        // Guardado em disco porque o modo Libras usa a MESMA escolha — ver
+        // ProporcaoDaCamera e applyPreviewAspectRatio no LibrasFragment.
         binding.btnAspectRatio.setOnClickListener {
             is4to3 = !is4to3
+            ProporcaoDaCamera.guardar(requireContext(), is4to3)
             bindCamera()
         }
 

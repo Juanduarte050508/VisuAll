@@ -45,6 +45,9 @@ internal object SentenceTranslator {
         val partes = ArrayList<String>()
         var ultGen: String? = null
         var ultTipo: String? = null
+        // Se ALGUM verbo ja entrou na frase -- nao so o token imediatamente
+        // anterior. Ver a regra do infinitivo la embaixo.
+        var jaHouveVerbo = false
         palavras.forEachIndexed { i, raw ->
             val p = raw.uppercase()
             if (p == "NEUTRO") return@forEachIndexed
@@ -69,7 +72,18 @@ internal object SentenceTranslator {
                     ultTipo = "adj"
                 }
                 "verbo" -> {
-                    partes.add(if (ultTipo == "verbo") "a ${v.inf}" else v.conj.orEmpty())
+                    // O primeiro verbo da frase e conjugado; do segundo em
+                    // diante vai no infinitivo com "a".
+                    //
+                    // A regra olhava so o token ANTERIOR ser verbo, e por isso
+                    // COMPUTADOR AJUDAR PESSOA SURDO CONVERSAR terminava em
+                    // "...surda conversa": antes de CONVERSAR vinha o adjetivo
+                    // SURDO, entao o teste falhava, apesar de "ajuda" ja estar
+                    // na frase. O que decide a forma do segundo verbo e haver
+                    // um verbo antes dele em qualquer lugar, nao encostado
+                    // nele -- o sujeito e o complemento cabem no meio.
+                    partes.add(if (jaHouveVerbo) "a ${v.inf}" else v.conj.orEmpty())
+                    jaHouveVerbo = true
                     ultTipo = "verbo"
                 }
             }
