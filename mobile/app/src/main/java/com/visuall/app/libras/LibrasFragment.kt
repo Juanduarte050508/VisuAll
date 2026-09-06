@@ -1169,7 +1169,16 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
             binding.chipResult.visibility = if (isLandscapeHudCompact()) View.GONE else View.INVISIBLE
             binding.progressConfidence.visibility = if (isLandscapeHudCompact()) View.GONE else View.INVISIBLE
             binding.progressConfidence.progress = 0
-            binding.progressClear.isVisible = false
+            // Mesma protecao do onGestoLimpar: enquanto o dedo segura a
+            // lixeira, a barra e DELE.
+            //
+            // Sem isto o hold nao aparecia nunca. Quem vai apertar a lixeira
+            // tira a mao da frente da camera pra alcancar a tela, entao
+            // "sem mao no quadro" e exatamente o estado em que o dedo esta no
+            // botao -- e esta linha apagava a barra treze vezes por segundo,
+            // bem na hora em que ela e a unica coisa dizendo que segurar
+            // adianta alguma coisa.
+            if (holdAnimator == null) binding.progressClear.isVisible = false
         }
     }
 
