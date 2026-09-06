@@ -15,11 +15,7 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.speech.RecognizerIntent
 import android.speech.tts.TextToSpeech
-import android.hardware.camera2.CameraCharacteristics
-import android.hardware.camera2.CameraManager
-import android.hardware.camera2.CaptureRequest
 import android.util.Log
-import android.util.Range
 import android.view.MotionEvent
 import android.view.WindowManager
 import android.view.Surface
@@ -35,7 +31,6 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 
 import android.util.Size
-import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
@@ -364,17 +359,26 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
             .setResolutionSelector(resolutionSelector)
             .setTargetRotation(targetRotation)
 
-        // Fixa o FPS numa faixa que a câmera realmente suporta. Pedir 60fps
-        // fixo sem checar antes falha silenciosamente em muitos aparelhos (o
-        // Camera2Interop simplesmente ignora o pedido) e, mesmo quando aceito,
-        // força exposição curta — pior imagem em ambiente escuro. Consultamos
-        // as faixas disponíveis e escolhemos a melhor, avisando no Logcat
-        // quando 60fps fixo não é suportado nativamente.
-        selecionarFaixaFps(requestedLensFacing)?.let { faixa ->
-            Camera2Interop.Extender(analysisBuilder)
-                .setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, faixa)
-        }
-
+        // Aqui a sessão era fixada em 60fps (CONTROL_AE_TARGET_FPS_RANGE, via
+        // Camera2Interop). Retirado: era a origem da cor diferente da tela da
+        // câmera.
+        //
+        // Faixa de AE fixa em 60 proíbe a exposição de passar de 1/60s. Em
+        // ambiente fechado a câmera compensa com ganho, e o aparelho ainda
+        // troca o caminho de processamento — nos próprios logs do Samsung dá
+        // pra ver os grafos separados por taxa (..._30FPS.vgo e
+        // ..._60FPS.vgo). O resultado é uma imagem com cor, contraste e ruído
+        // diferentes do que a mesma câmera mostra na tela anterior, que é o
+        // que se via ao entrar no modo Libras.
+        //
+        // E não comprava nada. Medido neste aparelho com o pino ativo:
+        // fps=24,4 com frame=36ms, dos quais 25ms são o MediaPipe da mão. O
+        // teto do reconhecimento é a própria inferência, perto de 27fps —
+        // os quadros extras que os 60fps entregavam eram descartados pelo
+        // STRATEGY_KEEP_ONLY_LATEST antes de serem olhados.
+        //
+        // Sem o pino, o AE volta ao automático: mesma decisão de exposição da
+        // tela da câmera, mesma cor.
         val analysis = analysisBuilder.build()
 
         val usandoCameraFrontal = lensFacing == CameraSelector.LENS_FACING_FRONT
@@ -487,45 +491,6 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
     // landmarks que alimentam o reconhecimento. Como a janela e sempre retrato,
     // ROTATION_0 e a resposta certa sempre.
     private fun currentTargetRotation(): Int = Surface.ROTATION_0
-
-    // Consulta as faixas de FPS que a câmera realmente suporta (Camera2) e
-    // escolhe a melhor opção em vez de forçar 60fps às cegas. Retorna null se
-    // não conseguir consultar (a câmera então usa o auto padrão do CameraX).
-    private fun selecionarFaixaFps(lensFacing: Int): Range<Int>? {
-        val desejada = Range(60, 60)
-        return try {
-            val manager = requireContext()
-                .getSystemService(Context.CAMERA_SERVICE) as CameraManager
-            val cameraId = manager.cameraIdList.firstOrNull { id ->
-                val facingCam = manager.getCameraCharacteristics(id)
-                    .get(CameraCharacteristics.LENS_FACING)
-                val facingDesejado = if (lensFacing == CameraSelector.LENS_FACING_FRONT) {
-                    CameraCharacteristics.LENS_FACING_FRONT
-                } else {
-                    CameraCharacteristics.LENS_FACING_BACK
-                }
-                facingCam == facingDesejado
-            } ?: return null
-
-            val faixas = manager.getCameraCharacteristics(cameraId)
-                .get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
-                ?: return null
-
-            faixas.firstOrNull { it == desejada } ?: run {
-                // Sem 60fps fixo nativo: usa a faixa de maior teto disponível
-                // em vez de insistir num valor que a câmera vai ignorar.
-                val melhor = faixas.maxByOrNull { it.upper }
-                Log.w(
-                    "LibrasFragment",
-                    "Camera sem suporte nativo a 60fps fixo; usando $melhor"
-                )
-                melhor
-            }
-        } catch (e: Exception) {
-            Log.w("LibrasFragment", "Falha ao consultar faixas de FPS da camera", e)
-            null
-        }
-    }
 
     /**
      * Usa no modo Libras a MESMA proporcao escolhida na tela da camera.
