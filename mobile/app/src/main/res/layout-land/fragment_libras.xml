@@ -736,7 +736,7 @@
             android:layout_width="wrap_content"
             android:layout_height="32dp"
             android:layout_marginHorizontal="4dp"
-            android:background="@drawable/vf_bg_chip_linhas"
+            android:background="@drawable/vf_bg_pilula_off"
             android:gravity="center"
             android:minWidth="92dp"
             android:paddingHorizontal="12dp"

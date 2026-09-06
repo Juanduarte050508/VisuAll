@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    A pilula NAO escolhida, no padrao do resto do app: preto, anel dourado de
+    2dp, e o texto branco por cima (quem pinta o texto e quem usa).
+
+    E o mesmo preenchimento e o mesmo anel de vf_bg_action_btn, o botao redondo
+    de icone que aparece em toda a tela do modo Libras — so que em pilula,
+    porque aqui dentro tem palavra em vez de desenho. Serve o LINHAS e o par
+    ALFABETO/CORPO, que sao as duas coisas com texto na tela.
+
+    Antes cada um tinha o seu cinza: o LINHAS e o par de modos usavam
+    vf_bg_mode_inactive (#242424 com anel dourado de 1dp em 20% de opacidade,
+    invisivel na pratica). Duas escolhas ruins nisso. A borda sumia, e cinza
+    apagado diz "desligado", quando o que se quer dizer e so "esta e a outra
+    opcao, e ela esta ali".
+
+    O escolhido continua sendo vf_bg_mode_active, dourado cheio. E o
+    preenchimento que marca a escolha, nao a falta de contorno no outro.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <corners android:radius="18dp" />
+    <solid android:color="#E6111111" />
+    <stroke android:width="2dp" android:color="@color/gold_light" />
+</shape>

@@ -854,6 +854,14 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
             .show(childFragmentManager, "history_$origem")
     }
 
+    /**
+     * Pinta o par ALFABETO/CORPO.
+     *
+     * O escolhido e dourado cheio com texto escuro; o outro e a pilula padrao
+     * do app -- preto, anel dourado, texto branco (vf_bg_pilula_off). Era um
+     * cinza apagado de contorno invisivel, que dizia "desligado" quando o que
+     * ele e de fato e a outra opcao, disponivel, ao lado.
+     */
     private fun updateModeButtons() {
         val dark = ContextCompat.getColor(requireContext(), R.color.text_on_gold)
         val light = ContextCompat.getColor(requireContext(), R.color.text_primary)
@@ -861,12 +869,12 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         if (modoAtual == LibrasAnalyzer.Modo.ALFABETO) {
             binding.btnModeAlphabet.setBackgroundResource(R.drawable.vf_bg_mode_active)
             binding.btnModeAlphabet.setTextColor(dark)
-            binding.btnModeBody.setBackgroundResource(R.drawable.vf_bg_mode_inactive)
+            binding.btnModeBody.setBackgroundResource(R.drawable.vf_bg_pilula_off)
             binding.btnModeBody.setTextColor(light)
             binding.btnModeBody.text = "CORPO"
             binding.tvModeLabel.text = "Modo Libras"
         } else {
-            binding.btnModeAlphabet.setBackgroundResource(R.drawable.vf_bg_mode_inactive)
+            binding.btnModeAlphabet.setBackgroundResource(R.drawable.vf_bg_pilula_off)
             binding.btnModeAlphabet.setTextColor(light)
             binding.btnModeBody.setBackgroundResource(R.drawable.vf_bg_mode_active)
             binding.btnModeBody.setTextColor(dark)
