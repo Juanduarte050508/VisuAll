@@ -94,7 +94,7 @@
         android:layout_width="wrap_content"
         android:layout_height="34dp"
         android:layout_marginStart="12dp"
-        android:background="@drawable/vf_bg_mode_inactive"
+        android:background="@drawable/vf_bg_chip_linhas"
         android:gravity="center"
         android:maxLines="1"
         android:paddingHorizontal="12dp"

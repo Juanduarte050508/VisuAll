@@ -81,6 +81,10 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         // pra nao confundir com um sinal sendo feito, e aqui nao ha essa
         // duvida -- o dedo esta no botao de proposito.
         const val TEMPO_HOLD_LIMPAR_MS = 3_000L
+
+        // Espaco entre os botoes do alto. Ver espacarBarraDoTopo.
+        const val ESPACO_BARRA_DP = 8
+        const val ESPACO_BARRA_OCULOS_DP = 18
     }
 
     private var _binding: FragmentLibrasBinding? = null
@@ -1266,6 +1270,7 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         binding.landmarkOverlay.setEncaixe(EncaixeDeQuadro.Modo.INTEIRA)
         binding.btnBloquear.isVisible = true
         binding.tvModeLabel.isVisible = false   // ver setPortraitHudVisible
+        espacarBarraDoTopo(true)
         // A tela nao pode apagar. Apagando, o Android para a activity: o
         // reconhecimento morre e a conexao com os oculos cai junto. Quem quiser
         // guardar o celular no bolso usa o cadeado, que escurece sem apagar.
@@ -1402,6 +1407,40 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         janela.attributes = janela.attributes.apply { screenBrightness = valor }
     }
 
+    /**
+     * Espaca os botoes do alto conforme o modo.
+     *
+     * No modo oculos o rotulo "Modo Libras" sai, e o buraco que ele deixa fica
+     * todo de um lado. Medido na tela do aparelho, antes: cadeado, olho e
+     * historico grudados na direita com 8dp entre eles, e 39dp de vazio entre
+     * o LINHAS e o cadeado. Tres botoes colados com um buraco do lado leem
+     * como uma coisa so, espremida contra a borda.
+     *
+     * Com 18dp entre eles o grupo anda 20dp pra esquerda, e o vazio que sobra
+     * ate o LINHAS cai justamente pros mesmos 18dp: medido depois, os quatro
+     * ficam em 18,0 / 18,3 / 18,3dp. A barra vira uma fileira de espacamento
+     * unico, que e o certo aqui -- LINHAS, olho e historico sao todos controle
+     * do que a tela mostra, entao nao ha grupo nenhum pra separar.
+     *
+     * So no retrato: no layout-land estes dois botoes sao uma coluna vertical
+     * presa pelos dois lados ao btn_oculos, e ali marginEnd deslocaria o botao
+     * pro lado em vez de separar coisa alguma.
+     */
+    private fun espacarBarraDoTopo(comOculos: Boolean) {
+        // desligarOculos roda tambem quando a tela ja foi embora, e por isso
+        // as linhas vizinhas la usam `_binding?`. Aqui vale o mesmo.
+        val b = _binding ?: return
+        if (resources.configuration.orientation != Configuration.ORIENTATION_PORTRAIT) return
+        val dp = if (comOculos) ESPACO_BARRA_OCULOS_DP else ESPACO_BARRA_DP
+        val px = (dp * resources.displayMetrics.density).toInt()
+        for (botao in listOf(b.btnBloquear, b.btnOculos)) {
+            val lp = botao.layoutParams as? ViewGroup.MarginLayoutParams ?: continue
+            if (lp.marginEnd == px) continue
+            lp.marginEnd = px
+            botao.layoutParams = lp
+        }
+    }
+
     private fun manterTelaAcesa(manter: Boolean) {
         val janela = activity?.window ?: return
         if (manter) janela.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -1415,6 +1454,7 @@ class LibrasFragment : Fragment(), TextToSpeech.OnInitListener {
         manterTelaAcesa(false)
         _binding?.btnBloquear?.isVisible = false
         _binding?.tvModeLabel?.isVisible = true
+        espacarBarraDoTopo(false)
         fonteOculos?.parar()
         fonteOculos = null
         binding.ivOculos.setImageDrawable(null)
